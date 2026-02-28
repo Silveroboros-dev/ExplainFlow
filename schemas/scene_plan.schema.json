@@ -1,0 +1,197 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://visual-idea-director.dev/schemas/scene_plan.schema.json",
+  "title": "scene_plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "plan_id",
+    "content_signal_ref",
+    "render_profile_ref",
+    "plan_summary",
+    "scenes",
+    "continuity_checks",
+    "final_bundle"
+  ],
+  "properties": {
+    "plan_id": { "type": "string", "minLength": 1 },
+    "content_signal_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "version"],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+$" }
+      }
+    },
+    "render_profile_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile_id"],
+      "properties": {
+        "profile_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "plan_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "one_sentence_promise"],
+      "properties": {
+        "title": { "type": "string", "minLength": 4 },
+        "one_sentence_promise": { "type": "string", "minLength": 10 }
+      }
+    },
+    "scenes": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "scene_id",
+          "beat_ref",
+          "title",
+          "objective",
+          "claim_refs",
+          "narration_script",
+          "on_screen_text",
+          "visual_spec",
+          "audio_spec",
+          "caption_spec",
+          "timing",
+          "acceptance_checks"
+        ],
+        "properties": {
+          "scene_id": { "type": "integer", "minimum": 1 },
+          "beat_ref": { "type": "string", "pattern": "^b[0-9]+$" },
+          "title": { "type": "string", "minLength": 3 },
+          "objective": { "type": "string", "minLength": 8 },
+          "claim_refs": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^c[0-9]+$" }
+          },
+          "narration_script": { "type": "string", "minLength": 20 },
+          "on_screen_text": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "visual_spec": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["visual_kind", "prompt", "key_elements"],
+            "properties": {
+              "visual_kind": {
+                "type": "string",
+                "enum": [
+                  "flowchart",
+                  "timeline",
+                  "comparison",
+                  "matrix",
+                  "process",
+                  "architecture",
+                  "concept_map",
+                  "illustration"
+                ]
+              },
+              "prompt": { "type": "string", "minLength": 12 },
+              "negative_prompt": { "type": "string" },
+              "key_elements": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string", "minLength": 2 }
+              },
+              "label_text": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          },
+          "audio_spec": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["voice_style", "pace_wpm"],
+            "properties": {
+              "voice_style": { "type": "string", "minLength": 2 },
+              "pace_wpm": { "type": "integer", "minimum": 90, "maximum": 190 },
+              "emphasis_words": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 2 }
+              }
+            }
+          },
+          "caption_spec": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["primary_caption", "hashtags"],
+            "properties": {
+              "primary_caption": { "type": "string", "minLength": 10 },
+              "hashtags": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string", "pattern": "^#[A-Za-z0-9_]+$" }
+              },
+              "cta": { "type": "string" }
+            }
+          },
+          "timing": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["start_sec", "duration_sec"],
+            "properties": {
+              "start_sec": { "type": "number", "minimum": 0 },
+              "duration_sec": { "type": "number", "exclusiveMinimum": 0 }
+            }
+          },
+          "acceptance_checks": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 4 }
+          }
+        }
+      }
+    },
+    "continuity_checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "terminology_consistent",
+        "style_consistent",
+        "palette_consistent"
+      ],
+      "properties": {
+        "terminology_consistent": { "type": "boolean" },
+        "style_consistent": { "type": "boolean" },
+        "palette_consistent": { "type": "boolean" },
+        "notes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "final_bundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["transcript", "scene_manifest", "social_pack"],
+      "properties": {
+        "transcript": { "type": "string", "minLength": 20 },
+        "scene_manifest": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["scene_id", "image_uri", "audio_uri"],
+            "properties": {
+              "scene_id": { "type": "integer", "minimum": 1 },
+              "image_uri": { "type": "string", "minLength": 1 },
+              "audio_uri": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "social_pack": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 10 }
+        }
+      }
+    }
+  }
+}

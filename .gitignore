@@ -1,0 +1,36 @@
+# API
+api/.env
+api/venv/
+api/__pycache__/
+api/*.pyc
+api/test_image_*.jpg
+api/test_image_*.png
+api/app/static/assets/*.png
+api/app/static/assets/*.mp3
+
+# Web
+web/node_modules
+web/.pnp
+web/.pnp.*
+web/.yarn/*
+!web/.yarn/patches
+!web/.yarn/plugins
+!web/.yarn/releases
+!web/.yarn/versions
+web/coverage
+web/.next/
+web/out/
+web/build
+web/npm-debug.log*
+web/yarn-debug.log*
+web/yarn-error.log*
+web/.pnpm-debug.log*
+web/.env*
+web/.vercel
+web/*.tsbuildinfo
+web/next-env.d.ts
+
+# Common
+.DS_Store
+*.pem
+.env

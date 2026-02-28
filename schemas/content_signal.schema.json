@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://visual-idea-director.dev/schemas/content_signal.schema.json",
+  "title": "content_signal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "source",
+    "thesis",
+    "key_claims",
+    "concepts",
+    "visual_candidates",
+    "narrative_beats",
+    "signal_quality"
+  ],
+  "properties": {
+    "version": {
+      "type": "string",
+      "pattern": "^v[0-9]+\\.[0-9]+$"
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "source_type",
+        "language",
+        "input_length_tokens"
+      ],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1 },
+        "source_type": {
+          "type": "string",
+          "enum": ["prompt", "document", "url", "article", "transcript", "slides"]
+        },
+        "language": { "type": "string", "minLength": 2, "maxLength": 10 },
+        "title": { "type": "string" },
+        "input_length_tokens": { "type": "integer", "minimum": 1 },
+        "source_hash": { "type": "string" }
+      }
+    },
+    "thesis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["one_liner", "expanded_summary"],
+      "properties": {
+        "one_liner": { "type": "string", "minLength": 10, "maxLength": 220 },
+        "expanded_summary": { "type": "string", "minLength": 40 }
+      }
+    },
+    "key_claims": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "claim_id",
+          "claim_text",
+          "supporting_points",
+          "confidence"
+        ],
+        "properties": {
+          "claim_id": { "type": "string", "pattern": "^c[0-9]+$" },
+          "claim_text": { "type": "string", "minLength": 8 },
+          "supporting_points": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "minLength": 4 }
+          },
+          "evidence_snippets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["text"],
+              "properties": {
+                "text": { "type": "string", "minLength": 4 },
+                "citation": { "type": "string" }
+              }
+            }
+          },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "concepts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["concept_id", "label", "definition", "importance"],
+        "properties": {
+          "concept_id": { "type": "string", "pattern": "^k[0-9]+$" },
+          "label": { "type": "string", "minLength": 2 },
+          "definition": { "type": "string", "minLength": 6 },
+          "importance": { "type": "integer", "minimum": 1, "maximum": 5 }
+        }
+      }
+    },
+    "visual_candidates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "candidate_id",
+          "purpose",
+          "recommended_structure",
+          "claim_refs"
+        ],
+        "properties": {
+          "candidate_id": { "type": "string", "pattern": "^v[0-9]+$" },
+          "purpose": { "type": "string", "minLength": 4 },
+          "recommended_structure": {
+            "type": "string",
+            "enum": [
+              "flowchart",
+              "timeline",
+              "comparison",
+              "matrix",
+              "process",
+              "architecture",
+              "concept_map",
+              "table"
+            ]
+          },
+          "data_points": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 2 }
+          },
+          "claim_refs": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^c[0-9]+$" }
+          }
+        }
+      }
+    },
+    "narrative_beats": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["beat_id", "role", "message", "claim_refs"],
+        "properties": {
+          "beat_id": { "type": "string", "pattern": "^b[0-9]+$" },
+          "role": {
+            "type": "string",
+            "enum": ["hook", "context", "problem", "mechanism", "example", "takeaway", "cta"]
+          },
+          "message": { "type": "string", "minLength": 8 },
+          "claim_refs": {
+            "type": "array",
+            "items": { "type": "string", "pattern": "^c[0-9]+$" }
+          }
+        }
+      }
+    },
+    "open_questions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "signal_quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["coverage_score", "ambiguity_score", "hallucination_risk"],
+      "properties": {
+        "coverage_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "ambiguity_score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "hallucination_risk": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  }
+}
