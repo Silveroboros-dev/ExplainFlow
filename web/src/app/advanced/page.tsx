@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import SceneCard from '@/components/SceneCard';
+import FinalBundle from '@/components/FinalBundle';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -23,23 +24,62 @@ export default function AdvancedStudio() {
   const [error, setError] = useState('');
 
   const [isGenerating, setIsGenerating] = useState(false);
-  const [scenes, setScenes] = useState<Record<string, { id: string, title?: string, text: string, imageUrl?: string, audioUrl?: string }>>({});
+  const [scenes, setScenes] = useState<Record<string, { id: string, title?: string, text: string, imageUrl?: string, audioUrl?: string, claim_refs?: string[], status: string }>>({});
+  
+  // Ref for the typewriter effect to track full text without causing infinite re-renders
+  const fullTextBuffer = React.useRef<Record<string, string>>({});
 
-  const upsertScene = (
-    prev: Record<string, { id: string, title?: string, text: string, imageUrl?: string, audioUrl?: string }>,
+  const updateSceneMetadata = (
     sceneId: string,
-    patch: Partial<{ id: string, title?: string, text: string, imageUrl?: string, audioUrl?: string }>
+    patch: Partial<{ id: string, title?: string, imageUrl?: string, audioUrl?: string, claim_refs?: string[], status: string }>
   ) => {
-    const existing = prev[sceneId] ?? { id: sceneId, text: '' };
-    return {
-      ...prev,
-      [sceneId]: {
-        ...existing,
-        ...patch,
-        id: sceneId,
-      }
-    };
+    setScenes(prev => {
+      const existing = prev[sceneId] ?? { id: sceneId, text: '', status: 'queued' };
+      return {
+        ...prev,
+        [sceneId]: {
+          ...existing,
+          ...patch,
+        }
+      };
+    });
   };
+
+  // Typewriter effect loop
+  React.useEffect(() => {
+    let animationFrameId: number;
+    
+    const updateTypewriter = () => {
+      setScenes(currentScenes => {
+        let hasChanges = false;
+        const nextScenes = { ...currentScenes };
+        
+        Object.keys(fullTextBuffer.current).forEach(sceneId => {
+          const currentScene = nextScenes[sceneId];
+          if (!currentScene) return;
+          
+          const targetText = fullTextBuffer.current[sceneId];
+          const currentTextLength = currentScene.text.length;
+          
+          if (currentTextLength < targetText.length) {
+            // Add characters based on how much is left to type
+            const charsToAdd = Math.max(1, Math.ceil((targetText.length - currentTextLength) / 15));
+            nextScenes[sceneId] = {
+              ...currentScene,
+              text: targetText.substring(0, currentTextLength + charsToAdd)
+            };
+            hasChanges = true;
+          }
+        });
+        
+        return hasChanges ? nextScenes : currentScenes;
+      });
+      animationFrameId = requestAnimationFrame(updateTypewriter);
+    };
+    
+    animationFrameId = requestAnimationFrame(updateTypewriter);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, []);
 
   const handleExtract = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,6 +89,7 @@ export default function AdvancedStudio() {
     setError('');
     setExtractedSignal(null);
     setScenes({});
+    fullTextBuffer.current = {};
     
     try {
       const response = await fetch('http://localhost:8000/api/extract-signal', {
@@ -75,15 +116,41 @@ export default function AdvancedStudio() {
     
     setIsGenerating(true);
     setScenes({});
+    fullTextBuffer.current = {};
     
+    // Construct a strict Render Profile matching the schema
+    const renderProfile = {
+      profile_id: "rp_custom_" + Date.now(),
+      goal: "teach",
+      audience_level: audience === 'Other' ? customAudience : audience.toLowerCase(),
+      visual_mode: visualMode,
+      style: {
+        descriptors: [visualMode === "illustration" ? "cinematic" : "clean", "modern"]
+      },
+      fidelity: fidelity,
+      density: density,
+      palette: {
+        mode: "auto"
+      },
+      output_controls: {
+        scene_count: 4,
+        target_duration_sec: 60,
+        aspect_ratio: "16:9"
+      },
+      voiceover: {
+        enabled: true,
+        voice_style: "neutral",
+        pace_wpm: 150
+      }
+    };
+
     try {
       const response = await fetch('http://localhost:8000/api/generate-stream-advanced', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           content_signal: extractedSignal,
-          visual_mode: visualMode,
-          audience: audience === 'Other' ? customAudience : audience
+          render_profile: renderProfile
         })
       });
 
@@ -112,17 +179,30 @@ export default function AdvancedStudio() {
             try {
               const data = JSON.parse(dataStr);
               
-              if (currentEvent === 'scene_start') {
-                setScenes(prev => upsertScene(prev, data.scene_id, { title: data.title }));
-              } else if (currentEvent === 'story_text_delta') {
-                setScenes(prev => {
-                  const scene = prev[data.scene_id] ?? { id: data.scene_id, text: '' };
-                  return upsertScene(prev, data.scene_id, { text: scene.text + data.delta });
+              if (currentEvent === 'scene_queue_ready') {
+                const initialScenes: Record<string, any> = {};
+                data.scenes.forEach((s: any) => {
+                  initialScenes[s.scene_id] = {
+                    id: s.scene_id,
+                    title: s.title,
+                    claim_refs: s.claim_refs,
+                    text: '',
+                    status: 'queued'
+                  };
+                  fullTextBuffer.current[s.scene_id] = s.narration_focus || ''; 
                 });
+                setScenes(initialScenes);
+              } else if (currentEvent === 'scene_start') {
+                fullTextBuffer.current[data.scene_id] = ''; // Clear placeholder
+                updateSceneMetadata(data.scene_id, { title: data.title, claim_refs: data.claim_refs, status: 'generating' });
+              } else if (currentEvent === 'story_text_delta') {
+                fullTextBuffer.current[data.scene_id] = (fullTextBuffer.current[data.scene_id] || '') + data.delta;
               } else if (currentEvent === 'diagram_ready') {
-                setScenes(prev => upsertScene(prev, data.scene_id, { imageUrl: data.url }));
+                updateSceneMetadata(data.scene_id, { imageUrl: data.url });
               } else if (currentEvent === 'audio_ready') {
-                setScenes(prev => upsertScene(prev, data.scene_id, { audioUrl: data.url }));
+                updateSceneMetadata(data.scene_id, { audioUrl: data.url });
+              } else if (currentEvent === 'scene_done') {
+                updateSceneMetadata(data.scene_id, { status: 'ready' });
               } else if (currentEvent === 'final_bundle_ready' || currentEvent === 'error') {
                 setIsGenerating(false);
               }
@@ -140,9 +220,10 @@ export default function AdvancedStudio() {
   };
 
   const handleRegenerate = (sceneId: string, newText: string, newImageUrl: string, newAudioUrl: string) => {
+    fullTextBuffer.current[sceneId] = newText;
     setScenes(prev => ({
       ...prev,
-      [sceneId]: { ...prev[sceneId], text: newText, imageUrl: newImageUrl, audioUrl: newAudioUrl }
+      [sceneId]: { ...prev[sceneId], text: '', imageUrl: newImageUrl, audioUrl: newAudioUrl, status: 'ready' }
     }));
   };
 
@@ -330,10 +411,16 @@ export default function AdvancedStudio() {
                 audioUrl={scene.audioUrl} 
                 visualMode={visualMode}
                 onRegenerate={handleRegenerate}
+                claimRefs={scene.claim_refs}
+                status={scene.status}
                 audioStatus={isGenerating && !scene.audioUrl ? "Generating..." : "Ready"} 
               />
             ))}
           </div>
+
+          {!isGenerating && Object.values(scenes).length > 0 && (
+            <FinalBundle scenes={scenes} topic={extractedSignal?.thesis?.one_liner || 'Advanced Explainer'} />
+          )}
         </div>
 
       </div>

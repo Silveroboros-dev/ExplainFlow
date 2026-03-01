@@ -15,6 +15,54 @@ The product focus is not just generation. It is directed generation:
 - regenerate a single scene without rerunning everything,
 - and trace each scene back to extracted claims.
 
+## How to Run Locally
+
+To run this system on another machine, follow these steps to start both the Python backend and the Next.js frontend.
+
+### Prerequisites
+- Python 3.10+
+- Node.js 18+ and `npm`
+- A Google GenAI API Key (with access to `gemini-3.1-pro-preview` and `gemini-3-pro-image-preview`)
+
+### 1. Set up the Backend (FastAPI)
+The backend handles the AI extraction, the multimodal streaming logic, and static asset serving.
+
+```bash
+cd api
+
+# Create and activate a virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Create your environment file
+echo "GEMINI_API_KEY=your_api_key_here" > .env
+
+# Start the FastAPI server
+uvicorn app.main:app --reload --port 8000
+```
+*The backend will now be running at `http://localhost:8000`. It will save generated images and audio to `api/app/static/assets`.*
+
+### 2. Set up the Frontend (Next.js)
+The frontend handles the UI, the Server-Sent Events (SSE) parsing, and the Scene Inspector.
+
+```bash
+cd web
+
+# Install dependencies
+npm install
+
+# Start the development server
+npm run dev
+```
+*The frontend will now be running at `http://localhost:3000`.*
+
+### 3. Usage
+1. Open `http://localhost:3000/quick` for the prompt-based generator.
+2. Open `http://localhost:3000/advanced` to test the long-document extraction and traceability features.
+
 ## MVP (Locked)
 
 In one run, a user can:

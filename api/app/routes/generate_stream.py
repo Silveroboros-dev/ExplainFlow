@@ -31,6 +31,7 @@ class ScenePlanSchema(BaseModel):
     title: str = Field(description="The title of the scene")
     narration_focus: str = Field(description="Instructions on what the narration should focus on for this scene")
     visual_prompt: str = Field(description="A detailed image prompt for the scene visual. It must specify subject, style, composition, and color direction. Keep image text-free.")
+    claim_refs: list[str] = Field(default=[], description="List of claim IDs (e.g., 'c1', 'c2') that this scene covers")
 
 class OutlineSchema(BaseModel):
     scenes: list[ScenePlanSchema]
@@ -40,7 +41,7 @@ def _load_schema_text(filename: str) -> str:
 
 def _style_guide_for_mode(visual_mode: str) -> str:
     if visual_mode == "diagram":
-        return "Visuals must be clean, high-detail educational diagrams or realistic landscapes. Avoid image text labels. Prefer realism and clarity."
+        return "Visuals must be clean, high-detail educational diagrams or historically/scientifically accurate realistic landscapes. Ensure the visual specifically illustrates the scientific or historical concepts mentioned in the text. Avoid image text labels. Prefer extreme accuracy, realism, and clarity."
     if visual_mode == "hybrid":
         return "Visuals must blend 3D subjects with holographic UI overlays, charts, or interface elements in a consistent style."
     return "Visuals must be high-quality cinematic 3D renders or polished vector-style illustrations with consistent palette and character design."
@@ -88,18 +89,17 @@ async def _stream_scene_assets(
     audio_prefix: str,
 ):
     scene_prompt = (
-        f"Topic: {topic}\n"
-        f"Audience: {audience}\n"
-        f"Tone: {tone or 'clear and engaging'}\n"
-        f"Scene title: {scene_title}\n"
-        f"Narration focus: {narration_focus}\n"
-        f"Visual constraints: {style_guide}\n"
-        f"Detailed visual direction: {visual_prompt}\n\n"
-        "STRICT FORMATTING RULES:\n"
-        "1) NO conversational filler.\n"
-        "2) NO markdown headers or labels.\n"
-        "3) Immediately output the exact spoken narration text for this scene.\n"
-        "4) After the text, generate the corresponding high-quality inline image."
+        f"CONTEXT: We are building an explainer about '{topic}' for a {audience} audience.\n"
+        f"SCENE TITLE: {scene_title}\n"
+        f"SCENE FOCUS: {narration_focus}\n"
+        f"VISUAL STYLE: {style_guide}\n"
+        f"VISUAL DIRECTION: {visual_prompt}\n\n"
+        "TASK: Generate the content for THIS SCENE ONLY.\n"
+        "STRICT OUTPUT RULES:\n"
+        "1) Start immediately with the spoken narration text. NO labels like 'Narration:', NO scene numbers, NO markdown titles.\n"
+        "2) The text must be 50-100 words.\n"
+        "3) Immediately after the text, generate the corresponding high-quality inline image. The image MUST accurately depict the specific scientific or historical details mentioned in the text.\n"
+        "4) DO NOT output any other text or conversational filler."
     )
 
     response_stream = await client.aio.models.generate_content_stream(
@@ -200,6 +200,12 @@ async def generate_stream(
                 idx = len(scenes) + 1
                 scenes.append(ScenePlanSchema(scene_id=f"scene-{idx}", title=f"Scene {idx}", narration_focus=f"Explain key point {idx} about {topic}.", visual_prompt="Generate a visually rich educational image for this scene."))
 
+            # Emit the queue instantly
+            yield {
+                "event": "scene_queue_ready",
+                "data": json.dumps({"scenes": [s.model_dump() for s in scenes], "optimized_count": len(scenes)})
+            }
+
             for idx, scene in enumerate(scenes, start=1):
                 if await request.is_disconnected(): return
                 scene_id = _normalized_scene_id(scene.scene_id, idx)
@@ -228,37 +234,95 @@ async def generate_stream(
 async def generate_stream_advanced(request: Request):
     body = await request.json()
     content_signal = body.get("content_signal", {})
-    visual_mode = body.get("visual_mode", "illustration")
-    audience = body.get("audience", "Beginner")
+    render_profile = body.get("render_profile", {})
+    
+    # Extract exact settings from the strict Render Profile
+    visual_mode = render_profile.get("visual_mode", "illustration")
+    audience = render_profile.get("audience_level", "beginner")
+    goal = render_profile.get("goal", "explain")
+    style_descriptors = ", ".join(render_profile.get("style", {}).get("descriptors", ["clean", "modern"]))
+    palette = render_profile.get("palette", {})
+    
+    # Formulate style rules directly from the strict schema
+    style_guide = f"Visual Mode: {visual_mode.upper()}.\n"
+    style_guide += f"Style Descriptors: {style_descriptors}.\n"
+    if palette.get("mode") == "brand":
+        style_guide += f"Mandatory Color Palette: Primary {palette.get('primary', '#000000')}, Secondary {palette.get('secondary', '#FFFFFF')}, Accent {palette.get('accent', '#FF0000')}. Use these specific hex colors prominently.\n"
+    else:
+        style_guide += "Palette: Auto-select an engaging, educational color palette.\n"
+        
+    if visual_mode == "diagram":
+        style_guide += "CRITICAL: Do NOT request 2D maps with text labels. Focus on abstract or photorealistic educational infographics."
+    elif visual_mode == "hybrid":
+        style_guide += "CRITICAL: Blend 3D objects with floating holographic UI elements or charts."
 
     async def event_generator():
-        style_guide = _style_guide_for_mode(visual_mode)
         thesis = content_signal.get("thesis", {}).get("one_liner", "A generic topic")
         beats = content_signal.get("narrative_beats", [])
         visual_candidates = content_signal.get("visual_candidates", [])
 
-        scene_specs: list[dict] = []
-        for idx in range(1, 5):
-            beat = beats[idx - 1] if idx - 1 < len(beats) else {}
-            candidate = visual_candidates[idx - 1] if idx - 1 < len(visual_candidates) else {}
-            role = str(beat.get("role") or f"Scene {idx}")
-            message = str(beat.get("message") or f"Explain key point {idx} from the thesis.")
-            visual_purpose = str(candidate.get("purpose") or "Generate a visual that clearly supports the narration focus.")
-            scene_specs.append({"scene_id": f"scene-{idx}", "title": role.capitalize(), "narration_focus": message, "visual_prompt": visual_purpose})
+        # --- Dynamic Scene Count Policy ---
+        output_controls = render_profile.get("output_controls", {})
+        target_duration = output_controls.get("target_duration_sec", 60)
+        density = render_profile.get("density", "standard")
+        sec_per_scene = 10 if density == "detailed" else (18 if density == "simple" else 14)
+        
+        import math
+        base_scenes = math.ceil(target_duration / sec_per_scene)
+        claims_count = len(content_signal.get("key_claims", []))
+        if claims_count > 5: base_scenes += 1
+        if audience == "beginner": base_scenes -= 1
+        scene_count = max(3, min(base_scenes, 8))
 
+        # --- RE-PLANNING PHASE (Advanced) ---
+        # We ask Gemini to map the extracted signal into the calculated number of scenes
+        planning_prompt = (
+            f"Given this core thesis: '{thesis}' and these narrative beats: {json.dumps(beats[:10])}, "
+            f"create a specific {scene_count}-scene storyboard outline for a {audience} audience. "
+            f"Ensure every scene has a descriptive title and a clear narration focus."
+        )
+        
         try:
-            for scene in scene_specs:
+            plan_response = await client.aio.models.generate_content(
+                model='gemini-3.1-pro-preview',
+                contents=planning_prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.7,
+                    response_mime_type="application/json",
+                    response_schema=OutlineSchema,
+                )
+            )
+            parsed_outline = OutlineSchema.model_validate_json(plan_response.text)
+            scenes = parsed_outline.scenes[:scene_count]
+            
+            while len(scenes) < scene_count:
+                idx = len(scenes) + 1
+                scenes.append(ScenePlanSchema(
+                    scene_id=f"scene-{idx}",
+                    title=f"Explainer Point {idx}",
+                    narration_focus=f"Further detail on {thesis}.",
+                    visual_prompt="A relevant educational visual.",
+                    claim_refs=[]
+                ))
+            
+            # 1. Emit the entire queue instantly
+            yield {
+                "event": "scene_queue_ready",
+                "data": json.dumps({"scenes": [s.model_dump() for s in scenes], "optimized_count": len(scenes)})
+            }
+            
+            for idx, scene in enumerate(scenes, start=1):
                 if await request.is_disconnected(): return
-                scene_id = scene["scene_id"]
-                title = scene["title"]
-                narration_focus = scene["narration_focus"]
-                visual_prompt = scene["visual_prompt"]
+                scene_id = scene.scene_id
+                title = scene.title
+                narration_focus = scene.narration_focus
 
-                yield {"event": "scene_start", "data": json.dumps({"scene_id": scene_id, "title": title})}
+                # Emit scene_start with the traced claim_refs
+                yield {"event": "scene_start", "data": json.dumps({"scene_id": scene_id, "title": title, "claim_refs": scene.claim_refs})}
 
                 async for event in _stream_scene_assets(
-                    request=request, scene_id=scene_id, topic=thesis, audience=audience, tone="clear and engaging", scene_title=title,
-                    narration_focus=narration_focus, style_guide=style_guide, visual_prompt=visual_prompt,
+                    request=request, scene_id=scene_id, topic=thesis, audience=audience, tone=goal, scene_title=title,
+                    narration_focus=narration_focus, style_guide=style_guide, visual_prompt=scene.visual_prompt,
                     image_prefix="advanced_interleaved", audio_prefix="advanced_audio"
                 ):
                     yield event
@@ -284,7 +348,7 @@ async def regenerate_scene(payload: RegenerateSceneRequest, request: Request):
             f"Original text context: {current_text}\n\n"
             "Requirements:\n"
             "1) Return updated narration text first (no labels or markdown).\n"
-            "2) Then return one high-quality inline image for that scene.\n"
+            "2) Then return one high-quality inline image for that scene. The image MUST accurately depict any specific scientific or historical details mentioned in the text.\n"
             f"3) Follow this visual style guide: {style_guide}"
         )
         response = await client.aio.models.generate_content(

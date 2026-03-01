@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import SceneCard from '@/components/SceneCard';
+import FinalBundle from '@/components/FinalBundle';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,32 +17,62 @@ export default function QuickGenerate() {
   const [tone, setTone] = useState('');
   const [visualMode, setVisualMode] = useState('illustration');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [scenes, setScenes] = useState<Record<string, { id: string, title?: string, text: string, imageUrl?: string, audioUrl?: string }>>({});
+  const [scenes, setScenes] = useState<Record<string, { id: string, title?: string, text: string, imageUrl?: string, audioUrl?: string, status: string }>>({});
 
-  const upsertScene = (
-    prev: Record<string, { id: string, title?: string, text: string, imageUrl?: string, audioUrl?: string }>,
+  const fullTextBuffer = React.useRef<Record<string, string>>({});
+
+  const updateSceneMetadata = (
     sceneId: string,
-    patch: Partial<{ id: string, title?: string, text: string, imageUrl?: string, audioUrl?: string }>
+    patch: Partial<{ id: string, title?: string, imageUrl?: string, audioUrl?: string, status: string }>
   ) => {
-    const existing = prev[sceneId] ?? { id: sceneId, text: '' };
-    return {
-      ...prev,
-      [sceneId]: {
-        ...existing,
-        ...patch,
-        id: sceneId,
-      }
-    };
+    setScenes(prev => {
+      const existing = prev[sceneId] ?? { id: sceneId, text: '', status: 'queued' };
+      return {
+        ...prev,
+        [sceneId]: {
+          ...existing,
+          ...patch,
+        }
+      };
+    });
   };
+
+  React.useEffect(() => {
+    let animationFrameId: number;
+    const updateTypewriter = () => {
+      setScenes(currentScenes => {
+        let hasChanges = false;
+        const nextScenes = { ...currentScenes };
+        Object.keys(fullTextBuffer.current).forEach(sceneId => {
+          const currentScene = nextScenes[sceneId];
+          if (!currentScene) return;
+          const targetText = fullTextBuffer.current[sceneId];
+          const currentTextLength = currentScene.text.length;
+          if (currentTextLength < targetText.length) {
+            const charsToAdd = Math.max(1, Math.ceil((targetText.length - currentTextLength) / 15));
+            nextScenes[sceneId] = {
+              ...currentScene,
+              text: targetText.substring(0, currentTextLength + charsToAdd)
+            };
+            hasChanges = true;
+          }
+        });
+        return hasChanges ? nextScenes : currentScenes;
+      });
+      animationFrameId = requestAnimationFrame(updateTypewriter);
+    };
+    animationFrameId = requestAnimationFrame(updateTypewriter);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, []);
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!topic) return;
     
     setIsGenerating(true);
-    setScenes({}); // clear previous output
+    setScenes({}); 
+    fullTextBuffer.current = {};
     
-    // Connect to the backend SSE endpoint
     const url = new URL('http://localhost:8000/api/generate-stream');
     url.searchParams.append('topic', topic);
     url.searchParams.append('audience', audience === 'Other' ? customAudience : audience);
@@ -50,27 +81,45 @@ export default function QuickGenerate() {
     
     const eventSource = new EventSource(url.toString());
     
+    eventSource.addEventListener('scene_queue_ready', (event) => {
+      const data = JSON.parse(event.data);
+      const initialScenes: Record<string, any> = {};
+      data.scenes.forEach((s: any) => {
+        initialScenes[s.scene_id] = {
+          id: s.scene_id,
+          title: s.title,
+          text: '',
+          status: 'queued'
+        };
+        fullTextBuffer.current[s.scene_id] = s.narration_focus || ''; 
+      });
+      setScenes(initialScenes);
+    });
+
     eventSource.addEventListener('scene_start', (event) => {
       const data = JSON.parse(event.data);
-      setScenes(prev => upsertScene(prev, data.scene_id, { title: data.title }));
+      fullTextBuffer.current[data.scene_id] = ''; 
+      updateSceneMetadata(data.scene_id, { title: data.title, status: 'generating' });
     });
 
     eventSource.addEventListener('story_text_delta', (event) => {
       const data = JSON.parse(event.data);
-      setScenes(prev => {
-        const existing = prev[data.scene_id] ?? { id: data.scene_id, text: '' };
-        return upsertScene(prev, data.scene_id, { text: existing.text + data.delta });
-      });
+      fullTextBuffer.current[data.scene_id] = (fullTextBuffer.current[data.scene_id] || '') + data.delta;
     });
 
     eventSource.addEventListener('diagram_ready', (event) => {
       const data = JSON.parse(event.data);
-      setScenes(prev => upsertScene(prev, data.scene_id, { imageUrl: data.url }));
+      updateSceneMetadata(data.scene_id, { imageUrl: data.url });
     });
 
     eventSource.addEventListener('audio_ready', (event) => {
       const data = JSON.parse(event.data);
-      setScenes(prev => upsertScene(prev, data.scene_id, { audioUrl: data.url }));
+      updateSceneMetadata(data.scene_id, { audioUrl: data.url });
+    });
+
+    eventSource.addEventListener('scene_done', (event) => {
+      const data = JSON.parse(event.data);
+      updateSceneMetadata(data.scene_id, { status: 'ready' });
     });
 
     eventSource.addEventListener('final_bundle_ready', () => {
@@ -86,9 +135,10 @@ export default function QuickGenerate() {
   };
 
   const handleRegenerate = (sceneId: string, newText: string, newImageUrl: string, newAudioUrl: string) => {
+    fullTextBuffer.current[sceneId] = newText;
     setScenes(prev => ({
       ...prev,
-      [sceneId]: { ...prev[sceneId], text: newText, imageUrl: newImageUrl, audioUrl: newAudioUrl }
+      [sceneId]: { ...prev[sceneId], text: '', imageUrl: newImageUrl, audioUrl: newAudioUrl, status: 'ready' }
     }));
   };
 
@@ -96,13 +146,11 @@ export default function QuickGenerate() {
     <main className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6 lg:px-8 font-sans">
       <div className="max-w-5xl mx-auto space-y-8">
         
-        {/* Header Section */}
         <div className="text-center space-y-2">
           <h1 className="text-4xl font-extrabold tracking-tight text-slate-900">ExplainFlow</h1>
           <p className="text-lg text-slate-500">Live Interleaved Generative Storyteller</p>
         </div>
 
-        {/* Configuration Form */}
         <Card className="shadow-sm border-slate-200">
           <CardHeader>
             <CardTitle>Quick Generate</CardTitle>
@@ -191,7 +239,6 @@ export default function QuickGenerate() {
           </CardContent>
         </Card>
 
-        {/* Timeline Stream Area */}
         <div className="space-y-6 mt-12">
           {Object.values(scenes).length > 0 && (
             <h2 className="text-2xl font-bold tracking-tight text-slate-900 mb-6">Generated Explainer</h2>
@@ -208,10 +255,15 @@ export default function QuickGenerate() {
                 audioUrl={scene.audioUrl} 
                 visualMode={visualMode}
                 onRegenerate={handleRegenerate}
+                status={scene.status}
                 audioStatus={isGenerating && !scene.audioUrl ? "Generating..." : "Ready"} 
               />
             ))}
           </div>
+
+          {!isGenerating && Object.values(scenes).length > 0 && (
+            <FinalBundle scenes={scenes} topic={topic} />
+          )}
         </div>
 
       </div>
