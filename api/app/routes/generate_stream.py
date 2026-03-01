@@ -238,14 +238,29 @@ async def generate_stream_advanced(request: Request):
     
     # Extract exact settings from the strict Render Profile
     visual_mode = render_profile.get("visual_mode", "illustration")
-    audience = render_profile.get("audience_level", "beginner")
-    goal = render_profile.get("goal", "explain")
+    audience_cfg = render_profile.get("audience", {})
+    audience_level = str(audience_cfg.get("level", "beginner")).lower()
+    audience_persona = str(audience_cfg.get("persona", "General audience")).strip()
+    domain_context = str(audience_cfg.get("domain_context", "")).strip()
+    taste_bar = str(audience_cfg.get("taste_bar", "standard")).lower()
+    must_include = [
+        str(item).strip()
+        for item in audience_cfg.get("must_include", [])
+        if isinstance(item, str) and str(item).strip()
+    ][:8]
+    must_avoid = [
+        str(item).strip()
+        for item in audience_cfg.get("must_avoid", [])
+        if isinstance(item, str) and str(item).strip()
+    ][:8]
+    goal = render_profile.get("goal", "teach")
     style_descriptors = ", ".join(render_profile.get("style", {}).get("descriptors", ["clean", "modern"]))
     palette = render_profile.get("palette", {})
     
     # Formulate style rules directly from the strict schema
     style_guide = f"Visual Mode: {visual_mode.upper()}.\n"
     style_guide += f"Style Descriptors: {style_descriptors}.\n"
+    style_guide += f"Taste Bar: {taste_bar.upper()}.\n"
     if palette.get("mode") == "brand":
         style_guide += f"Mandatory Color Palette: Primary {palette.get('primary', '#000000')}, Secondary {palette.get('secondary', '#FFFFFF')}, Accent {palette.get('accent', '#FF0000')}. Use these specific hex colors prominently.\n"
     else:
@@ -260,6 +275,9 @@ async def generate_stream_advanced(request: Request):
         thesis = content_signal.get("thesis", {}).get("one_liner", "A generic topic")
         beats = content_signal.get("narrative_beats", [])
         visual_candidates = content_signal.get("visual_candidates", [])
+        audience_descriptor = f"{audience_persona} ({audience_level})"
+        if domain_context:
+            audience_descriptor += f" in {domain_context}"
 
         # --- Dynamic Scene Count Policy ---
         output_controls = render_profile.get("output_controls", {})
@@ -271,16 +289,20 @@ async def generate_stream_advanced(request: Request):
         base_scenes = math.ceil(target_duration / sec_per_scene)
         claims_count = len(content_signal.get("key_claims", []))
         if claims_count > 5: base_scenes += 1
-        if audience == "beginner": base_scenes -= 1
+        if audience_level == "beginner": base_scenes -= 1
         scene_count = max(3, min(base_scenes, 8))
 
         # --- RE-PLANNING PHASE (Advanced) ---
         # We ask Gemini to map the extracted signal into the calculated number of scenes
         planning_prompt = (
             f"Given this core thesis: '{thesis}' and these narrative beats: {json.dumps(beats[:10])}, "
-            f"create a specific {scene_count}-scene storyboard outline for a {audience} audience. "
-            f"Ensure every scene has a descriptive title and a clear narration focus."
+            f"create a specific {scene_count}-scene storyboard outline for the audience persona '{audience_descriptor}'. "
+            f"Audience taste bar is '{taste_bar}'. Ensure every scene has a descriptive title and a clear narration focus."
         )
+        if must_include:
+            planning_prompt += f" Must include: {', '.join(must_include)}."
+        if must_avoid:
+            planning_prompt += f" Must avoid: {', '.join(must_avoid)}."
         
         try:
             plan_response = await client.aio.models.generate_content(
@@ -321,7 +343,7 @@ async def generate_stream_advanced(request: Request):
                 yield {"event": "scene_start", "data": json.dumps({"scene_id": scene_id, "title": title, "claim_refs": scene.claim_refs})}
 
                 async for event in _stream_scene_assets(
-                    request=request, scene_id=scene_id, topic=thesis, audience=audience, tone=goal, scene_title=title,
+                    request=request, scene_id=scene_id, topic=thesis, audience=audience_descriptor, tone=goal, scene_title=title,
                     narration_focus=narration_focus, style_guide=style_guide, visual_prompt=scene.visual_prompt,
                     image_prefix="advanced_interleaved", audio_prefix="advanced_audio"
                 ):

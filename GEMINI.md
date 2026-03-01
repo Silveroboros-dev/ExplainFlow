@@ -58,4 +58,5 @@ To ensure safety and user control during automated development:
 - **Diff Transparency:** Always show a clear diff or summary of the intended changes before applying them.
 - **Explicit Permission:** Never overwrite an existing file's entire contents without asking the user for direct, explicit permission to proceed. Surgical edits via `replace` are preferred over full-file `write_file` operations.
 - **Discovery Autonomy:** Read-only commands (like `cat`, `grep`, `ls`, `read_file`) and architectural investigation tools should be used autonomously to maintain momentum and never require explicit user permission.
+- **Detailed Git Commits:** When committing and pushing to GitHub, always provide a multi-line commit message. Use the first line for a high-level summary and subsequent `-m` flags or lines for a technical breakdown of specific features, fixes, or refactors included in the push.
 

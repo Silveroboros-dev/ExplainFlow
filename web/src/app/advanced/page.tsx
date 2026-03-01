@@ -16,8 +16,12 @@ export default function AdvancedStudio() {
   const [visualMode, setVisualMode] = useState('illustration');
   const [fidelity, setFidelity] = useState('high');
   const [density, setDensity] = useState('standard');
-  const [audience, setAudience] = useState('Beginner');
-  const [customAudience, setCustomAudience] = useState('');
+  const [audienceLevel, setAudienceLevel] = useState('intermediate');
+  const [audiencePersona, setAudiencePersona] = useState('Product manager');
+  const [domainContext, setDomainContext] = useState('');
+  const [tasteBar, setTasteBar] = useState('high');
+  const [mustIncludeText, setMustIncludeText] = useState('');
+  const [mustAvoidText, setMustAvoidText] = useState('');
   
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractedSignal, setExtractedSignal] = useState<any>(null);
@@ -122,7 +126,18 @@ export default function AdvancedStudio() {
     const renderProfile = {
       profile_id: "rp_custom_" + Date.now(),
       goal: "teach",
-      audience_level: audience === 'Other' ? customAudience : audience.toLowerCase(),
+      audience: {
+        level: audienceLevel,
+        persona: audiencePersona,
+        domain_context: domainContext || undefined,
+        taste_bar: tasteBar,
+        must_include: mustIncludeText
+          ? mustIncludeText.split(',').map(item => item.trim()).filter(Boolean).slice(0, 8)
+          : undefined,
+        must_avoid: mustAvoidText
+          ? mustAvoidText.split(',').map(item => item.trim()).filter(Boolean).slice(0, 8)
+          : undefined
+      },
       visual_mode: visualMode,
       style: {
         descriptors: [visualMode === "illustration" ? "cinematic" : "clean", "modern"]
@@ -305,33 +320,74 @@ export default function AdvancedStudio() {
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="audience">Target Audience</Label>
-                      <Select value={audience} onValueChange={setAudience}>
-                        <SelectTrigger id="audience">
-                          <SelectValue placeholder="Select audience" />
+                      <Label htmlFor="audienceLevel">Audience Level</Label>
+                      <Select value={audienceLevel} onValueChange={setAudienceLevel}>
+                        <SelectTrigger id="audienceLevel">
+                          <SelectValue placeholder="Select audience level" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="Beginner">Beginner (Simple language)</SelectItem>
-                          <SelectItem value="Intermediate">Intermediate (General Public)</SelectItem>
-                          <SelectItem value="Expert">Expert (Technical)</SelectItem>
-                          <SelectItem value="Other">Other (Specify...)</SelectItem>
+                          <SelectItem value="beginner">Beginner</SelectItem>
+                          <SelectItem value="intermediate">Intermediate</SelectItem>
+                          <SelectItem value="expert">Expert</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                   </div>
 
-                  {audience === 'Other' && (
-                    <div className="space-y-2">
-                      <Label htmlFor="customAudience">Specify Audience</Label>
-                      <Input 
-                        id="customAudience" 
-                        value={customAudience} 
-                        onChange={e => setCustomAudience(e.target.value)} 
-                        placeholder="e.g. 5-year old children, investors..." 
-                        required 
-                      />
-                    </div>
-                  )}
+                  <div className="space-y-2">
+                    <Label htmlFor="audiencePersona">Audience Persona</Label>
+                    <Input
+                      id="audiencePersona"
+                      value={audiencePersona}
+                      onChange={e => setAudiencePersona(e.target.value)}
+                      placeholder="e.g. Product manager, data journalist, startup founder"
+                      required
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="domainContext">Domain Context (Optional)</Label>
+                    <Input
+                      id="domainContext"
+                      value={domainContext}
+                      onChange={e => setDomainContext(e.target.value)}
+                      placeholder="e.g. B2B SaaS roadmap decisions"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="tasteBar">Taste Bar</Label>
+                    <Select value={tasteBar} onValueChange={setTasteBar}>
+                      <SelectTrigger id="tasteBar">
+                        <SelectValue placeholder="Select taste bar" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="standard">Standard</SelectItem>
+                        <SelectItem value="high">High</SelectItem>
+                        <SelectItem value="very_high">Very High</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="mustInclude">Must Include (Optional)</Label>
+                    <Input
+                      id="mustInclude"
+                      value={mustIncludeText}
+                      onChange={e => setMustIncludeText(e.target.value)}
+                      placeholder="Comma-separated, e.g. business tradeoffs, clean hierarchy"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="mustAvoid">Must Avoid (Optional)</Label>
+                    <Input
+                      id="mustAvoid"
+                      value={mustAvoidText}
+                      onChange={e => setMustAvoidText(e.target.value)}
+                      placeholder="Comma-separated, e.g. low-level code details"
+                    />
+                  </div>
 
                   <Button type="submit" className="w-full" disabled={isExtracting} size="lg">
                     {isExtracting ? (

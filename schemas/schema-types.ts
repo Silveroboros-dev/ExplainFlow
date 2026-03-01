@@ -101,6 +101,7 @@ export interface ContentSignal {
 
 export type RenderGoal = "teach" | "persuade" | "summarize" | "pitch";
 export type AudienceLevel = "beginner" | "intermediate" | "expert";
+export type TasteBar = "standard" | "high" | "very_high";
 export type VisualMode = "diagram" | "illustration" | "hybrid";
 export type Fidelity = "low" | "medium" | "high";
 export type Density = "simple" | "standard" | "detailed";
@@ -148,11 +149,20 @@ export interface RenderAccessibility {
   max_on_screen_words?: number;
 }
 
+export interface RenderAudience {
+  level: AudienceLevel;
+  persona: string;
+  domain_context?: string;
+  taste_bar: TasteBar;
+  must_include?: string[];
+  must_avoid?: string[];
+}
+
 export interface RenderProfile {
   profile_id: string;
   profile_name?: string;
   goal: RenderGoal;
-  audience_level: AudienceLevel;
+  audience: RenderAudience;
   visual_mode: VisualMode;
   style: RenderStyle;
   fidelity: Fidelity;

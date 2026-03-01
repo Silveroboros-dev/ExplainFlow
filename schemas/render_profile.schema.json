@@ -7,7 +7,7 @@
   "required": [
     "profile_id",
     "goal",
-    "audience_level",
+    "audience",
     "visual_mode",
     "style",
     "fidelity",
@@ -23,9 +23,40 @@
       "type": "string",
       "enum": ["teach", "persuade", "summarize", "pitch"]
     },
-    "audience_level": {
-      "type": "string",
-      "enum": ["beginner", "intermediate", "expert"]
+    "audience": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "persona", "taste_bar"],
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["beginner", "intermediate", "expert"]
+        },
+        "persona": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 80
+        },
+        "domain_context": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "taste_bar": {
+          "type": "string",
+          "enum": ["standard", "high", "very_high"]
+        },
+        "must_include": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "type": "string", "minLength": 3 }
+        },
+        "must_avoid": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "type": "string", "minLength": 3 }
+        }
+      }
     },
     "visual_mode": {
       "type": "string",

@@ -144,11 +144,24 @@ class RenderAccessibility(StrictModel):
     max_on_screen_words: int | None = Field(default=None, ge=4, le=30)
 
 
+class RenderAudience(StrictModel):
+    level: Literal["beginner", "intermediate", "expert"]
+    persona: Annotated[str, StringConstraints(min_length=2, max_length=80)]
+    domain_context: Annotated[str, StringConstraints(min_length=2, max_length=120)] | None = None
+    taste_bar: Literal["standard", "high", "very_high"]
+    must_include: list[Annotated[str, StringConstraints(min_length=3)]] | None = Field(
+        default=None, max_length=8
+    )
+    must_avoid: list[Annotated[str, StringConstraints(min_length=3)]] | None = Field(
+        default=None, max_length=8
+    )
+
+
 class RenderProfile(StrictModel):
     profile_id: Annotated[str, StringConstraints(min_length=1)]
     profile_name: str | None = None
     goal: Literal["teach", "persuade", "summarize", "pitch"]
-    audience_level: Literal["beginner", "intermediate", "expert"]
+    audience: RenderAudience
     visual_mode: Literal["diagram", "illustration", "hybrid"]
     style: RenderStyle
     fidelity: Literal["low", "medium", "high"]

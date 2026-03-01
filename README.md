@@ -86,7 +86,11 @@ In one run, a user can:
   - `fidelity` (`low`, `medium`, `high`)
   - `density` (`simple`, `standard`, `detailed`)
   - `palette` (auto/brand/custom)
-  - `audience_level` (`beginner`, `intermediate`, `expert`)
+  - `audience` object:
+    - `level` (`beginner`, `intermediate`, `expert`)
+    - `persona` (open-ended, e.g. "Product manager")
+    - `taste_bar` (`standard`, `high`, `very_high`)
+    - optional `domain_context`, `must_include`, `must_avoid`
 
 3. Signal Extraction Layer
 - Extract once into `content_signal`:
