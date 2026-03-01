@@ -1,345 +1,310 @@
 import json
-import asyncio
+import time
+from pathlib import Path
+
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, Field
-from typing import List
-from sse_starlette.sse import EventSourceResponse
 from google import genai
 from google.genai import types
+from pydantic import BaseModel, Field
+from sse_starlette.sse import EventSourceResponse
 
 router = APIRouter()
 
-# Initialize the GenAI client. It automatically picks up GEMINI_API_KEY from the environment
 client = genai.Client()
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SCHEMAS_DIR = REPO_ROOT / "schemas"
+ASSET_DIR = Path(__file__).resolve().parents[1] / "static" / "assets"
+ASSET_DIR.mkdir(parents=True, exist_ok=True)
 
 class SignalExtractionRequest(BaseModel):
     input_text: str
 
 class RegenerateSceneRequest(BaseModel):
     scene_id: str
+    current_text: str
     instruction: str
+    visual_mode: str = "illustration"
 
-# Define the structured output schema for the scene plan
 class ScenePlanSchema(BaseModel):
     scene_id: str = Field(description="A unique identifier for the scene, e.g., 'scene-1'")
     title: str = Field(description="The title of the scene")
     narration_focus: str = Field(description="Instructions on what the narration should focus on for this scene")
-    visual_prompt: str = Field(description="An incredibly detailed, high-quality prompt for an image generator (like Imagen 4). It must specify a clear subject, a cohesive visual style (e.g., 'clean isometric vector illustration', 'cinematic 3D render', 'minimalist infographic'), color palette instructions, and composition. The image MUST be highly relevant to the educational topic, acting as a visual aid. Do NOT include text or labels in the prompt as AI struggles with spelling.")
+    visual_prompt: str = Field(description="A detailed image prompt for the scene visual. It must specify subject, style, composition, and color direction. Keep image text-free.")
 
 class OutlineSchema(BaseModel):
     scenes: list[ScenePlanSchema]
 
+def _load_schema_text(filename: str) -> str:
+    return (SCHEMAS_DIR / filename).read_text(encoding="utf-8")
+
+def _style_guide_for_mode(visual_mode: str) -> str:
+    if visual_mode == "diagram":
+        return "Visuals must be clean, high-detail educational diagrams or realistic landscapes. Avoid image text labels. Prefer realism and clarity."
+    if visual_mode == "hybrid":
+        return "Visuals must blend 3D subjects with holographic UI overlays, charts, or interface elements in a consistent style."
+    return "Visuals must be high-quality cinematic 3D renders or polished vector-style illustrations with consistent palette and character design."
+
+def _base_url(request: Request) -> str:
+    return str(request.base_url).rstrip("/")
+
+def _save_image_and_get_url(request: Request, scene_id: str, image_bytes: bytes, prefix: str) -> str:
+    ts = int(time.time() * 1000)
+    img_filename = f"{prefix}_{scene_id}_{ts}.png"
+    img_path = ASSET_DIR / img_filename
+    img_path.write_bytes(image_bytes)
+    return f"{_base_url(request)}/static/assets/{img_filename}"
+
+def _generate_audio_and_get_url(request: Request, scene_id: str, text: str, prefix: str) -> str:
+    narration = text.strip()
+    if not narration:
+        return ""
+    try:
+        from gtts import gTTS
+    except Exception as exc:
+        print(f"Audio generation unavailable (gTTS import failed): {exc}")
+        return ""
+    try:
+        ts = int(time.time() * 1000)
+        audio_filename = f"{prefix}_{scene_id}_{ts}.mp3"
+        audio_path = ASSET_DIR / audio_filename
+        gTTS(text=narration, lang="en", slow=False).save(str(audio_path))
+        return f"{_base_url(request)}/static/assets/{audio_filename}"
+    except Exception as exc:
+        print(f"Audio generation failed: {exc}")
+        return ""
+
+async def _stream_scene_assets(
+    request: Request,
+    scene_id: str,
+    topic: str,
+    audience: str,
+    tone: str,
+    scene_title: str,
+    narration_focus: str,
+    style_guide: str,
+    visual_prompt: str,
+    image_prefix: str,
+    audio_prefix: str,
+):
+    scene_prompt = (
+        f"Topic: {topic}\n"
+        f"Audience: {audience}\n"
+        f"Tone: {tone or 'clear and engaging'}\n"
+        f"Scene title: {scene_title}\n"
+        f"Narration focus: {narration_focus}\n"
+        f"Visual constraints: {style_guide}\n"
+        f"Detailed visual direction: {visual_prompt}\n\n"
+        "STRICT FORMATTING RULES:\n"
+        "1) NO conversational filler.\n"
+        "2) NO markdown headers or labels.\n"
+        "3) Immediately output the exact spoken narration text for this scene.\n"
+        "4) After the text, generate the corresponding high-quality inline image."
+    )
+
+    response_stream = await client.aio.models.generate_content_stream(
+        model="gemini-3-pro-image-preview",
+        contents=scene_prompt,
+        config=types.GenerateContentConfig(temperature=0.7),
+    )
+
+    current_scene_text = ""
+    async for chunk in response_stream:
+        if await request.is_disconnected():
+            return
+        
+        candidates = getattr(chunk, "candidates", [])
+        if not candidates:
+            continue
+            
+        parts = getattr(candidates[0].content, "parts", [])
+        for part in parts:
+            text = getattr(part, "text", None)
+            if text:
+                current_scene_text += text
+                yield {
+                    "event": "story_text_delta",
+                    "data": json.dumps({"scene_id": scene_id, "delta": text}),
+                }
+            
+            inline_data = getattr(part, "inline_data", None)
+            binary = getattr(inline_data, "data", None) if inline_data else None
+            if binary:
+                image_url = _save_image_and_get_url(
+                    request=request,
+                    scene_id=scene_id,
+                    image_bytes=binary,
+                    prefix=image_prefix,
+                )
+                yield {
+                    "event": "diagram_ready",
+                    "data": json.dumps({"scene_id": scene_id, "url": image_url}),
+                }
+
+    if current_scene_text.strip():
+        audio_url = _generate_audio_and_get_url(
+            request=request,
+            scene_id=scene_id,
+            text=current_scene_text,
+            prefix=audio_prefix,
+        )
+        if audio_url:
+            yield {
+                "event": "audio_ready",
+                "data": json.dumps({"scene_id": scene_id, "url": audio_url}),
+            }
+
+def _normalized_scene_id(raw: str, default_idx: int) -> str:
+    candidate = (raw or "").strip()
+    if not candidate:
+        return f"scene-{default_idx}"
+    return candidate
+
 @router.post("/extract-signal")
 async def extract_signal(request: SignalExtractionRequest):
     try:
-        # Load the schema definition to enforce the structure
-        with open("../schemas/content_signal.schema.json", "r") as f:
-            schema_str = f.read()
-
-        extraction_prompt = f"""
-        Analyze the following document and extract the core signal into a highly structured JSON format.
-        You MUST strictly adhere to the provided JSON Schema.
-        
-        DOCUMENT:
-        {request.input_text}
-        
-        JSON SCHEMA:
-        {schema_str}
-        
-        Return ONLY valid JSON matching this schema, without any markdown formatting like ```json.
-        """
-
+        schema_str = _load_schema_text("content_signal.schema.json")
+        extraction_prompt = f"Analyze the following document and extract the core signal into a highly structured JSON format.\nYou MUST strictly adhere to the provided JSON Schema.\n\nDOCUMENT:\n{request.input_text}\n\nJSON SCHEMA:\n{schema_str}\n\nReturn ONLY valid JSON matching this schema, without any markdown formatting like ```json."
         response = await client.aio.models.generate_content(
-            model='gemini-3.1-pro-preview',
+            model="gemini-3.1-pro-preview",
             contents=extraction_prompt,
-            config=types.GenerateContentConfig(
-                temperature=0.2, # Low temperature for accurate extraction
-                response_mime_type="application/json",
-            )
+            config=types.GenerateContentConfig(temperature=0.2, response_mime_type="application/json"),
         )
-        
         signal_data = json.loads(response.text)
         return {"status": "success", "content_signal": signal_data}
-        
-    except Exception as e:
-        print(f"Extraction error: {e}")
-        return {"status": "error", "message": str(e)}
+    except Exception as exc:
+        print(f"Extraction error: {exc}")
+        return {"status": "error", "message": str(exc)}
 
 @router.get("/generate-stream")
-async def generate_stream(request: Request, topic: str, audience: str, tone: str, visual_mode: str = "illustration"):
+async def generate_stream(
+    request: Request,
+    topic: str,
+    audience: str,
+    tone: str,
+    visual_mode: str = "illustration",
+):
     async def event_generator():
-        # 1. Extract the structure (Planning phase)
-        # Adapt visual mode into concrete style guidelines
-        style_guide = ""
-        if visual_mode == "diagram":
-            style_guide = "All visual prompts MUST be for clean, highly detailed, photorealistic infographics or accurate geographical/historical landscapes. Do NOT request 2D maps with text labels as AI struggles with spelling. Instead, request 'a photorealistic satellite view of the Yucatan peninsula' or 'an accurate 3D cross-section of a crater'. Focus on high-fidelity, educational realism."
-        elif visual_mode == "illustration":
-            style_guide = "All visual prompts MUST be for beautiful, cinematic 3D renders or high-quality vector illustrations. Focus on stylized characters, expressive lighting, and engaging scenes."
-        elif visual_mode == "hybrid":
-            style_guide = "All visual prompts MUST blend 3D objects or characters with floating holographic UI elements, charts, or graphical overlays."
-
-        planning_prompt = f"Create a 4-scene outline for a visual explainer about '{topic}'. The target audience is {audience}. The tone should be {tone}. You MUST generate EXACTLY 4 scenes, no more, no less.\n\nCRITICAL VISUAL RULE:\n{style_guide}"
-        
+        style_guide = _style_guide_for_mode(visual_mode)
+        planning_prompt = f"Create a 4-scene outline for a visual explainer about '{topic}'. Target audience: {audience}. Tone: {tone or 'clear and engaging'}. You MUST generate EXACTLY 4 scenes.\n\nVisual rule: {style_guide}"
         try:
-            # We use the async client to generate the structural plan first
             plan_response = await client.aio.models.generate_content(
-                model='gemini-3.1-pro-preview',
+                model="gemini-3.1-pro-preview",
                 contents=planning_prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.7,
-                    response_mime_type="application/json",
-                    response_schema=OutlineSchema,
-                )
+                config=types.GenerateContentConfig(temperature=0.7, response_mime_type="application/json", response_schema=OutlineSchema),
             )
-            
-            outline = json.loads(plan_response.text)
-            scenes = outline.get("scenes", [])
-            
-            # 2. Generate Interleaved Content (Nano Banana Pro)
-            # We ask the model to generate the whole explainer as a single interleaved stream
-            # based on the planned scenes.
-            
-            scenes_data = "\n".join([f"- Scene {i+1}: {s['title']} ({s['narration_focus']})" for i, s in enumerate(scenes)])
-            
-            gen_prompt = f"Create a 4-scene visual explainer about '{topic}' for a {audience} audience with a {tone} tone.\n\n"
-            gen_prompt += f"Follow this plan:\n{scenes_data}\n\n"
-            gen_prompt += "For each scene, you MUST:\n"
-            gen_prompt += "1. Output the EXACT narration text to be spoken. DO NOT include 'Scene X', scene titles, or any labels. Start directly with the speech.\n"
-            gen_prompt += "2. Then, generate a high-quality, relevant image for that scene.\n\n"
-            gen_prompt += f"Visual Style Guide: {style_guide}"
+            parsed_outline = OutlineSchema.model_validate_json(plan_response.text)
+            scenes = parsed_outline.scenes[:4]
 
-            response_stream = await client.aio.models.generate_content_stream(
-                model='gemini-3-pro-image-preview',
-                contents=gen_prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.7,
-                )
-            )
-            
-            scene_idx = 0
-            current_scene = scenes[scene_idx]
-            current_scene_id = current_scene["scene_id"]
-            current_scene_text = ""
-            
-            # Start the first scene immediately with the planned title
-            yield {
-                "event": "scene_start",
-                "data": json.dumps({"scene_id": current_scene_id, "title": current_scene["title"]})
-            }
+            while len(scenes) < 4:
+                idx = len(scenes) + 1
+                scenes.append(ScenePlanSchema(scene_id=f"scene-{idx}", title=f"Scene {idx}", narration_focus=f"Explain key point {idx} about {topic}.", visual_prompt="Generate a visually rich educational image for this scene."))
 
-            async for chunk in response_stream:
-                if await request.is_disconnected():
-                    return
-                
-                for part in chunk.candidates[0].content.parts:
-                    # Handle Text Part (Narration)
-                    if part.text:
-                        current_scene_text += part.text
-                        yield {
-                            "event": "story_text_delta",
-                            "data": json.dumps({"scene_id": current_scene_id, "delta": part.text})
-                        }
-                    
-                    # Handle Image Part (Generated by Nano Banana Pro)
-                    if part.inline_data:
-                        # 1. Handle Image
-                        import time
-                        timestamp = int(time.time())
-                        img_filename = f"interleaved_{current_scene_id}_{timestamp}.png"
-                        img_filepath = f"app/static/assets/{img_filename}"
-                        
-                        with open(img_filepath, 'wb') as f:
-                            f.write(part.inline_data.data)
-                        
-                        image_url = f"http://localhost:8000/static/assets/{img_filename}"
-                        
-                        yield {
-                            "event": "diagram_ready",
-                            "data": json.dumps({"scene_id": current_scene_id, "url": image_url})
-                        }
-                        
-                        # 2. Handle Audio Generation for accumulated text
-                        if current_scene_text.strip():
-                            try:
-                                from gtts import gTTS
-                                tts = gTTS(text=current_scene_text, lang='en', slow=False)
-                                audio_filename = f"audio_{current_scene_id}_{timestamp}.mp3"
-                                audio_filepath = f"app/static/assets/{audio_filename}"
-                                tts.save(audio_filepath)
-                                
-                                audio_url = f"http://localhost:8000/static/assets/{audio_filename}"
-                                yield {
-                                    "event": "audio_ready",
-                                    "data": json.dumps({"scene_id": current_scene_id, "url": audio_url})
-                                }
-                            except Exception as e:
-                                print(f"Audio generation failed: {e}")
-                        
-                        # 3. Finish Scene
-                        yield {
-                            "event": "scene_done",
-                            "data": json.dumps({"scene_id": current_scene_id})
-                        }
-                        
-                        # Reset and prepare for next scene from the PLAN
-                        current_scene_text = ""
-                        scene_idx += 1
-                        if scene_idx < len(scenes):
-                            current_scene = scenes[scene_idx]
-                            current_scene_id = current_scene["scene_id"]
-                            yield {
-                                "event": "scene_start",
-                                "data": json.dumps({"scene_id": current_scene_id, "title": current_scene["title"]})
-                            }
+            for idx, scene in enumerate(scenes, start=1):
+                if await request.is_disconnected(): return
+                scene_id = _normalized_scene_id(scene.scene_id, idx)
+                title = scene.title or f"Scene {idx}"
+                narration_focus = scene.narration_focus or f"Explain key point {idx}."
+                visual_prompt = scene.visual_prompt or ""
 
-            yield {
-                "event": "final_bundle_ready",
-                "data": json.dumps({"run_id": "interleaved-run-123", "bundle_url": "/api/final-bundle/interleaved-run-123"})
-            }
-            
-            yield {
-                "event": "final_bundle_ready",
-                "data": json.dumps({"run_id": "live-run-123", "bundle_url": "/api/final-bundle/live-run-123"})
-            }
-            
-        except Exception as e:
-            print(f"Error generating stream: {e}")
-            yield {
-                "event": "error",
-                "data": json.dumps({"error": str(e)})
-            }
+                yield {"event": "scene_start", "data": json.dumps({"scene_id": scene_id, "title": title})}
 
+                async for event in _stream_scene_assets(
+                    request=request, scene_id=scene_id, topic=topic, audience=audience, tone=tone, scene_title=title,
+                    narration_focus=narration_focus, style_guide=style_guide, visual_prompt=visual_prompt,
+                    image_prefix="interleaved", audio_prefix="audio"
+                ):
+                    yield event
+
+                yield {"event": "scene_done", "data": json.dumps({"scene_id": scene_id})}
+
+            yield {"event": "final_bundle_ready", "data": json.dumps({"run_id": "interleaved-run-123", "bundle_url": "/api/final-bundle/interleaved-run-123"})}
+        except Exception as exc:
+            print(f"Error generating stream: {exc}")
+            yield {"event": "error", "data": json.dumps({"error": str(exc)})}
     return EventSourceResponse(event_generator())
 
 @router.post("/generate-stream-advanced")
 async def generate_stream_advanced(request: Request):
-    """
-    A POST endpoint for streaming generation that accepts a full JSON body
-    including the extracted content_signal.
-    (We use POST because SSE via standard EventSource doesn't easily support POST with body in the browser,
-    but we can read the body, cache the parameters, and redirect to a GET stream, 
-    or use the fetch API with a custom SSE parser on the frontend).
-    
-    For simplicity in this MVP, we will accept a large JSON body in a POST,
-    and return an EventSourceResponse directly (FastAPI supports this even for POSTs).
-    """
     body = await request.json()
     content_signal = body.get("content_signal", {})
     visual_mode = body.get("visual_mode", "illustration")
     audience = body.get("audience", "Beginner")
-    
-    async def event_generator():
-        # 1. Extract the structure based on the content_signal
-        style_guide = ""
-        if visual_mode == "diagram":
-            style_guide = "All visual prompts MUST be for clean, highly detailed, photorealistic infographics or accurate geographical/historical landscapes. Do NOT request 2D maps with text labels. Focus on high-fidelity, educational realism."
-        elif visual_mode == "illustration":
-            style_guide = "All visual prompts MUST be for beautiful, cinematic 3D renders or high-quality vector illustrations. Focus on stylized characters, expressive lighting, and engaging scenes."
-        elif visual_mode == "hybrid":
-            style_guide = "All visual prompts MUST blend 3D objects or characters with floating holographic UI elements, charts, or graphical overlays."
 
-        # Summarize the content signal for the prompt to avoid token bloat
+    async def event_generator():
+        style_guide = _style_guide_for_mode(visual_mode)
         thesis = content_signal.get("thesis", {}).get("one_liner", "A generic topic")
         beats = content_signal.get("narrative_beats", [])
-        beats_summary = "\n".join([f"- Scene {i+1}: {b.get('role')} - {b.get('message')}" for i, b in enumerate(beats[:4])]) # Limit to 4 for now
+        visual_candidates = content_signal.get("visual_candidates", [])
 
-        gen_prompt = f"Create a 4-scene visual explainer based on the following extracted signal.\n"
-        gen_prompt += f"Core Thesis: {thesis}\n"
-        gen_prompt += f"Target Audience: {audience}\n\n"
-        gen_prompt += f"Narrative Beats to follow:\n{beats_summary}\n\n"
-        gen_prompt += "For each scene, you MUST:\n"
-        gen_prompt += "1. Output the EXACT narration text to be spoken. DO NOT include 'Scene X', scene titles, or any labels. Start directly with the speech.\n"
-        gen_prompt += "2. Then, generate a high-quality, relevant image for that scene.\n\n"
-        gen_prompt += f"Visual Style Guide: {style_guide}"
+        scene_specs: list[dict] = []
+        for idx in range(1, 5):
+            beat = beats[idx - 1] if idx - 1 < len(beats) else {}
+            candidate = visual_candidates[idx - 1] if idx - 1 < len(visual_candidates) else {}
+            role = str(beat.get("role") or f"Scene {idx}")
+            message = str(beat.get("message") or f"Explain key point {idx} from the thesis.")
+            visual_purpose = str(candidate.get("purpose") or "Generate a visual that clearly supports the narration focus.")
+            scene_specs.append({"scene_id": f"scene-{idx}", "title": role.capitalize(), "narration_focus": message, "visual_prompt": visual_purpose})
 
         try:
-            response_stream = await client.aio.models.generate_content_stream(
-                model='gemini-3-pro-image-preview',
-                contents=gen_prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.7,
-                )
-            )
-            
-            scene_idx = 0
-            current_beat = beats[scene_idx] if beats else {}
-            current_scene_id = f"scene-{scene_idx + 1}"
-            current_scene_text = ""
-            
-            # Start the first scene immediately
-            yield {
-                "event": "scene_start",
-                "data": json.dumps({"scene_id": current_scene_id, "title": current_beat.get('role', 'Intro').capitalize()})
-            }
+            for scene in scene_specs:
+                if await request.is_disconnected(): return
+                scene_id = scene["scene_id"]
+                title = scene["title"]
+                narration_focus = scene["narration_focus"]
+                visual_prompt = scene["visual_prompt"]
 
-            async for chunk in response_stream:
-                if await request.is_disconnected():
-                    return
-                
-                for part in chunk.candidates[0].content.parts:
-                    if part.text:
-                        current_scene_text += part.text
-                        yield {
-                            "event": "story_text_delta",
-                            "data": json.dumps({"scene_id": current_scene_id, "delta": part.text})
-                        }
-                    
-                    if part.inline_data:
-                        import time
-                        timestamp = int(time.time())
-                        img_filename = f"interleaved_{current_scene_id}_{timestamp}.png"
-                        img_filepath = f"app/static/assets/{img_filename}"
-                        
-                        with open(img_filepath, 'wb') as f:
-                            f.write(part.inline_data.data)
-                        
-                        image_url = f"http://localhost:8000/static/assets/{img_filename}"
-                        
-                        yield {
-                            "event": "diagram_ready",
-                            "data": json.dumps({"scene_id": current_scene_id, "url": image_url})
-                        }
-                        
-                        if current_scene_text.strip():
-                            try:
-                                from gtts import gTTS
-                                tts = gTTS(text=current_scene_text, lang='en', slow=False)
-                                audio_filename = f"audio_{current_scene_id}_{timestamp}.mp3"
-                                audio_filepath = f"app/static/assets/{audio_filename}"
-                                tts.save(audio_filepath)
-                                
-                                audio_url = f"http://localhost:8000/static/assets/{audio_filename}"
-                                yield {
-                                    "event": "audio_ready",
-                                    "data": json.dumps({"scene_id": current_scene_id, "url": audio_url})
-                                }
-                            except Exception as e:
-                                print(f"Audio generation failed: {e}")
-                        
-                        yield {
-                            "event": "scene_done",
-                            "data": json.dumps({"scene_id": current_scene_id})
-                        }
-                        
-                        current_scene_text = ""
-                        scene_idx += 1
-                        if scene_idx < 4 and scene_idx < len(beats):
-                            current_beat = beats[scene_idx]
-                            current_scene_id = f"scene-{scene_idx + 1}"
-                            yield {
-                                "event": "scene_start",
-                                "data": json.dumps({"scene_id": current_scene_id, "title": current_beat.get('role', f'Scene {scene_idx+1}').capitalize()})
-                            }
+                yield {"event": "scene_start", "data": json.dumps({"scene_id": scene_id, "title": title})}
 
-            yield {
-                "event": "final_bundle_ready",
-                "data": json.dumps({"run_id": "advanced-run-123", "bundle_url": "/api/final-bundle/advanced-run-123"})
-            }
-        except Exception as e:
-            print(f"Error in advanced stream: {e}")
-            yield {
-                "event": "error",
-                "data": json.dumps({"error": str(e)})
-            }
+                async for event in _stream_scene_assets(
+                    request=request, scene_id=scene_id, topic=thesis, audience=audience, tone="clear and engaging", scene_title=title,
+                    narration_focus=narration_focus, style_guide=style_guide, visual_prompt=visual_prompt,
+                    image_prefix="advanced_interleaved", audio_prefix="advanced_audio"
+                ):
+                    yield event
 
+                yield {"event": "scene_done", "data": json.dumps({"scene_id": scene_id})}
+
+            yield {"event": "final_bundle_ready", "data": json.dumps({"run_id": "advanced-run-123", "bundle_url": "/api/final-bundle/advanced-run-123"})}
+        except Exception as exc:
+            print(f"Error in advanced stream: {exc}")
+            yield {"event": "error", "data": json.dumps({"error": str(exc)})}
     return EventSourceResponse(event_generator())
+
+@router.post("/regenerate-scene")
+async def regenerate_scene(payload: RegenerateSceneRequest, request: Request):
+    scene_id = payload.scene_id
+    current_text = payload.current_text
+    instruction = payload.instruction
+    visual_mode = payload.visual_mode
+    try:
+        style_guide = _style_guide_for_mode(visual_mode)
+        regen_prompt = (
+            f"Regenerate scene {scene_id} with this instruction: {instruction}\n\n"
+            f"Original text context: {current_text}\n\n"
+            "Requirements:\n"
+            "1) Return updated narration text first (no labels or markdown).\n"
+            "2) Then return one high-quality inline image for that scene.\n"
+            f"3) Follow this visual style guide: {style_guide}"
+        )
+        response = await client.aio.models.generate_content(
+            model="gemini-3-pro-image-preview",
+            contents=regen_prompt,
+            config=types.GenerateContentConfig(temperature=0.7),
+        )
+        updated_text = ""
+        image_bytes = None
+        for candidate in getattr(response, "candidates", []):
+            for part in getattr(candidate.content, "parts", []):
+                if getattr(part, "text", None): updated_text += part.text
+                inline_data = getattr(part, "inline_data", None)
+                if inline_data and getattr(inline_data, "data", None):
+                    image_bytes = inline_data.data
+        image_url = ""
+        if image_bytes:
+            image_url = _save_image_and_get_url(request=request, scene_id=scene_id, image_bytes=image_bytes, prefix="regen")
+        audio_url = _generate_audio_and_get_url(request=request, scene_id=scene_id, text=updated_text, prefix="regen_audio")
+        return {"status": "success", "scene_id": scene_id, "text": updated_text, "imageUrl": image_url, "audioUrl": audio_url}
+    except Exception as exc:
+        print(f"Regeneration error: {exc}")
+        return {"status": "error", "message": str(exc)}

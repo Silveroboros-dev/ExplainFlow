@@ -1,10 +1,68 @@
+import { useState } from 'react';
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Loader2, Wand2 } from "lucide-react";
 
-export default function SceneCard({ sceneId, title, text, imageUrl, audioStatus, audioUrl }: { sceneId: string, title?: string, text: string, imageUrl?: string, audioStatus: string, audioUrl?: string }) {
+interface SceneCardProps {
+  sceneId: string;
+  title?: string;
+  text: string;
+  imageUrl?: string;
+  audioStatus: string;
+  audioUrl?: string;
+  visualMode?: string;
+  onRegenerate?: (sceneId: string, newText: string, newImageUrl: string, newAudioUrl: string) => void;
+}
+
+export default function SceneCard({ sceneId, title, text, imageUrl, audioStatus, audioUrl, visualMode, onRegenerate }: SceneCardProps) {
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  const [instruction, setInstruction] = useState('');
+  const [isOpen, setIsOpen] = useState(false);
+
+  const handleRegenSubmit = async () => {
+    if (!instruction) return;
+    setIsRegenerating(true);
+    
+    try {
+      const response = await fetch('http://localhost:8000/api/regenerate-scene', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scene_id: sceneId,
+          current_text: text,
+          instruction: instruction,
+          visual_mode: visualMode || 'illustration'
+        })
+      });
+      
+      const data = await response.json();
+      if (data.status === 'success' && onRegenerate) {
+        onRegenerate(sceneId, data.text, data.imageUrl, data.audioUrl);
+        setIsOpen(false);
+        setInstruction('');
+      }
+    } catch (err) {
+      console.error("Regen failed:", err);
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
+
   return (
-    <Card className="w-full mb-4 overflow-hidden border-slate-200">
-      <div className="flex flex-col md:flex-row h-full">
+    <Card className={`w-full mb-4 overflow-hidden border-slate-200 transition-all ${isRegenerating ? 'opacity-50 grayscale' : ''}`}>
+      <div className="flex flex-col md:flex-row h-full relative">
+        
+        {isRegenerating && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/50 backdrop-blur-sm">
+            <div className="flex flex-col items-center gap-2">
+              <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+              <p className="text-sm font-medium text-blue-900">Regenerating Scene...</p>
+            </div>
+          </div>
+        )}
+
         {/* Left Side: Narration & Audio */}
         <div className="flex-1 p-6 flex flex-col gap-4">
           <div>
@@ -22,9 +80,38 @@ export default function SceneCard({ sceneId, title, text, imageUrl, audioStatus,
                 <p className="text-sm text-slate-500 font-medium">Audio: {audioStatus}</p>
               </div>
             )}
-            <Button variant="outline" size="sm" className="mt-4">
-              Regenerate Scene
-            </Button>
+            
+            <Dialog open={isOpen} onOpenChange={setIsOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm" className="mt-4 gap-2">
+                  <Wand2 className="h-4 w-4" />
+                  Regenerate Scene
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Regenerate Scene</DialogTitle>
+                  <DialogDescription>
+                    Tell the AI what to change about this scene (e.g., "Make it more dramatic" or "Focus more on the chemistry").
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="py-4">
+                  <Textarea 
+                    placeholder="Instruction for regeneration..." 
+                    value={instruction}
+                    onChange={(e) => setInstruction(e.target.value)}
+                    className="min-h-[100px]"
+                  />
+                </div>
+                <DialogFooter>
+                  <Button variant="ghost" onClick={() => setIsOpen(false)}>Cancel</Button>
+                  <Button onClick={handleRegenSubmit} disabled={isRegenerating || !instruction}>
+                    {isRegenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
+                    Apply Edit
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
 

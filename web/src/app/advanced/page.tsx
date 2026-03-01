@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { Loader2 } from "lucide-react";
 
 export default function AdvancedStudio() {
@@ -15,6 +16,7 @@ export default function AdvancedStudio() {
   const [fidelity, setFidelity] = useState('high');
   const [density, setDensity] = useState('standard');
   const [audience, setAudience] = useState('Beginner');
+  const [customAudience, setCustomAudience] = useState('');
   
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractedSignal, setExtractedSignal] = useState<any>(null);
@@ -22,6 +24,22 @@ export default function AdvancedStudio() {
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [scenes, setScenes] = useState<Record<string, { id: string, title?: string, text: string, imageUrl?: string, audioUrl?: string }>>({});
+
+  const upsertScene = (
+    prev: Record<string, { id: string, title?: string, text: string, imageUrl?: string, audioUrl?: string }>,
+    sceneId: string,
+    patch: Partial<{ id: string, title?: string, text: string, imageUrl?: string, audioUrl?: string }>
+  ) => {
+    const existing = prev[sceneId] ?? { id: sceneId, text: '' };
+    return {
+      ...prev,
+      [sceneId]: {
+        ...existing,
+        ...patch,
+        id: sceneId,
+      }
+    };
+  };
 
   const handleExtract = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,7 +63,7 @@ export default function AdvancedStudio() {
       } else {
         setError(data.message || 'Extraction failed');
       }
-    } catch (err) {
+    } catch {
       setError('Network error during extraction');
     } finally {
       setIsExtracting(false);
@@ -65,7 +83,7 @@ export default function AdvancedStudio() {
         body: JSON.stringify({
           content_signal: extractedSignal,
           visual_mode: visualMode,
-          audience: audience
+          audience: audience === 'Other' ? customAudience : audience
         })
       });
 
@@ -95,25 +113,16 @@ export default function AdvancedStudio() {
               const data = JSON.parse(dataStr);
               
               if (currentEvent === 'scene_start') {
-                setScenes(prev => ({ ...prev, [data.scene_id]: { id: data.scene_id, title: data.title, text: '' } }));
+                setScenes(prev => upsertScene(prev, data.scene_id, { title: data.title }));
               } else if (currentEvent === 'story_text_delta') {
                 setScenes(prev => {
-                  const scene = prev[data.scene_id];
-                  if (!scene) return prev;
-                  return { ...prev, [data.scene_id]: { ...scene, text: scene.text + data.delta } };
+                  const scene = prev[data.scene_id] ?? { id: data.scene_id, text: '' };
+                  return upsertScene(prev, data.scene_id, { text: scene.text + data.delta });
                 });
               } else if (currentEvent === 'diagram_ready') {
-                setScenes(prev => {
-                  const scene = prev[data.scene_id];
-                  if (!scene) return prev;
-                  return { ...prev, [data.scene_id]: { ...scene, imageUrl: data.url } };
-                });
+                setScenes(prev => upsertScene(prev, data.scene_id, { imageUrl: data.url }));
               } else if (currentEvent === 'audio_ready') {
-                setScenes(prev => {
-                  const scene = prev[data.scene_id];
-                  if (!scene) return prev;
-                  return { ...prev, [data.scene_id]: { ...scene, audioUrl: data.url } };
-                });
+                setScenes(prev => upsertScene(prev, data.scene_id, { audioUrl: data.url }));
               } else if (currentEvent === 'final_bundle_ready' || currentEvent === 'error') {
                 setIsGenerating(false);
               }
@@ -123,10 +132,18 @@ export default function AdvancedStudio() {
           }
         }
       }
+      setIsGenerating(false);
     } catch (err) {
       console.error("Stream error:", err);
       setIsGenerating(false);
     }
+  };
+
+  const handleRegenerate = (sceneId: string, newText: string, newImageUrl: string, newAudioUrl: string) => {
+    setScenes(prev => ({
+      ...prev,
+      [sceneId]: { ...prev[sceneId], text: newText, imageUrl: newImageUrl, audioUrl: newAudioUrl }
+    }));
   };
 
   return (
@@ -205,7 +222,35 @@ export default function AdvancedStudio() {
                         </SelectContent>
                       </Select>
                     </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="audience">Target Audience</Label>
+                      <Select value={audience} onValueChange={setAudience}>
+                        <SelectTrigger id="audience">
+                          <SelectValue placeholder="Select audience" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Beginner">Beginner (Simple language)</SelectItem>
+                          <SelectItem value="Intermediate">Intermediate (General Public)</SelectItem>
+                          <SelectItem value="Expert">Expert (Technical)</SelectItem>
+                          <SelectItem value="Other">Other (Specify...)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
+
+                  {audience === 'Other' && (
+                    <div className="space-y-2">
+                      <Label htmlFor="customAudience">Specify Audience</Label>
+                      <Input 
+                        id="customAudience" 
+                        value={customAudience} 
+                        onChange={e => setCustomAudience(e.target.value)} 
+                        placeholder="e.g. 5-year old children, investors..." 
+                        required 
+                      />
+                    </div>
+                  )}
 
                   <Button type="submit" className="w-full" disabled={isExtracting} size="lg">
                     {isExtracting ? (
@@ -283,6 +328,8 @@ export default function AdvancedStudio() {
                 text={scene.text} 
                 imageUrl={scene.imageUrl} 
                 audioUrl={scene.audioUrl} 
+                visualMode={visualMode}
+                onRegenerate={handleRegenerate}
                 audioStatus={isGenerating && !scene.audioUrl ? "Generating..." : "Ready"} 
               />
             ))}

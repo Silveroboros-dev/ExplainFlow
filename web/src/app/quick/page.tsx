@@ -12,10 +12,27 @@ import { Loader2 } from "lucide-react";
 export default function QuickGenerate() {
   const [topic, setTopic] = useState('');
   const [audience, setAudience] = useState('Beginner');
+  const [customAudience, setCustomAudience] = useState('');
   const [tone, setTone] = useState('');
   const [visualMode, setVisualMode] = useState('illustration');
   const [isGenerating, setIsGenerating] = useState(false);
   const [scenes, setScenes] = useState<Record<string, { id: string, title?: string, text: string, imageUrl?: string, audioUrl?: string }>>({});
+
+  const upsertScene = (
+    prev: Record<string, { id: string, title?: string, text: string, imageUrl?: string, audioUrl?: string }>,
+    sceneId: string,
+    patch: Partial<{ id: string, title?: string, text: string, imageUrl?: string, audioUrl?: string }>
+  ) => {
+    const existing = prev[sceneId] ?? { id: sceneId, text: '' };
+    return {
+      ...prev,
+      [sceneId]: {
+        ...existing,
+        ...patch,
+        id: sceneId,
+      }
+    };
+  };
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,7 +44,7 @@ export default function QuickGenerate() {
     // Connect to the backend SSE endpoint
     const url = new URL('http://localhost:8000/api/generate-stream');
     url.searchParams.append('topic', topic);
-    url.searchParams.append('audience', audience);
+    url.searchParams.append('audience', audience === 'Other' ? customAudience : audience);
     url.searchParams.append('tone', tone);
     url.searchParams.append('visual_mode', visualMode);
     
@@ -35,53 +52,28 @@ export default function QuickGenerate() {
     
     eventSource.addEventListener('scene_start', (event) => {
       const data = JSON.parse(event.data);
-      setScenes(prev => ({
-        ...prev,
-        [data.scene_id]: { id: data.scene_id, title: data.title, text: '' }
-      }));
+      setScenes(prev => upsertScene(prev, data.scene_id, { title: data.title }));
     });
 
     eventSource.addEventListener('story_text_delta', (event) => {
       const data = JSON.parse(event.data);
       setScenes(prev => {
-        const scene = prev[data.scene_id];
-        if (!scene) return prev;
-        return {
-          ...prev,
-          [data.scene_id]: { ...scene, text: scene.text + data.delta }
-        };
+        const existing = prev[data.scene_id] ?? { id: data.scene_id, text: '' };
+        return upsertScene(prev, data.scene_id, { text: existing.text + data.delta });
       });
     });
 
     eventSource.addEventListener('diagram_ready', (event) => {
       const data = JSON.parse(event.data);
-      setScenes(prev => {
-        const scene = prev[data.scene_id];
-        if (!scene) return prev;
-        return {
-          ...prev,
-          [data.scene_id]: { ...scene, imageUrl: data.url }
-        };
-      });
+      setScenes(prev => upsertScene(prev, data.scene_id, { imageUrl: data.url }));
     });
 
     eventSource.addEventListener('audio_ready', (event) => {
       const data = JSON.parse(event.data);
-      setScenes(prev => {
-        const scene = prev[data.scene_id];
-        if (!scene) return prev;
-        return {
-          ...prev,
-          [data.scene_id]: { ...scene, audioUrl: data.url }
-        };
-      });
+      setScenes(prev => upsertScene(prev, data.scene_id, { audioUrl: data.url }));
     });
 
-    eventSource.addEventListener('scene_done', (event) => {
-      // Logic for when a scene is completely finished
-    });
-
-    eventSource.addEventListener('final_bundle_ready', (event) => {
+    eventSource.addEventListener('final_bundle_ready', () => {
       eventSource.close();
       setIsGenerating(false);
     });
@@ -91,6 +83,13 @@ export default function QuickGenerate() {
       eventSource.close();
       setIsGenerating(false);
     });
+  };
+
+  const handleRegenerate = (sceneId: string, newText: string, newImageUrl: string, newAudioUrl: string) => {
+    setScenes(prev => ({
+      ...prev,
+      [sceneId]: { ...prev[sceneId], text: newText, imageUrl: newImageUrl, audioUrl: newAudioUrl }
+    }));
   };
 
   return (
@@ -134,9 +133,23 @@ export default function QuickGenerate() {
                     <SelectItem value="Beginner">Beginner (Simple language)</SelectItem>
                     <SelectItem value="Intermediate">Intermediate (General Public)</SelectItem>
                     <SelectItem value="Expert">Expert (Technical)</SelectItem>
+                    <SelectItem value="Other">Other (Specify...)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+
+              {audience === 'Other' && (
+                <div className="space-y-2">
+                  <Label htmlFor="customAudience">Specify Audience</Label>
+                  <Input 
+                    id="customAudience" 
+                    value={customAudience} 
+                    onChange={e => setCustomAudience(e.target.value)} 
+                    placeholder="e.g. 5-year old children, investors..." 
+                    required 
+                  />
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="visualMode">Visual Style</Label>
@@ -193,6 +206,8 @@ export default function QuickGenerate() {
                 text={scene.text} 
                 imageUrl={scene.imageUrl} 
                 audioUrl={scene.audioUrl} 
+                visualMode={visualMode}
+                onRegenerate={handleRegenerate}
                 audioStatus={isGenerating && !scene.audioUrl ? "Generating..." : "Ready"} 
               />
             ))}
