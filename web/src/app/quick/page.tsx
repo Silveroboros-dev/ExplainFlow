@@ -1,5 +1,6 @@
 "use client";
 
+import Image from 'next/image';
 import React, { useState } from 'react';
 import SceneCard from '@/components/SceneCard';
 import FinalBundle from '@/components/FinalBundle';
@@ -10,6 +11,21 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Loader2 } from "lucide-react";
 
+type QuickScene = {
+  id: string;
+  title?: string;
+  text: string;
+  imageUrl?: string;
+  audioUrl?: string;
+  status: string;
+};
+
+type SceneQueueItem = {
+  scene_id: string;
+  title?: string;
+  narration_focus?: string;
+};
+
 export default function QuickGenerate() {
   const [topic, setTopic] = useState('');
   const [audience, setAudience] = useState('Beginner');
@@ -17,7 +33,7 @@ export default function QuickGenerate() {
   const [tone, setTone] = useState('');
   const [visualMode, setVisualMode] = useState('illustration');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [scenes, setScenes] = useState<Record<string, { id: string, title?: string, text: string, imageUrl?: string, audioUrl?: string, status: string }>>({});
+  const [scenes, setScenes] = useState<Record<string, QuickScene>>({});
 
   const fullTextBuffer = React.useRef<Record<string, string>>({});
 
@@ -81,10 +97,10 @@ export default function QuickGenerate() {
     
     const eventSource = new EventSource(url.toString());
     
-    eventSource.addEventListener('scene_queue_ready', (event) => {
-      const data = JSON.parse(event.data);
-      const initialScenes: Record<string, any> = {};
-      data.scenes.forEach((s: any) => {
+    eventSource.addEventListener('scene_queue_ready', (event: MessageEvent) => {
+      const data = JSON.parse(event.data) as { scenes?: SceneQueueItem[] };
+      const initialScenes: Record<string, QuickScene> = {};
+      (data.scenes ?? []).forEach((s) => {
         initialScenes[s.scene_id] = {
           id: s.scene_id,
           title: s.title,
@@ -143,21 +159,44 @@ export default function QuickGenerate() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6 lg:px-8 font-sans">
-      <div className="max-w-5xl mx-auto space-y-8">
+    <main className="relative isolate min-h-screen overflow-x-clip bg-[#05070f] py-12 px-4 sm:px-6 lg:px-8 font-sans text-slate-100">
+      <div className="landing-bg page-bg-muted pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden>
+        <div className="landing-aurora" />
+        <div className="landing-grid" />
+        <div className="landing-noise" />
+        <div className="landing-collage">
+          <div className="collage-tile tile-1">
+            <Image src="/humanity/vitruvian.jpg" alt="" fill sizes="180px" className="object-contain p-4" />
+            <div className="collage-tile-frame" />
+            <div className="collage-tile-glow" />
+          </div>
+          <div className="collage-tile tile-2">
+            <Image src="/humanity/mandelbrot.jpg" alt="" fill sizes="180px" className="object-cover" />
+            <div className="collage-tile-frame" />
+            <div className="collage-tile-glow" />
+          </div>
+        </div>
+        <div className="landing-rings">
+          <div className="landing-ring landing-ring-a" />
+          <div className="landing-ring landing-ring-b" />
+          <div className="landing-ring landing-ring-c" />
+        </div>
+      </div>
+
+      <div className="relative z-10 max-w-5xl mx-auto space-y-8">
         
         <div className="text-center space-y-2">
-          <h1 className="text-4xl font-extrabold tracking-tight text-slate-900">ExplainFlow</h1>
-          <p className="text-lg text-slate-500">Live Interleaved Generative Storyteller</p>
+          <h1 className="text-4xl font-extrabold tracking-tight text-slate-100 drop-shadow-[0_2px_16px_rgba(2,6,23,0.75)]">ExplainFlow</h1>
+          <p className="text-lg text-slate-200/95 drop-shadow-[0_1px_8px_rgba(2,6,23,0.6)]">Live Interleaved Generative Storyteller</p>
         </div>
 
-        <Card className="shadow-sm border-slate-200">
+        <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
           <CardHeader>
-            <CardTitle>Quick Generate</CardTitle>
-            <CardDescription>Enter a topic and style to generate a complete visual explainer instantly.</CardDescription>
+            <CardTitle className="text-slate-900">Quick Generate</CardTitle>
+            <CardDescription className="text-slate-600">Enter a topic and style to generate a complete visual explainer instantly.</CardDescription>
           </CardHeader>
           <CardContent>
-            <form onSubmit={handleGenerate} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <form onSubmit={handleGenerate} className="high-contrast-form-labels grid grid-cols-1 md:grid-cols-2 gap-6">
               
               <div className="space-y-2 md:col-span-2">
                 <Label htmlFor="topic">Topic</Label>
@@ -167,17 +206,17 @@ export default function QuickGenerate() {
                   onChange={e => setTopic(e.target.value)} 
                   placeholder="e.g. How does photosynthesis work?" 
                   required 
-                  className="text-lg"
+                  className="text-lg bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
                 />
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="audience">Target Audience</Label>
                 <Select value={audience} onValueChange={setAudience}>
-                  <SelectTrigger id="audience">
+                  <SelectTrigger id="audience" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
                     <SelectValue placeholder="Select audience" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="bg-white text-slate-900 border-slate-300">
                     <SelectItem value="Beginner">Beginner (Simple language)</SelectItem>
                     <SelectItem value="Intermediate">Intermediate (General Public)</SelectItem>
                     <SelectItem value="Expert">Expert (Technical)</SelectItem>
@@ -195,6 +234,7 @@ export default function QuickGenerate() {
                     onChange={e => setCustomAudience(e.target.value)} 
                     placeholder="e.g. 5-year old children, investors..." 
                     required 
+                    className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
                   />
                 </div>
               )}
@@ -202,10 +242,10 @@ export default function QuickGenerate() {
               <div className="space-y-2">
                 <Label htmlFor="visualMode">Visual Style</Label>
                 <Select value={visualMode} onValueChange={setVisualMode}>
-                  <SelectTrigger id="visualMode">
+                  <SelectTrigger id="visualMode" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
                     <SelectValue placeholder="Select visual style" />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="bg-white text-slate-900 border-slate-300">
                     <SelectItem value="illustration">Illustration (Cinematic 3D)</SelectItem>
                     <SelectItem value="diagram">Diagram (Clean Vectors)</SelectItem>
                     <SelectItem value="hybrid">Hybrid (3D + UI Elements)</SelectItem>
@@ -220,6 +260,7 @@ export default function QuickGenerate() {
                   value={tone} 
                   onChange={e => setTone(e.target.value)} 
                   placeholder="e.g. Engaging, Professional, Humorous" 
+                  className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
                 />
               </div>
 
@@ -241,7 +282,7 @@ export default function QuickGenerate() {
 
         <div className="space-y-6 mt-12">
           {Object.values(scenes).length > 0 && (
-            <h2 className="text-2xl font-bold tracking-tight text-slate-900 mb-6">Generated Explainer</h2>
+            <h2 className="text-2xl font-bold tracking-tight text-slate-100 mb-6">Generated Explainer</h2>
           )}
           
           <div className="flex flex-col gap-6">

@@ -1,5 +1,6 @@
 "use client";
 
+import Image from 'next/image';
 import React, { useState } from 'react';
 import SceneCard from '@/components/SceneCard';
 import FinalBundle from '@/components/FinalBundle';
@@ -344,26 +345,49 @@ export default function AdvancedStudio() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6 lg:px-8 font-sans">
-      <div className="max-w-6xl mx-auto space-y-8">
+    <main className="relative isolate min-h-screen overflow-x-clip bg-[#05070f] py-12 px-4 sm:px-6 lg:px-8 font-sans text-slate-100">
+      <div className="landing-bg page-bg-muted pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden>
+        <div className="landing-aurora" />
+        <div className="landing-grid" />
+        <div className="landing-noise" />
+        <div className="landing-collage">
+          <div className="collage-tile tile-1">
+            <Image src="/humanity/vitruvian.jpg" alt="" fill sizes="180px" className="object-contain p-4" />
+            <div className="collage-tile-frame" />
+            <div className="collage-tile-glow" />
+          </div>
+          <div className="collage-tile tile-2">
+            <Image src="/humanity/mandelbrot.jpg" alt="" fill sizes="180px" className="object-cover" />
+            <div className="collage-tile-frame" />
+            <div className="collage-tile-glow" />
+          </div>
+        </div>
+        <div className="landing-rings">
+          <div className="landing-ring landing-ring-a" />
+          <div className="landing-ring landing-ring-b" />
+          <div className="landing-ring landing-ring-c" />
+        </div>
+      </div>
+
+      <div className="relative z-10 max-w-6xl mx-auto space-y-8">
         
         {/* Header Section */}
         <div className="text-center space-y-2">
-          <h1 className="text-4xl font-extrabold tracking-tight text-slate-900">Advanced Studio</h1>
-          <p className="text-lg text-slate-500">Long-document input and granular render profile control.</p>
+          <h1 className="text-4xl font-extrabold tracking-tight text-slate-100 drop-shadow-[0_2px_16px_rgba(2,6,23,0.75)]">Advanced Studio</h1>
+          <p className="text-lg text-slate-200/95 drop-shadow-[0_1px_8px_rgba(2,6,23,0.6)]">Long-document input and granular render profile control.</p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           
           {/* Left Column: Input Form */}
           <div className="space-y-6">
-            <Card className="shadow-sm border-slate-200">
+            <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
               <CardHeader>
-                <CardTitle>1. Source Material</CardTitle>
-                <CardDescription>Paste your long-form document, article, or transcript.</CardDescription>
+                <CardTitle className="text-slate-900">1. Source Material</CardTitle>
+                <CardDescription className="text-slate-600">Paste your long-form document, article, or transcript.</CardDescription>
               </CardHeader>
               <CardContent>
-                <form onSubmit={handleExtract} className="space-y-6">
+                <form onSubmit={handleExtract} className="high-contrast-form-labels space-y-6">
                   
                   <div className="space-y-2">
                     <Label htmlFor="sourceDoc">Document Text</Label>
@@ -372,7 +396,7 @@ export default function AdvancedStudio() {
                       value={sourceDoc} 
                       onChange={e => setSourceDoc(e.target.value)} 
                       placeholder="Paste long document here..." 
-                      className="min-h-[250px] text-base"
+                      className="min-h-[250px] text-base bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
                       required
                     />
                   </div>
@@ -381,10 +405,10 @@ export default function AdvancedStudio() {
                     <div className="space-y-2">
                       <Label htmlFor="visualMode">Visual Mode</Label>
                       <Select value={visualMode} onValueChange={setVisualMode}>
-                        <SelectTrigger id="visualMode">
+                        <SelectTrigger id="visualMode" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
                           <SelectValue placeholder="Select..." />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="bg-white text-slate-900 border-slate-300">
                           <SelectItem value="diagram">Diagram</SelectItem>
                           <SelectItem value="illustration">Illustration</SelectItem>
                           <SelectItem value="hybrid">Hybrid</SelectItem>
@@ -395,10 +419,10 @@ export default function AdvancedStudio() {
                     <div className="space-y-2">
                       <Label htmlFor="fidelity">Fidelity</Label>
                       <Select value={fidelity} onValueChange={setFidelity}>
-                        <SelectTrigger id="fidelity">
+                        <SelectTrigger id="fidelity" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
                           <SelectValue placeholder="Select..." />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="bg-white text-slate-900 border-slate-300">
                           <SelectItem value="low">Low (Draft)</SelectItem>
                           <SelectItem value="medium">Medium</SelectItem>
                           <SelectItem value="high">High (Final)</SelectItem>
@@ -409,10 +433,10 @@ export default function AdvancedStudio() {
                     <div className="space-y-2">
                       <Label htmlFor="density">Information Density</Label>
                       <Select value={density} onValueChange={setDensity}>
-                        <SelectTrigger id="density">
+                        <SelectTrigger id="density" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
                           <SelectValue placeholder="Select..." />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="bg-white text-slate-900 border-slate-300">
                           <SelectItem value="simple">Simple</SelectItem>
                           <SelectItem value="standard">Standard</SelectItem>
                           <SelectItem value="detailed">Detailed</SelectItem>
@@ -423,10 +447,10 @@ export default function AdvancedStudio() {
                     <div className="space-y-2">
                       <Label htmlFor="audienceLevel">Audience Level</Label>
                       <Select value={audienceLevel} onValueChange={setAudienceLevel}>
-                        <SelectTrigger id="audienceLevel">
+                        <SelectTrigger id="audienceLevel" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
                           <SelectValue placeholder="Select audience level" />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent className="bg-white text-slate-900 border-slate-300">
                           <SelectItem value="beginner">Beginner</SelectItem>
                           <SelectItem value="intermediate">Intermediate</SelectItem>
                           <SelectItem value="expert">Expert</SelectItem>
@@ -442,6 +466,7 @@ export default function AdvancedStudio() {
                       value={audiencePersona}
                       onChange={e => setAudiencePersona(e.target.value)}
                       placeholder="e.g. Product manager, data journalist, startup founder"
+                      className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
                       required
                     />
                   </div>
@@ -453,16 +478,17 @@ export default function AdvancedStudio() {
                       value={domainContext}
                       onChange={e => setDomainContext(e.target.value)}
                       placeholder="e.g. B2B SaaS roadmap decisions"
+                      className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
                     />
                   </div>
 
                   <div className="space-y-2">
                     <Label htmlFor="tasteBar">Taste Bar</Label>
                     <Select value={tasteBar} onValueChange={setTasteBar}>
-                      <SelectTrigger id="tasteBar">
+                      <SelectTrigger id="tasteBar" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
                         <SelectValue placeholder="Select taste bar" />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent className="bg-white text-slate-900 border-slate-300">
                         <SelectItem value="standard">Standard</SelectItem>
                         <SelectItem value="high">High</SelectItem>
                         <SelectItem value="very_high">Very High</SelectItem>
@@ -477,6 +503,7 @@ export default function AdvancedStudio() {
                       value={mustIncludeText}
                       onChange={e => setMustIncludeText(e.target.value)}
                       placeholder="Comma-separated, e.g. business tradeoffs, clean hierarchy"
+                      className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
                     />
                   </div>
 
@@ -487,6 +514,7 @@ export default function AdvancedStudio() {
                       value={mustAvoidText}
                       onChange={e => setMustAvoidText(e.target.value)}
                       placeholder="Comma-separated, e.g. typical AI-generated gibberish, very abstract speculation"
+                      className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
                     />
                   </div>
 
@@ -509,10 +537,10 @@ export default function AdvancedStudio() {
 
           {/* Right Column: Signal Data & Next Steps */}
           <div className="space-y-6">
-            <Card className="shadow-sm border-slate-200 h-full flex flex-col">
+            <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70 h-full flex flex-col">
               <CardHeader>
-                <CardTitle>2. Content Signal</CardTitle>
-                <CardDescription>The style-agnostic extraction of your document.</CardDescription>
+                <CardTitle className="text-slate-900">2. Content Signal</CardTitle>
+                <CardDescription className="text-slate-600">The style-agnostic extraction of your document.</CardDescription>
               </CardHeader>
               <CardContent className="flex-1 flex flex-col">
                 {extractedSignal ? (
@@ -577,7 +605,7 @@ export default function AdvancedStudio() {
           )}
 
           {Object.values(scenes).length > 0 && (
-            <h2 className="text-2xl font-bold tracking-tight text-slate-900 mb-6">Generated Explainer</h2>
+            <h2 className="text-2xl font-bold tracking-tight text-slate-100 mb-6">Generated Explainer</h2>
           )}
           
           <div className="flex flex-col gap-6">
