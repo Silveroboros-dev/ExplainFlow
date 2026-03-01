@@ -1,4 +1,6 @@
+import asyncio
 import json
+import re
 import time
 from pathlib import Path
 
@@ -10,7 +12,11 @@ from sse_starlette.sse import EventSourceResponse
 
 router = APIRouter()
 
-client = genai.Client()
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SCHEMAS_DIR = REPO_ROOT / "schemas"
@@ -48,6 +54,39 @@ def _style_guide_for_mode(visual_mode: str) -> str:
 
 def _base_url(request: Request) -> str:
     return str(request.base_url).rstrip("/")
+
+
+def _is_resource_exhausted(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return (
+        "resource_exhausted" in message
+        or "quota exceeded" in message
+        or "429" in message
+        or "rate limit" in message
+    )
+
+
+def _is_daily_quota_exhausted(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "perday" in message or "per-day" in message or "requestsperday" in message
+
+
+def _extract_retry_delay_seconds(exc: Exception, default_seconds: float = 5.0) -> float:
+    message = str(exc)
+    retry_in_match = re.search(r"retry in ([0-9]+(?:\.[0-9]+)?)s", message, re.IGNORECASE)
+    if retry_in_match:
+        return max(1.0, min(float(retry_in_match.group(1)), 30.0))
+    retry_delay_match = re.search(r"retryDelay': '([0-9]+)s'", message)
+    if retry_delay_match:
+        return max(1.0, min(float(retry_delay_match.group(1)), 30.0))
+    return default_seconds
+
+
+def _friendly_quota_error_message() -> str:
+    return (
+        "Gemini generation is temporarily unavailable due to quota or rate limits "
+        "(RESOURCE_EXHAUSTED). Wait ~30-60 seconds and retry, or use a billed API key/project."
+    )
 
 def _save_image_and_get_url(request: Request, scene_id: str, image_bytes: bytes, prefix: str) -> str:
     ts = int(time.time() * 1000)
@@ -102,44 +141,71 @@ async def _stream_scene_assets(
         "4) DO NOT output any other text or conversational filler."
     )
 
-    response_stream = await client.aio.models.generate_content_stream(
-        model="gemini-3-pro-image-preview",
-        contents=scene_prompt,
-        config=types.GenerateContentConfig(temperature=0.7),
-    )
-
     current_scene_text = ""
-    async for chunk in response_stream:
-        if await request.is_disconnected():
-            return
-        
-        candidates = getattr(chunk, "candidates", [])
-        if not candidates:
-            continue
-            
-        parts = getattr(candidates[0].content, "parts", [])
-        for part in parts:
-            text = getattr(part, "text", None)
-            if text:
-                current_scene_text += text
-                yield {
-                    "event": "story_text_delta",
-                    "data": json.dumps({"scene_id": scene_id, "delta": text}),
-                }
-            
-            inline_data = getattr(part, "inline_data", None)
-            binary = getattr(inline_data, "data", None) if inline_data else None
-            if binary:
-                image_url = _save_image_and_get_url(
-                    request=request,
-                    scene_id=scene_id,
-                    image_bytes=binary,
-                    prefix=image_prefix,
-                )
-                yield {
-                    "event": "diagram_ready",
-                    "data": json.dumps({"scene_id": scene_id, "url": image_url}),
-                }
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        emitted_any_chunk = False
+        try:
+            response_stream = await client.aio.models.generate_content_stream(
+                model="gemini-3-pro-image-preview",
+                contents=scene_prompt,
+                config=types.GenerateContentConfig(temperature=0.7),
+            )
+
+            async for chunk in response_stream:
+                if await request.is_disconnected():
+                    return
+
+                candidates = getattr(chunk, "candidates", [])
+                if not candidates:
+                    continue
+
+                parts = getattr(candidates[0].content, "parts", [])
+                for part in parts:
+                    text = getattr(part, "text", None)
+                    if text:
+                        emitted_any_chunk = True
+                        current_scene_text += text
+                        yield {
+                            "event": "story_text_delta",
+                            "data": json.dumps({"scene_id": scene_id, "delta": text}),
+                        }
+
+                    inline_data = getattr(part, "inline_data", None)
+                    binary = getattr(inline_data, "data", None) if inline_data else None
+                    if binary:
+                        emitted_any_chunk = True
+                        image_url = _save_image_and_get_url(
+                            request=request,
+                            scene_id=scene_id,
+                            image_bytes=binary,
+                            prefix=image_prefix,
+                        )
+                        yield {
+                            "event": "diagram_ready",
+                            "data": json.dumps({"scene_id": scene_id, "url": image_url}),
+                        }
+            break
+        except Exception as exc:
+            is_retryable = (
+                _is_resource_exhausted(exc)
+                and not _is_daily_quota_exhausted(exc)
+                and not emitted_any_chunk
+                and attempt < max_attempts - 1
+            )
+            if not is_retryable:
+                raise
+            delay_sec = _extract_retry_delay_seconds(exc) * (1.0 + 0.5 * attempt)
+            yield {
+                "event": "status",
+                "data": json.dumps(
+                    {
+                        "scene_id": scene_id,
+                        "message": f"Rate limit reached. Retrying this scene in {int(round(delay_sec))}s...",
+                    }
+                ),
+            }
+            await asyncio.sleep(delay_sec)
 
     if current_scene_text.strip():
         audio_url = _generate_audio_and_get_url(
@@ -227,7 +293,8 @@ async def generate_stream(
             yield {"event": "final_bundle_ready", "data": json.dumps({"run_id": "interleaved-run-123", "bundle_url": "/api/final-bundle/interleaved-run-123"})}
         except Exception as exc:
             print(f"Error generating stream: {exc}")
-            yield {"event": "error", "data": json.dumps({"error": str(exc)})}
+            message = _friendly_quota_error_message() if _is_resource_exhausted(exc) else str(exc)
+            yield {"event": "error", "data": json.dumps({"error": message})}
     return EventSourceResponse(event_generator())
 
 @router.post("/generate-stream-advanced")
@@ -354,7 +421,8 @@ async def generate_stream_advanced(request: Request):
             yield {"event": "final_bundle_ready", "data": json.dumps({"run_id": "advanced-run-123", "bundle_url": "/api/final-bundle/advanced-run-123"})}
         except Exception as exc:
             print(f"Error in advanced stream: {exc}")
-            yield {"event": "error", "data": json.dumps({"error": str(exc)})}
+            message = _friendly_quota_error_message() if _is_resource_exhausted(exc) else str(exc)
+            yield {"event": "error", "data": json.dumps({"error": message})}
     return EventSourceResponse(event_generator())
 
 @router.post("/regenerate-scene")

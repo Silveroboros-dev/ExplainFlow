@@ -60,3 +60,18 @@ To ensure safety and user control during automated development:
 - **Discovery Autonomy:** Read-only commands (like `cat`, `grep`, `ls`, `read_file`) and architectural investigation tools should be used autonomously to maintain momentum and never require explicit user permission.
 - **Detailed Git Commits:** When committing and pushing to GitHub, always provide a multi-line commit message. Use the first line for a high-level summary and subsequent `-m` flags or lines for a technical breakdown of specific features, fixes, or refactors included in the push.
 
+## 7. The "Sandbox" & Infrastructure Gotchas (Learned the Hard Way)
+
+**The Challenge (GCP Quota):**
+When working within a **Google Cloud Sandbox (Free Tier)** project, high-tier multimodal models like `gemini-3-pro-image-preview` and `imagen-3.0` have extremely low or zero default quotas. This often leads to immediate `429` (Rate Limit) or `500` (Quota Exceeded) errors, which can be misdiagnosed as code bugs.
+*   **The Lesson:** You must "Upgrade" the billing account (even if using credits) to enable these models for a robust "Creative Storyteller" demo.
+
+**The Challenge (Cloud Run Timeouts):**
+Streaming models take time to "think" before emitting the first byte. Default Cloud Run timeouts (often 60s) will kill the connection just as the first scene is generated.
+*   **The Lesson:** Increase Cloud Run request timeouts to **300s** and verify that `response_streaming` is supported by any intermediate proxies or balancers.
+
+**The Challenge (Grep Madness):**
+Running un-scoped `grep` or `find` commands in a modern codebase can pull in thousands of lines of context from `node_modules` or `venv`, polluting the AI context and causing "log madness" in the CLI.
+*   **The Lesson:** Always use `grep_search` (which respects `.gitignore`) or explicitly exclude library folders (`--exclude-dir={node_modules,venv}`) to maintain a clean, high-signal developer environment.
+
+

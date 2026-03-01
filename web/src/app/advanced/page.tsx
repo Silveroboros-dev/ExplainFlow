@@ -11,6 +11,54 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Loader2 } from "lucide-react";
 
+const SIGNAL_EXPLAINER_TEXT = [
+  "Structured extraction converts long input into a stable JSON contract.",
+  "",
+  "Why this is better than uncontrolled extraction:",
+  "- Predictable downstream planning and rendering",
+  "- Traceable claim references across scenes",
+  "- Cleaner visual prompts with less source noise",
+  "",
+  "What the extractor learns:",
+  "- Thesis and key claims",
+  "- Concepts and narrative beats",
+  "- Visual candidates and quality-risk scores",
+].join("\n");
+
+const SIGNAL_JSON_PREVIEW = `{
+  "version": "v1.0",
+  "thesis": { "one_liner": "...", "expanded_summary": "..." },
+  "key_claims": [{ "claim_id": "c1", "claim_text": "...", "confidence": 0.86 }],
+  "concepts": [{ "concept_id": "k1", "label": "...", "importance": 0.79 }],
+  "visual_candidates": [
+    { "candidate_id": "v1", "recommended_structure": "comparison", "claim_refs": ["c1"] }
+  ],
+  "narrative_beats": [{ "beat_id": "b1", "role": "hook", "claim_refs": ["c1"] }],
+  "signal_quality": { "coverage_score": 0.9, "ambiguity_score": 0.2, "hallucination_risk": 0.1 }
+}`;
+
+type ExtractedSignal = {
+  thesis?: { one_liner?: string };
+  [key: string]: unknown;
+};
+
+type SceneViewModel = {
+  id: string;
+  title?: string;
+  text: string;
+  imageUrl?: string;
+  audioUrl?: string;
+  claim_refs?: string[];
+  status: string;
+};
+
+type SceneQueueItem = {
+  scene_id: string;
+  title?: string;
+  claim_refs?: string[];
+  narration_focus?: string;
+};
+
 export default function AdvancedStudio() {
   const [sourceDoc, setSourceDoc] = useState('');
   const [visualMode, setVisualMode] = useState('illustration');
@@ -24,18 +72,21 @@ export default function AdvancedStudio() {
   const [mustAvoidText, setMustAvoidText] = useState('');
   
   const [isExtracting, setIsExtracting] = useState(false);
-  const [extractedSignal, setExtractedSignal] = useState<any>(null);
+  const [extractedSignal, setExtractedSignal] = useState<ExtractedSignal | null>(null);
   const [error, setError] = useState('');
+  const [generationError, setGenerationError] = useState('');
+  const [typedExplainer, setTypedExplainer] = useState('');
+  const [typedPreview, setTypedPreview] = useState('');
 
   const [isGenerating, setIsGenerating] = useState(false);
-  const [scenes, setScenes] = useState<Record<string, { id: string, title?: string, text: string, imageUrl?: string, audioUrl?: string, claim_refs?: string[], status: string }>>({});
+  const [scenes, setScenes] = useState<Record<string, SceneViewModel>>({});
   
   // Ref for the typewriter effect to track full text without causing infinite re-renders
   const fullTextBuffer = React.useRef<Record<string, string>>({});
 
   const updateSceneMetadata = (
     sceneId: string,
-    patch: Partial<{ id: string, title?: string, imageUrl?: string, audioUrl?: string, claim_refs?: string[], status: string }>
+    patch: Partial<SceneViewModel>
   ) => {
     setScenes(prev => {
       const existing = prev[sceneId] ?? { id: sceneId, text: '', status: 'queued' };
@@ -85,6 +136,40 @@ export default function AdvancedStudio() {
     return () => cancelAnimationFrame(animationFrameId);
   }, []);
 
+  React.useEffect(() => {
+    if (!isExtracting) {
+      setTypedExplainer('');
+      setTypedPreview('');
+      return;
+    }
+
+    setTypedExplainer('');
+    setTypedPreview('');
+
+    const targetDurationMs = 33000;
+    const tickMs = 60;
+    const totalChars = SIGNAL_EXPLAINER_TEXT.length + SIGNAL_JSON_PREVIEW.length;
+    const totalTicks = Math.max(1, Math.ceil(targetDurationMs / tickMs));
+    const charsPerTick = totalChars / totalTicks;
+    let cursor = 0;
+
+    const intervalId = window.setInterval(() => {
+      cursor = Math.min(totalChars, cursor + charsPerTick);
+      const shownChars = Math.floor(cursor);
+      const explainerChars = Math.min(shownChars, SIGNAL_EXPLAINER_TEXT.length);
+      const previewChars = Math.max(0, shownChars - SIGNAL_EXPLAINER_TEXT.length);
+
+      setTypedExplainer(SIGNAL_EXPLAINER_TEXT.slice(0, explainerChars));
+      setTypedPreview(SIGNAL_JSON_PREVIEW.slice(0, previewChars));
+
+      if (cursor >= totalChars) {
+        window.clearInterval(intervalId);
+      }
+    }, tickMs);
+
+    return () => window.clearInterval(intervalId);
+  }, [isExtracting]);
+
   const handleExtract = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!sourceDoc) return;
@@ -102,9 +187,13 @@ export default function AdvancedStudio() {
         body: JSON.stringify({ input_text: sourceDoc })
       });
       
-      const data = await response.json();
+      const data: {
+        status?: string;
+        content_signal?: ExtractedSignal;
+        message?: string;
+      } = await response.json();
       if (data.status === 'success') {
-        setExtractedSignal(data.content_signal);
+        setExtractedSignal(data.content_signal ?? null);
       } else {
         setError(data.message || 'Extraction failed');
       }
@@ -119,6 +208,7 @@ export default function AdvancedStudio() {
     if (!extractedSignal) return;
     
     setIsGenerating(true);
+    setGenerationError('');
     setScenes({});
     fullTextBuffer.current = {};
     
@@ -192,11 +282,12 @@ export default function AdvancedStudio() {
             if (!dataStr) continue;
             
             try {
-              const data = JSON.parse(dataStr);
+              const data: unknown = JSON.parse(dataStr);
               
               if (currentEvent === 'scene_queue_ready') {
-                const initialScenes: Record<string, any> = {};
-                data.scenes.forEach((s: any) => {
+                const queue = data as { scenes?: SceneQueueItem[] };
+                const initialScenes: Record<string, SceneViewModel> = {};
+                (queue.scenes ?? []).forEach((s) => {
                   initialScenes[s.scene_id] = {
                     id: s.scene_id,
                     title: s.title,
@@ -208,17 +299,26 @@ export default function AdvancedStudio() {
                 });
                 setScenes(initialScenes);
               } else if (currentEvent === 'scene_start') {
-                fullTextBuffer.current[data.scene_id] = ''; // Clear placeholder
-                updateSceneMetadata(data.scene_id, { title: data.title, claim_refs: data.claim_refs, status: 'generating' });
+                const payload = data as { scene_id: string; title?: string; claim_refs?: string[] };
+                fullTextBuffer.current[payload.scene_id] = ''; // Clear placeholder
+                updateSceneMetadata(payload.scene_id, { title: payload.title, claim_refs: payload.claim_refs, status: 'generating' });
               } else if (currentEvent === 'story_text_delta') {
-                fullTextBuffer.current[data.scene_id] = (fullTextBuffer.current[data.scene_id] || '') + data.delta;
+                const payload = data as { scene_id: string; delta?: string };
+                fullTextBuffer.current[payload.scene_id] = (fullTextBuffer.current[payload.scene_id] || '') + (payload.delta || '');
               } else if (currentEvent === 'diagram_ready') {
-                updateSceneMetadata(data.scene_id, { imageUrl: data.url });
+                const payload = data as { scene_id: string; url?: string };
+                updateSceneMetadata(payload.scene_id, { imageUrl: payload.url });
               } else if (currentEvent === 'audio_ready') {
-                updateSceneMetadata(data.scene_id, { audioUrl: data.url });
+                const payload = data as { scene_id: string; url?: string };
+                updateSceneMetadata(payload.scene_id, { audioUrl: payload.url });
               } else if (currentEvent === 'scene_done') {
-                updateSceneMetadata(data.scene_id, { status: 'ready' });
-              } else if (currentEvent === 'final_bundle_ready' || currentEvent === 'error') {
+                const payload = data as { scene_id: string };
+                updateSceneMetadata(payload.scene_id, { status: 'ready' });
+              } else if (currentEvent === 'final_bundle_ready') {
+                setIsGenerating(false);
+              } else if (currentEvent === 'error') {
+                const payload = data as { error?: string };
+                setGenerationError(payload.error || 'Generation failed.');
                 setIsGenerating(false);
               }
             } catch (e) {
@@ -230,6 +330,7 @@ export default function AdvancedStudio() {
       setIsGenerating(false);
     } catch (err) {
       console.error("Stream error:", err);
+      setGenerationError('Unable to connect to generation stream.');
       setIsGenerating(false);
     }
   };
@@ -385,7 +486,7 @@ export default function AdvancedStudio() {
                       id="mustAvoid"
                       value={mustAvoidText}
                       onChange={e => setMustAvoidText(e.target.value)}
-                      placeholder="Comma-separated, e.g. low-level code details"
+                      placeholder="Comma-separated, e.g. typical AI-generated gibberish, very abstract speculation"
                     />
                   </div>
 
@@ -437,6 +538,22 @@ export default function AdvancedStudio() {
                       </Button>
                     </div>
                   </div>
+                ) : isExtracting ? (
+                  <div className="space-y-4 flex-1 flex flex-col">
+                    <div className="p-4 bg-amber-50 text-amber-950 rounded-md border border-amber-200">
+                      <h4 className="font-semibold mb-2">Extracting Structured Signal...</h4>
+                      <p className="text-sm whitespace-pre-wrap font-mono leading-6">
+                        {typedExplainer}
+                        <span className="animate-pulse">|</span>
+                      </p>
+                    </div>
+                    <div className="bg-slate-900 text-slate-50 p-4 rounded-md overflow-auto max-h-[400px] text-xs font-mono">
+                      <pre>
+                        {typedPreview}
+                        <span className="animate-pulse">|</span>
+                      </pre>
+                    </div>
+                  </div>
                 ) : (
                   <div className="flex-1 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-md p-8">
                     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mb-4 opacity-50"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><line x1="10" x2="8" y1="9" y2="9"/></svg>
@@ -452,6 +569,13 @@ export default function AdvancedStudio() {
 
         {/* Timeline Stream Area */}
         <div className="space-y-6 mt-12">
+          {generationError && (
+            <div className="p-4 bg-red-50 text-red-900 rounded-md border border-red-200">
+              <h4 className="font-semibold mb-1">Generation Error</h4>
+              <p className="text-sm">{generationError}</p>
+            </div>
+          )}
+
           {Object.values(scenes).length > 0 && (
             <h2 className="text-2xl font-bold tracking-tight text-slate-900 mb-6">Generated Explainer</h2>
           )}
