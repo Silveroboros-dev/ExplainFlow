@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,18 +16,45 @@ interface SceneCardProps {
   visualMode?: string;
   claimRefs?: string[];
   status?: string;
+  qaStatus?: 'PASS' | 'WARN' | 'FAIL';
+  qaReasons?: string[];
+  qaScore?: number;
+  qaWordCount?: number;
+  autoRetryCount?: number;
   onRegenerate?: (sceneId: string, newText: string, newImageUrl: string, newAudioUrl: string) => void;
 }
 
-export default function SceneCard({ sceneId, title, text, imageUrl, audioStatus, audioUrl, visualMode, claimRefs, status = 'ready', onRegenerate }: SceneCardProps) {
+export default function SceneCard({
+  sceneId,
+  title,
+  text,
+  imageUrl,
+  audioStatus,
+  audioUrl,
+  visualMode,
+  claimRefs,
+  status = 'ready',
+  qaStatus,
+  qaReasons = [],
+  qaScore,
+  qaWordCount,
+  autoRetryCount,
+  onRegenerate,
+}: SceneCardProps) {
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [instruction, setInstruction] = useState('');
   const [isOpen, setIsOpen] = useState(false);
 
   // Determine badge color based on status
   const badgeColor = status === 'queued' ? 'bg-slate-200 text-slate-600' : 
-                     status === 'generating' ? 'bg-blue-100 text-blue-700 border-blue-200 animate-pulse' : 
+                     status === 'generating' || status === 'retrying' ? 'bg-blue-100 text-blue-700 border-blue-200 animate-pulse' :
+                     status === 'qa-failed' ? 'bg-rose-100 text-rose-700 border-rose-200' :
                      'bg-green-100 text-green-700 border-green-200';
+  const qaBadgeColor = qaStatus === 'PASS'
+    ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
+    : qaStatus === 'WARN'
+      ? 'bg-amber-100 text-amber-700 border-amber-200'
+      : 'bg-rose-100 text-rose-700 border-rose-200';
 
   const handleRegenSubmit = async () => {
     if (!instruction) return;
@@ -95,6 +122,27 @@ export default function SceneCard({ sceneId, title, text, imageUrl, audioStatus,
             <p className={`leading-relaxed transition-opacity duration-300 ${status === 'queued' ? 'text-slate-400 italic' : 'text-slate-700'}`}>
               {text || (status === 'queued' ? "Waiting for AI generation..." : "")}
             </p>
+            {qaStatus && (
+              <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge className={`${qaBadgeColor} border text-[10px] tracking-wider`}>QA {qaStatus}</Badge>
+                  {typeof qaScore === 'number' && (
+                    <span className="text-xs text-slate-600">Score: {qaScore.toFixed(2)}</span>
+                  )}
+                  {typeof qaWordCount === 'number' && (
+                    <span className="text-xs text-slate-600">Words: {qaWordCount}</span>
+                  )}
+                  {(autoRetryCount ?? 0) > 0 && (
+                    <span className="text-xs text-slate-600">Auto-retries: {autoRetryCount}</span>
+                  )}
+                </div>
+                {qaReasons.length > 0 && (
+                  <p className="mt-2 text-xs text-slate-600">
+                    {qaReasons.slice(0, 2).join(' ')}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
           
           <div className="mt-auto pt-4">
@@ -119,7 +167,7 @@ export default function SceneCard({ sceneId, title, text, imageUrl, audioStatus,
                 <DialogHeader>
                   <DialogTitle>Regenerate Scene</DialogTitle>
                   <DialogDescription>
-                    Tell the AI what to change about this scene (e.g., "Make it more dramatic" or "Focus more on the chemistry").
+                    Tell the AI what to change about this scene (for example: make it more dramatic, or focus more on the chemistry).
                   </DialogDescription>
                 </DialogHeader>
                 <div className="py-4">

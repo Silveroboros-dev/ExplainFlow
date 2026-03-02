@@ -51,6 +51,11 @@ type SceneViewModel = {
   audioUrl?: string;
   claim_refs?: string[];
   status: string;
+  qa_status?: 'PASS' | 'WARN' | 'FAIL';
+  qa_reasons?: string[];
+  qa_score?: number;
+  qa_word_count?: number;
+  auto_retry_count?: number;
 };
 
 type SceneQueueItem = {
@@ -58,6 +63,32 @@ type SceneQueueItem = {
   title?: string;
   claim_refs?: string[];
   narration_focus?: string;
+};
+
+type SceneQaPayload = {
+  scene_id: string;
+  status: 'PASS' | 'WARN' | 'FAIL';
+  score: number;
+  reasons: string[];
+  attempt: number;
+  word_count: number;
+};
+
+type ScriptPackPayload = {
+  plan_id: string;
+  plan_summary: string;
+  audience_descriptor: string;
+  scene_count: number;
+  scenes: Array<{
+    scene_id: string;
+    title: string;
+    scene_goal: string;
+    narration_focus: string;
+    visual_prompt: string;
+    claim_refs: string[];
+    continuity_refs: string[];
+    acceptance_checks: string[];
+  }>;
 };
 
 export default function AdvancedStudio() {
@@ -81,9 +112,14 @@ export default function AdvancedStudio() {
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [scenes, setScenes] = useState<Record<string, SceneViewModel>>({});
+  const [scriptPack, setScriptPack] = useState<ScriptPackPayload | null>(null);
   
   // Ref for the typewriter effect to track full text without causing infinite re-renders
   const fullTextBuffer = React.useRef<Record<string, string>>({});
+
+  const asStringArray = (value: unknown): string[] => (
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+  );
 
   const updateSceneMetadata = (
     sceneId: string,
@@ -179,10 +215,12 @@ export default function AdvancedStudio() {
     setError('');
     setExtractedSignal(null);
     setScenes({});
+    setScriptPack(null);
     fullTextBuffer.current = {};
     
     try {
-      const response = await fetch('http://localhost:8000/api/extract-signal', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${apiUrl}/api/extract-signal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input_text: sourceDoc })
@@ -198,7 +236,8 @@ export default function AdvancedStudio() {
       } else {
         setError(data.message || 'Extraction failed');
       }
-    } catch {
+    } catch (err) {
+      console.error(err);
       setError('Network error during extraction');
     } finally {
       setIsExtracting(false);
@@ -211,9 +250,9 @@ export default function AdvancedStudio() {
     setIsGenerating(true);
     setGenerationError('');
     setScenes({});
+    setScriptPack(null);
     fullTextBuffer.current = {};
     
-    // Construct a strict Render Profile matching the schema
     const renderProfile = {
       profile_id: "rp_custom_" + Date.now(),
       goal: "teach",
@@ -251,7 +290,8 @@ export default function AdvancedStudio() {
     };
 
     try {
-      const response = await fetch('http://localhost:8000/api/generate-stream-advanced', {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${apiUrl}/api/generate-stream-advanced`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -283,43 +323,101 @@ export default function AdvancedStudio() {
             if (!dataStr) continue;
             
             try {
-              const data: unknown = JSON.parse(dataStr);
+              const parsedData: unknown = JSON.parse(dataStr);
+              if (!parsedData || typeof parsedData !== 'object') continue;
+              const data = parsedData as Record<string, unknown>;
               
               if (currentEvent === 'scene_queue_ready') {
-                const queue = data as { scenes?: SceneQueueItem[] };
                 const initialScenes: Record<string, SceneViewModel> = {};
-                (queue.scenes ?? []).forEach((s) => {
-                  initialScenes[s.scene_id] = {
-                    id: s.scene_id,
-                    title: s.title,
-                    claim_refs: s.claim_refs,
+                const queueScenes = Array.isArray(data.scenes) ? data.scenes : [];
+                queueScenes.forEach(scene => {
+                  if (!scene || typeof scene !== 'object') return;
+                  const sceneItem = scene as SceneQueueItem;
+                  if (!sceneItem.scene_id) return;
+                  initialScenes[sceneItem.scene_id] = {
+                    id: sceneItem.scene_id,
+                    title: sceneItem.title,
+                    claim_refs: sceneItem.claim_refs,
                     text: '',
                     status: 'queued'
                   };
-                  fullTextBuffer.current[s.scene_id] = s.narration_focus || ''; 
+                  fullTextBuffer.current[sceneItem.scene_id] = sceneItem.narration_focus || '';
                 });
                 setScenes(initialScenes);
+              } else if (currentEvent === 'script_pack_ready') {
+                const rawPack = data.script_pack;
+                if (rawPack && typeof rawPack === 'object') {
+                  setScriptPack(rawPack as ScriptPackPayload);
+                }
               } else if (currentEvent === 'scene_start') {
-                const payload = data as { scene_id: string; title?: string; claim_refs?: string[] };
-                fullTextBuffer.current[payload.scene_id] = ''; // Clear placeholder
-                updateSceneMetadata(payload.scene_id, { title: payload.title, claim_refs: payload.claim_refs, status: 'generating' });
+                const sceneId = typeof data.scene_id === 'string' ? data.scene_id : '';
+                if (!sceneId) continue;
+                fullTextBuffer.current[sceneId] = '';
+                updateSceneMetadata(sceneId, {
+                  title: typeof data.title === 'string' ? data.title : undefined,
+                  claim_refs: asStringArray(data.claim_refs),
+                  status: 'generating'
+                });
               } else if (currentEvent === 'story_text_delta') {
-                const payload = data as { scene_id: string; delta?: string };
-                fullTextBuffer.current[payload.scene_id] = (fullTextBuffer.current[payload.scene_id] || '') + (payload.delta || '');
+                const sceneId = typeof data.scene_id === 'string' ? data.scene_id : '';
+                if (!sceneId) continue;
+                const delta = typeof data.delta === 'string' ? data.delta : '';
+                fullTextBuffer.current[sceneId] = (fullTextBuffer.current[sceneId] || '') + delta;
               } else if (currentEvent === 'diagram_ready') {
-                const payload = data as { scene_id: string; url?: string };
-                updateSceneMetadata(payload.scene_id, { imageUrl: payload.url });
+                const sceneId = typeof data.scene_id === 'string' ? data.scene_id : '';
+                if (!sceneId) continue;
+                updateSceneMetadata(sceneId, { imageUrl: typeof data.url === 'string' ? data.url : undefined });
               } else if (currentEvent === 'audio_ready') {
-                const payload = data as { scene_id: string; url?: string };
-                updateSceneMetadata(payload.scene_id, { audioUrl: payload.url });
+                const sceneId = typeof data.scene_id === 'string' ? data.scene_id : '';
+                if (!sceneId) continue;
+                updateSceneMetadata(sceneId, { audioUrl: typeof data.url === 'string' ? data.url : undefined });
+              } else if (currentEvent === 'qa_status') {
+                const qa = data as unknown as SceneQaPayload;
+                if (!qa.scene_id) continue;
+                updateSceneMetadata(qa.scene_id, {
+                  qa_status: qa.status,
+                  qa_reasons: Array.isArray(qa.reasons) ? qa.reasons : [],
+                  qa_score: typeof qa.score === 'number' ? qa.score : undefined,
+                  qa_word_count: typeof qa.word_count === 'number' ? qa.word_count : undefined,
+                  status: qa.status === 'FAIL' ? 'qa-failed' : 'generating',
+                });
+              } else if (currentEvent === 'qa_retry') {
+                const sceneId = typeof data.scene_id === 'string' ? data.scene_id : '';
+                if (!sceneId) continue;
+                setScenes(prev => {
+                  const existing = prev[sceneId] ?? { id: sceneId, text: '', status: 'queued' };
+                  return {
+                    ...prev,
+                    [sceneId]: {
+                      ...existing,
+                      status: 'retrying',
+                      auto_retry_count: (existing.auto_retry_count ?? 0) + 1,
+                    },
+                  };
+                });
+              } else if (currentEvent === 'scene_retry_reset') {
+                const sceneId = typeof data.scene_id === 'string' ? data.scene_id : '';
+                if (!sceneId) continue;
+                fullTextBuffer.current[sceneId] = '';
+                updateSceneMetadata(sceneId, {
+                  text: '',
+                  imageUrl: undefined,
+                  audioUrl: undefined,
+                  status: 'generating',
+                });
               } else if (currentEvent === 'scene_done') {
-                const payload = data as { scene_id: string };
-                updateSceneMetadata(payload.scene_id, { status: 'ready' });
+                const sceneId = typeof data.scene_id === 'string' ? data.scene_id : '';
+                if (!sceneId) continue;
+                const qaStatus = typeof data.qa_status === 'string' ? data.qa_status : '';
+                const autoRetries = typeof data.auto_retries === 'number' ? data.auto_retries : undefined;
+                updateSceneMetadata(sceneId, {
+                  status: qaStatus === 'FAIL' ? 'qa-failed' : 'ready',
+                  auto_retry_count: autoRetries,
+                });
               } else if (currentEvent === 'final_bundle_ready') {
                 setIsGenerating(false);
               } else if (currentEvent === 'error') {
-                const payload = data as { error?: string };
-                setGenerationError(payload.error || 'Generation failed.');
+                setGenerationError(typeof data.error === 'string' ? data.error : 'Generation failed.');
                 setIsGenerating(false);
               }
             } catch (e) {
@@ -583,7 +681,7 @@ export default function AdvancedStudio() {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-200 rounded-md p-8">
+                  <div className="flex-1 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-300 rounded-md p-8">
                     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mb-4 opacity-50"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><line x1="10" x2="8" y1="9" y2="9"/></svg>
                     <p className="text-center font-medium">Awaiting source material...</p>
                     <p className="text-center text-sm mt-1">Paste a document and click Extract to see the signal JSON.</p>
@@ -604,6 +702,22 @@ export default function AdvancedStudio() {
             </div>
           )}
 
+          {scriptPack && (
+            <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
+              <CardHeader>
+                <CardTitle className="text-slate-900">3. Script Pack</CardTitle>
+                <CardDescription className="text-slate-600">
+                  Planner output with continuity refs and acceptance checks before scene generation.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="bg-slate-900 text-slate-50 p-4 rounded-md overflow-auto max-h-[420px] text-xs font-mono">
+                  <pre>{JSON.stringify(scriptPack, null, 2)}</pre>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           {Object.values(scenes).length > 0 && (
             <h2 className="text-2xl font-bold tracking-tight text-slate-100 mb-6">Generated Explainer</h2>
           )}
@@ -621,6 +735,11 @@ export default function AdvancedStudio() {
                 onRegenerate={handleRegenerate}
                 claimRefs={scene.claim_refs}
                 status={scene.status}
+                qaStatus={scene.qa_status}
+                qaReasons={scene.qa_reasons}
+                qaScore={scene.qa_score}
+                qaWordCount={scene.qa_word_count}
+                autoRetryCount={scene.auto_retry_count}
                 audioStatus={isGenerating && !scene.audioUrl ? "Generating..." : "Ready"} 
               />
             ))}

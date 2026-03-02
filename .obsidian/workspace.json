@@ -62,6 +62,20 @@
               "icon": "lucide-file",
               "title": "Live Director Console"
             }
+          },
+          {
+            "id": "980e6a1a41fb66a6",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "ExplainFlow Architecture.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "ExplainFlow Architecture"
+            }
           }
         ],
         "currentTab": 3
@@ -229,30 +243,33 @@
   },
   "active": "bc610e46fc79877f",
   "lastOpenFiles": [
-    "api/test_advanced_lab.py",
-    "api/probe_quota.py",
-    "api/app/static/assets/advanced_audio_scene-5_1772367739275.mp3",
-    "api/app/static/assets/advanced_interleaved_scene-5_1772367739273.png",
-    "api/app/static/assets/advanced_audio_scene-4_1772367709521.mp3",
-    "api/app/static/assets/advanced_interleaved_scene-4_1772367709519.png",
-    "api/app/static/assets/advanced_audio_scene-3_1772367683481.mp3",
-    "api/app/static/assets/advanced_interleaved_scene-3_1772367683479.png",
-    "api/app/static/assets/advanced_audio_scene-2_1772367653709.mp3",
-    "api/app/static/assets/advanced_interleaved_scene-2_1772367653700.png",
-    "api/app/static/assets/advanced_audio_scene-1_1772367627258.mp3",
-    "api/app/static/assets/advanced_interleaved_scene-1_1772367627246.png",
-    "api/app/static/assets/advanced_audio_scene-5_1772366841688.mp3",
-    "api/app/static/assets/advanced_interleaved_scene-5_1772366841686.png",
-    "api/app/static/assets/advanced_audio_scene-4_1772366804843.mp3",
-    "api/app/static/assets/advanced_interleaved_scene-4_1772366804839.png",
-    "api/app/static/assets/advanced_audio_scene-3_1772366770273.mp3",
-    "api/app/static/assets/advanced_interleaved_scene-3_1772366770267.png",
-    "api/app/static/assets/advanced_audio_scene-2_1772366741696.mp3",
-    "api/app/static/assets/advanced_interleaved_scene-2_1772366741693.png",
-    "api/app/static/assets/advanced_interleaved_scene-1_1772366711709.png",
+    "api/app/static/assets/advanced_audio_scene-6_1772400456811.mp3",
+    "api/app/static/assets/advanced_interleaved_scene-6_1772400456805.png",
+    "api/app/static/assets/regen_audio_scene-3_1772400437913.mp3",
+    "api/app/static/assets/regen_scene-3_1772400437911.png",
+    "api/app/static/assets/advanced_audio_scene-5_1772400430409.mp3",
+    "api/app/static/assets/advanced_interleaved_scene-5_1772400430405.png",
+    "api/app/static/assets/advanced_audio_scene-4_1772400397409.mp3",
+    "api/app/static/assets/advanced_interleaved_scene-4_1772400397406.png",
+    "api/app/static/assets/advanced_audio_scene-3_1772400368599.mp3",
+    "api/app/static/assets/advanced_interleaved_scene-3_1772400368597.png",
+    "api/app/static/assets/advanced_audio_scene-2_1772400340900.mp3",
+    "api/app/static/assets/advanced_interleaved_scene-2_1772400340898.png",
+    "api/app/static/assets/advanced_audio_scene-1_1772400312710.mp3",
+    "api/app/static/assets/advanced_interleaved_scene-1_1772400312688.png",
+    "ExplainFlow Architecture.md",
+    "Live Director Console.md",
+    "web/public/humanity/vitruvian.jpg",
+    "web/public/humanity/mandelbrot.jpg",
+    "web/public/humanity/mandelbrot.svg",
+    "api/app/static/assets/advanced_audio_scene-7_1772391740161.mp3",
+    "api/app/static/assets/advanced_audio_scene-6_1772391710637.mp3",
+    "api/app/static/assets/advanced_audio_scene-5_1772391680420.mp3",
+    "api/app/static/assets/advanced_audio_scene-4_1772391650671.mp3",
+    "docs/humanity-canon.md",
+    "docs/collage-sources.md",
     "GEMINI.md",
     "48-Hour Plan (Creative Storyteller, brand-aligned).md",
-    "Live Director Console.md",
     "Clean way to think about it for ExplainFlow.md",
     "web/node_modules/@radix-ui/react-slider/README.md",
     "web/node_modules/@radix-ui/react-progress/node_modules/@radix-ui/react-context/README.md",
@@ -271,9 +288,6 @@
     "web/node_modules/@radix-ui/react-tooltip/README.md",
     "web/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-slot/README.md",
     "web/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-primitive/README.md",
-    "web/node_modules/@radix-ui/react-tabs/README.md",
-    "web/node_modules/@radix-ui/react-slider/node_modules/@radix-ui/react-slot/README.md",
-    "web/node_modules/@radix-ui/react-slider/node_modules/@radix-ui/react-primitive/README.md",
-    "web/node_modules/@radix-ui/react-switch/node_modules/@radix-ui/react-slot/README.md"
+    "web/node_modules/@radix-ui/react-tabs/README.md"
   ]
 }

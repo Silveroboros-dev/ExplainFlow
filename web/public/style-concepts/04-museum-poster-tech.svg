@@ -1,0 +1,40 @@
+<svg width="1920" height="1080" viewBox="0 0 1920 1080" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1920" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#111318"/>
+      <stop offset="0.65" stop-color="#181B22"/>
+      <stop offset="1" stop-color="#1D2028"/>
+    </linearGradient>
+    <linearGradient id="warm" x1="200" y1="180" x2="1500" y2="920" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#D6744B" stop-opacity="0.34"/>
+      <stop offset="1" stop-color="#D8A36A" stop-opacity="0.08"/>
+    </linearGradient>
+    <pattern id="grain" x="0" y="0" width="70" height="70" patternUnits="userSpaceOnUse">
+      <circle cx="6" cy="8" r="1" fill="#FFF0D7" fill-opacity="0.05"/>
+      <circle cx="28" cy="34" r="1" fill="#FFF0D7" fill-opacity="0.04"/>
+      <circle cx="62" cy="18" r="1" fill="#FFF0D7" fill-opacity="0.03"/>
+      <circle cx="44" cy="59" r="1" fill="#FFF0D7" fill-opacity="0.04"/>
+    </pattern>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <rect width="1920" height="1080" fill="url(#grain)"/>
+
+  <rect x="130" y="130" width="760" height="760" fill="#E7DFCF" fill-opacity="0.06" stroke="#E7DFCF" stroke-opacity="0.24" stroke-width="2"/>
+  <rect x="760" y="240" width="980" height="680" fill="#A8B2C6" fill-opacity="0.05" stroke="#A8B2C6" stroke-opacity="0.22" stroke-width="2"/>
+  <circle cx="620" cy="360" r="210" fill="url(#warm)"/>
+  <circle cx="1450" cy="770" r="270" fill="#6A788F" fill-opacity="0.09"/>
+
+  <path d="M220 900L910 210" stroke="#D07A52" stroke-opacity="0.45" stroke-width="4"/>
+  <path d="M760 920L1650 320" stroke="#8897B0" stroke-opacity="0.35" stroke-width="3"/>
+
+  <g opacity="0.18" font-family="Inter, Arial, sans-serif" font-weight="800">
+    <text x="180" y="430" fill="#EFE5D3" font-size="190" letter-spacing="0.02em">FLOW</text>
+    <text x="830" y="780" fill="#D0D8E6" font-size="180" letter-spacing="0.06em">SIGNAL</text>
+  </g>
+
+  <g>
+    <rect x="140" y="84" width="278" height="44" rx="22" fill="#252220" stroke="#B38962" stroke-opacity="0.5"/>
+    <text x="166" y="112" fill="#F1D5B8" font-family="Inter, Arial, sans-serif" font-size="16" letter-spacing="0.08em">Museum Poster Tech</text>
+  </g>
+</svg>

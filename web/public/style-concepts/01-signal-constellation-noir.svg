@@ -1,0 +1,71 @@
+<svg width="1920" height="1080" viewBox="0 0 1920 1080" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1920" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#05070D"/>
+      <stop offset="0.5" stop-color="#0B1323"/>
+      <stop offset="1" stop-color="#10182C"/>
+    </linearGradient>
+    <radialGradient id="g1" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(450 280) rotate(16) scale(540 360)">
+      <stop stop-color="#2ED5FF" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#2ED5FF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="g2" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1500 250) rotate(192) scale(520 350)">
+      <stop stop-color="#4B7BFF" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#4B7BFF" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="g3" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(980 840) rotate(90) scale(500 320)">
+      <stop stop-color="#F39B45" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#F39B45" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="dots" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1" fill="#C8D3F8" fill-opacity="0.11"/>
+    </pattern>
+    <filter id="glow" x="-200" y="-200" width="2320" height="1480" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <rect width="1920" height="1080" fill="url(#g1)"/>
+  <rect width="1920" height="1080" fill="url(#g2)"/>
+  <rect width="1920" height="1080" fill="url(#g3)"/>
+  <rect width="1920" height="1080" fill="url(#dots)"/>
+
+  <g stroke="#7FE6FF" stroke-opacity="0.24" stroke-width="1.4" filter="url(#glow)">
+    <path d="M210 230L420 190L660 260L890 180L1140 260L1420 220L1670 300"/>
+    <path d="M180 520L420 470L620 550L860 500L1110 570L1320 500L1600 580"/>
+    <path d="M260 830L500 760L760 860L980 790L1240 860L1470 810L1730 880"/>
+    <path d="M420 190L420 470L500 760"/>
+    <path d="M660 260L620 550L760 860"/>
+    <path d="M890 180L860 500L980 790"/>
+    <path d="M1140 260L1110 570L1240 860"/>
+    <path d="M1420 220L1320 500L1470 810"/>
+  </g>
+
+  <g filter="url(#glow)">
+    <circle cx="420" cy="190" r="7" fill="#8DE9FF"/>
+    <circle cx="660" cy="260" r="6" fill="#8DE9FF"/>
+    <circle cx="890" cy="180" r="8" fill="#98B5FF"/>
+    <circle cx="1140" cy="260" r="6" fill="#8DE9FF"/>
+    <circle cx="1420" cy="220" r="7" fill="#98B5FF"/>
+    <circle cx="420" cy="470" r="8" fill="#8DE9FF"/>
+    <circle cx="620" cy="550" r="7" fill="#8DE9FF"/>
+    <circle cx="860" cy="500" r="9" fill="#C2D1FF"/>
+    <circle cx="1110" cy="570" r="7" fill="#8DE9FF"/>
+    <circle cx="1320" cy="500" r="7" fill="#98B5FF"/>
+    <circle cx="500" cy="760" r="8" fill="#8DE9FF"/>
+    <circle cx="760" cy="860" r="7" fill="#8DE9FF"/>
+    <circle cx="980" cy="790" r="10" fill="#FFD19A"/>
+    <circle cx="1240" cy="860" r="7" fill="#8DE9FF"/>
+    <circle cx="1470" cy="810" r="8" fill="#98B5FF"/>
+  </g>
+
+  <g opacity="0.7">
+    <rect x="118" y="110" width="260" height="44" rx="22" fill="#0E1B35" stroke="#35589D" stroke-opacity="0.42"/>
+    <text x="148" y="138" fill="#B2C7FF" font-family="Inter, Arial, sans-serif" font-size="16" letter-spacing="0.08em">Signal Constellation Noir</text>
+  </g>
+</svg>

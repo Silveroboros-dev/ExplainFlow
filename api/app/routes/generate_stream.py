@@ -3,6 +3,7 @@ import json
 import re
 import time
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Request
 from google import genai
@@ -37,10 +38,208 @@ class ScenePlanSchema(BaseModel):
     title: str = Field(description="The title of the scene")
     narration_focus: str = Field(description="Instructions on what the narration should focus on for this scene")
     visual_prompt: str = Field(description="A detailed image prompt for the scene visual. It must specify subject, style, composition, and color direction. Keep image text-free.")
-    claim_refs: list[str] = Field(default=[], description="List of claim IDs (e.g., 'c1', 'c2') that this scene covers")
+    claim_refs: list[str] = Field(default_factory=list, description="List of claim IDs (e.g., 'c1', 'c2') that this scene covers")
 
 class OutlineSchema(BaseModel):
     scenes: list[ScenePlanSchema]
+
+
+class ScriptPackScene(BaseModel):
+    scene_id: str
+    title: str
+    scene_goal: str
+    narration_focus: str
+    visual_prompt: str
+    claim_refs: list[str] = Field(default_factory=list)
+    continuity_refs: list[str] = Field(default_factory=list)
+    acceptance_checks: list[str] = Field(default_factory=list)
+
+
+class ScriptPack(BaseModel):
+    plan_id: str
+    plan_summary: str
+    audience_descriptor: str
+    scene_count: int
+    scenes: list[ScriptPackScene]
+
+
+def _extract_anchor_terms(text: str, limit: int = 4) -> list[str]:
+    if not text:
+        return []
+    stopwords = {
+        "about",
+        "across",
+        "after",
+        "again",
+        "also",
+        "being",
+        "between",
+        "clear",
+        "detail",
+        "explain",
+        "focus",
+        "further",
+        "have",
+        "into",
+        "just",
+        "make",
+        "more",
+        "only",
+        "point",
+        "scene",
+        "should",
+        "that",
+        "their",
+        "there",
+        "these",
+        "this",
+        "with",
+    }
+    tokens = re.findall(r"[a-zA-Z][a-zA-Z0-9-]{3,}", text.lower())
+    anchors: list[str] = []
+    for token in tokens:
+        if token in stopwords:
+            continue
+        if token not in anchors:
+            anchors.append(token)
+        if len(anchors) >= limit:
+            break
+    return anchors
+
+
+def _compile_script_pack(
+    *,
+    plan_id: str,
+    thesis: str,
+    audience_descriptor: str,
+    scenes: list[ScenePlanSchema],
+    must_include: list[str],
+    must_avoid: list[str],
+) -> ScriptPack:
+    script_scenes: list[ScriptPackScene] = []
+    for idx, scene in enumerate(scenes, start=1):
+        scene_id = _normalized_scene_id(scene.scene_id, idx)
+        title = (scene.title or f"Scene {idx}").strip()
+        narration_focus = (scene.narration_focus or f"Explain core point {idx} about {thesis}.").strip()
+        visual_prompt = (scene.visual_prompt or "Generate a precise educational visual that supports the narration.").strip()
+        claim_refs = [ref for ref in scene.claim_refs if isinstance(ref, str) and ref.strip()]
+
+        continuity_refs: list[str] = []
+        if idx > 1:
+            continuity_refs.append(f"Maintain continuity from scene-{idx - 1}.")
+        continuity_refs.extend(_extract_anchor_terms(title, limit=2))
+
+        acceptance_checks = [
+            "Narration is between 50 and 100 words.",
+            "Narration is plain spoken prose with no labels or markdown.",
+            "Visual and narration align with the stated scene focus.",
+        ]
+        if must_include:
+            acceptance_checks.append(f"Prefer these audience cues: {', '.join(must_include[:4])}.")
+        if must_avoid:
+            acceptance_checks.append(f"Avoid these patterns: {', '.join(must_avoid[:4])}.")
+
+        script_scenes.append(
+            ScriptPackScene(
+                scene_id=scene_id,
+                title=title,
+                scene_goal=f"Deliver scene {idx} of the explainer clearly for {audience_descriptor}.",
+                narration_focus=narration_focus,
+                visual_prompt=visual_prompt,
+                claim_refs=claim_refs,
+                continuity_refs=continuity_refs,
+                acceptance_checks=acceptance_checks,
+            )
+        )
+
+    return ScriptPack(
+        plan_id=plan_id,
+        plan_summary=f"{thesis} explained through {len(script_scenes)} cohesive scenes.",
+        audience_descriptor=audience_descriptor,
+        scene_count=len(script_scenes),
+        scenes=script_scenes,
+    )
+
+
+def _evaluate_scene_quality(
+    *,
+    scene: ScriptPackScene,
+    generated_text: str,
+    image_url: str,
+    must_include: list[str],
+    must_avoid: list[str],
+    continuity_hints: list[str],
+    attempt: int,
+) -> dict[str, Any]:
+    text = (generated_text or "").strip()
+    text_lower = text.lower()
+    words = re.findall(r"\b[\w'-]+\b", text)
+    word_count = len(words)
+    reasons: list[str] = []
+    score = 1.0
+
+    hard_fail = False
+    if not text:
+        hard_fail = True
+        reasons.append("No narration text returned.")
+    if not image_url:
+        hard_fail = True
+        reasons.append("No inline image returned.")
+
+    if word_count and (word_count < 45 or word_count > 125):
+        score -= 0.3
+        reasons.append(f"Narration length is {word_count} words (target 50-100).")
+
+    focus_tokens = _extract_anchor_terms(scene.narration_focus, limit=5)
+    if focus_tokens and not any(token in text_lower for token in focus_tokens):
+        score -= 0.2
+        reasons.append("Narration drifted away from the planned scene focus.")
+
+    missing_include = [
+        term for term in must_include
+        if term and term.lower() not in text_lower
+    ]
+    if missing_include:
+        score -= min(0.25, 0.1 * len(missing_include))
+        reasons.append(f"Missing must_include cues: {', '.join(missing_include[:3])}.")
+
+    violated_avoid = [
+        term for term in must_avoid
+        if term and term.lower() in text_lower
+    ]
+    if violated_avoid:
+        score -= min(0.3, 0.15 * len(violated_avoid))
+        reasons.append(f"Contains must_avoid cues: {', '.join(violated_avoid[:3])}.")
+
+    continuity_terms = [
+        token
+        for hint in continuity_hints
+        for token in _extract_anchor_terms(hint, limit=1)
+    ]
+    if continuity_terms and not any(token in text_lower for token in continuity_terms[:3]):
+        score -= 0.1
+        reasons.append("Weak continuity tie to earlier scenes.")
+
+    score = max(0.0, min(score, 1.0))
+    if hard_fail or score < 0.55:
+        status = "FAIL"
+    elif score < 0.8:
+        status = "WARN"
+    else:
+        status = "PASS"
+
+    if not reasons and status == "PASS":
+        reasons = ["Scene passed quality checks."]
+
+    return {
+        "scene_id": scene.scene_id,
+        "status": status,
+        "score": round(score, 2),
+        "reasons": reasons,
+        "attempt": attempt,
+        "word_count": word_count,
+    }
+
 
 def _load_schema_text(filename: str) -> str:
     return (SCHEMAS_DIR / filename).read_text(encoding="utf-8")
@@ -126,13 +325,30 @@ async def _stream_scene_assets(
     visual_prompt: str,
     image_prefix: str,
     audio_prefix: str,
+    continuity_hints: list[str] | None = None,
+    extra_constraints: list[str] | None = None,
+    result_collector: dict[str, Any] | None = None,
 ):
+    continuity_block = ""
+    if continuity_hints:
+        continuity_lines = "\n".join(f"- {hint}" for hint in continuity_hints[-4:])
+        continuity_block = f"CONTINUITY MEMORY:\n{continuity_lines}\n\n"
+
+    constraints_block = ""
+    if extra_constraints:
+        constraints_lines = "\n".join(f"- {constraint}" for constraint in extra_constraints[:8])
+        constraints_block = f"ACCEPTANCE CHECKS:\n{constraints_lines}\n\n"
+
     scene_prompt = (
         f"CONTEXT: We are building an explainer about '{topic}' for a {audience} audience.\n"
+        f"TONE: {tone}\n"
         f"SCENE TITLE: {scene_title}\n"
         f"SCENE FOCUS: {narration_focus}\n"
         f"VISUAL STYLE: {style_guide}\n"
         f"VISUAL DIRECTION: {visual_prompt}\n\n"
+        f"{continuity_block}"
+        f"{constraints_block}"
+        "CRITICAL CONTINUITY RULE: All generated images MUST share an identical, cohesive visual style. Maintain the exact same art direction as previous scenes.\n\n"
         "TASK: Generate the content for THIS SCENE ONLY.\n"
         "STRICT OUTPUT RULES:\n"
         "1) Start immediately with the spoken narration text. NO labels like 'Narration:', NO scene numbers, NO markdown titles.\n"
@@ -142,6 +358,8 @@ async def _stream_scene_assets(
     )
 
     current_scene_text = ""
+    latest_image_url = ""
+    audio_url = ""
     max_attempts = 3
     for attempt in range(max_attempts):
         emitted_any_chunk = False
@@ -181,6 +399,7 @@ async def _stream_scene_assets(
                             image_bytes=binary,
                             prefix=image_prefix,
                         )
+                        latest_image_url = image_url
                         yield {
                             "event": "diagram_ready",
                             "data": json.dumps({"scene_id": scene_id, "url": image_url}),
@@ -219,6 +438,12 @@ async def _stream_scene_assets(
                 "event": "audio_ready",
                 "data": json.dumps({"scene_id": scene_id, "url": audio_url}),
             }
+
+    if result_collector is not None:
+        result_collector["text"] = current_scene_text
+        result_collector["image_url"] = latest_image_url
+        result_collector["audio_url"] = audio_url
+        result_collector["word_count"] = len(re.findall(r"\b[\w'-]+\b", current_scene_text))
 
 def _normalized_scene_id(raw: str, default_idx: int) -> str:
     candidate = (raw or "").strip()
@@ -341,7 +566,6 @@ async def generate_stream_advanced(request: Request):
     async def event_generator():
         thesis = content_signal.get("thesis", {}).get("one_liner", "A generic topic")
         beats = content_signal.get("narrative_beats", [])
-        visual_candidates = content_signal.get("visual_candidates", [])
         audience_descriptor = f"{audience_persona} ({audience_level})"
         if domain_context:
             audience_descriptor += f" in {domain_context}"
@@ -393,30 +617,144 @@ async def generate_stream_advanced(request: Request):
                     visual_prompt="A relevant educational visual.",
                     claim_refs=[]
                 ))
-            
+
+            script_pack = _compile_script_pack(
+                plan_id=f"script-pack-{int(time.time())}",
+                thesis=thesis,
+                audience_descriptor=audience_descriptor,
+                scenes=scenes,
+                must_include=must_include,
+                must_avoid=must_avoid,
+            )
+            yield {"event": "script_pack_ready", "data": json.dumps({"script_pack": script_pack.model_dump()})}
+
             # 1. Emit the entire queue instantly
             yield {
                 "event": "scene_queue_ready",
-                "data": json.dumps({"scenes": [s.model_dump() for s in scenes], "optimized_count": len(scenes)})
+                "data": json.dumps(
+                    {
+                        "scenes": [
+                            {
+                                "scene_id": s.scene_id,
+                                "title": s.title,
+                                "claim_refs": s.claim_refs,
+                                "narration_focus": s.narration_focus,
+                            }
+                            for s in script_pack.scenes
+                        ],
+                        "optimized_count": script_pack.scene_count,
+                    }
+                ),
             }
-            
-            for idx, scene in enumerate(scenes, start=1):
-                if await request.is_disconnected(): return
+
+            continuity_memory: list[str] = []
+
+            for scene in script_pack.scenes:
+                if await request.is_disconnected():
+                    return
                 scene_id = scene.scene_id
                 title = scene.title
-                narration_focus = scene.narration_focus
 
                 # Emit scene_start with the traced claim_refs
-                yield {"event": "scene_start", "data": json.dumps({"scene_id": scene_id, "title": title, "claim_refs": scene.claim_refs})}
+                yield {
+                    "event": "scene_start",
+                    "data": json.dumps(
+                        {
+                            "scene_id": scene_id,
+                            "title": title,
+                            "claim_refs": scene.claim_refs,
+                        }
+                    ),
+                }
 
-                async for event in _stream_scene_assets(
-                    request=request, scene_id=scene_id, topic=thesis, audience=audience_descriptor, tone=goal, scene_title=title,
-                    narration_focus=narration_focus, style_guide=style_guide, visual_prompt=scene.visual_prompt,
-                    image_prefix="advanced_interleaved", audio_prefix="advanced_audio"
-                ):
-                    yield event
+                retries_used = 0
+                qa_result: dict[str, Any] = {
+                    "scene_id": scene_id,
+                    "status": "WARN",
+                    "score": 0.0,
+                    "reasons": ["Quality checks not executed."],
+                    "attempt": 1,
+                    "word_count": 0,
+                }
+                scene_result: dict[str, Any] = {}
+                retry_reason_constraints: list[str] = []
 
-                yield {"event": "scene_done", "data": json.dumps({"scene_id": scene_id})}
+                for attempt_index in range(2):
+                    scene_result = {}
+                    active_continuity = (continuity_memory[-3:] + scene.continuity_refs)[-6:]
+                    attempt_constraints = list(scene.acceptance_checks)
+                    if retry_reason_constraints:
+                        attempt_constraints.append(
+                            f"Fix these QA issues from previous attempt: {'; '.join(retry_reason_constraints[:3])}."
+                        )
+
+                    if attempt_index > 0:
+                        yield {
+                            "event": "scene_retry_reset",
+                            "data": json.dumps({"scene_id": scene_id, "retry_index": attempt_index}),
+                        }
+
+                    async for event in _stream_scene_assets(
+                        request=request,
+                        scene_id=scene_id,
+                        topic=thesis,
+                        audience=audience_descriptor,
+                        tone=goal,
+                        scene_title=title,
+                        narration_focus=scene.narration_focus,
+                        style_guide=style_guide,
+                        visual_prompt=scene.visual_prompt,
+                        image_prefix="advanced_interleaved",
+                        audio_prefix="advanced_audio",
+                        continuity_hints=active_continuity,
+                        extra_constraints=attempt_constraints,
+                        result_collector=scene_result,
+                    ):
+                        yield event
+
+                    qa_result = _evaluate_scene_quality(
+                        scene=scene,
+                        generated_text=str(scene_result.get("text", "")),
+                        image_url=str(scene_result.get("image_url", "")),
+                        must_include=must_include,
+                        must_avoid=must_avoid,
+                        continuity_hints=active_continuity,
+                        attempt=attempt_index + 1,
+                    )
+                    yield {"event": "qa_status", "data": json.dumps(qa_result)}
+
+                    if qa_result["status"] != "FAIL":
+                        break
+
+                    if attempt_index == 0:
+                        retry_reason_constraints = list(qa_result["reasons"])
+                        retries_used = 1
+                        yield {
+                            "event": "qa_retry",
+                            "data": json.dumps(
+                                {
+                                    "scene_id": scene_id,
+                                    "retry_index": 1,
+                                    "reasons": qa_result["reasons"],
+                                }
+                            ),
+                        }
+
+                continuity_tokens = _extract_anchor_terms(str(scene_result.get("text", "")), limit=4)
+                if continuity_tokens:
+                    continuity_memory.append(f"{title}: {', '.join(continuity_tokens)}")
+                    continuity_memory = continuity_memory[-8:]
+
+                yield {
+                    "event": "scene_done",
+                    "data": json.dumps(
+                        {
+                            "scene_id": scene_id,
+                            "qa_status": qa_result["status"],
+                            "auto_retries": retries_used,
+                        }
+                    ),
+                }
 
             yield {"event": "final_bundle_ready", "data": json.dumps({"run_id": "advanced-run-123", "bundle_url": "/api/final-bundle/advanced-run-123"})}
         except Exception as exc:

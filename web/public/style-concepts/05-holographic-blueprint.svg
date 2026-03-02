@@ -1,0 +1,57 @@
+<svg width="1920" height="1080" viewBox="0 0 1920 1080" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1920" y2="1080" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#030711"/>
+      <stop offset="0.5" stop-color="#081224"/>
+      <stop offset="1" stop-color="#0C1930"/>
+    </linearGradient>
+    <pattern id="grid" x="0" y="0" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M48 0H0V48" stroke="#5DA7FF" stroke-opacity="0.16"/>
+    </pattern>
+    <linearGradient id="scan" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#66D8FF" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#66D8FF" stop-opacity="0.26"/>
+      <stop offset="1" stop-color="#66D8FF" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="glow" x="-220" y="-220" width="2360" height="1520">
+      <feGaussianBlur stdDeviation="4"/>
+    </filter>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <rect width="1920" height="1080" fill="url(#grid)"/>
+
+  <g filter="url(#glow)">
+    <circle cx="960" cy="540" r="360" stroke="#71D8FF" stroke-opacity="0.34" stroke-width="2"/>
+    <circle cx="960" cy="540" r="270" stroke="#71D8FF" stroke-opacity="0.28" stroke-width="2"/>
+    <circle cx="960" cy="540" r="180" stroke="#71D8FF" stroke-opacity="0.24" stroke-width="2"/>
+    <circle cx="960" cy="540" r="90" stroke="#71D8FF" stroke-opacity="0.28" stroke-width="2"/>
+  </g>
+
+  <g stroke="#8AB7FF" stroke-opacity="0.3" stroke-width="2" fill="none">
+    <path d="M250 540H1670"/>
+    <path d="M960 130V950"/>
+    <path d="M480 220L1440 860"/>
+    <path d="M1440 220L480 860"/>
+  </g>
+
+  <g stroke="#6EE7F9" stroke-opacity="0.5" stroke-width="3" fill="none" stroke-linecap="round">
+    <path d="M960 180A360 360 0 0 1 1265 365"/>
+    <path d="M660 730A360 360 0 0 1 420 540"/>
+    <path d="M1120 790A270 270 0 0 1 760 760"/>
+  </g>
+
+  <g>
+    <circle cx="960" cy="540" r="12" fill="#D4EEFF"/>
+    <circle cx="1265" cy="365" r="8" fill="#97DCFF"/>
+    <circle cx="420" cy="540" r="8" fill="#97DCFF"/>
+    <circle cx="760" cy="760" r="7" fill="#97DCFF"/>
+  </g>
+
+  <rect x="0" y="430" width="1920" height="180" fill="url(#scan)"/>
+
+  <g>
+    <rect x="132" y="86" width="294" height="44" rx="22" fill="#10213E" stroke="#4F8DDD" stroke-opacity="0.7"/>
+    <text x="160" y="114" fill="#B4DCFF" font-family="Inter, Arial, sans-serif" font-size="16" letter-spacing="0.07em">Holographic Blueprint</text>
+  </g>
+</svg>

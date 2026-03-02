@@ -1,4 +1,4 @@
-
+wtf 
 Project angle: **“Explainer Director”** that turns one idea into a mixed-media explainer stream (text + schema/diagram image + voiceover + captions).
 - Add a first-run intake step for visual/style controls.
 - Split pipeline into:

@@ -3,164 +3,109 @@
 ## Goal
 
 Show a clear story in 4 minutes:
-1. Familiar prompt-first UX.
-2. Live interleaved mixed-media generation.
-3. Advanced control for long inputs and style profile.
-4. Scene-level regeneration without full rerun.
-5. Google Cloud deployment proof.
+1. High-impact, modern visual branding.
+2. Live multimodal streaming (The "Nano Banana" Pattern).
+3. Advanced Studio for professional persona-driven generation.
+4. Directed iteration through scene-level regeneration.
+5. Deployed GCP architecture proof.
 
 ## Demo Setup (Before Recording)
 
-- Keep one reliable sample prompt ready.
-- Keep one long-document sample ready.
-- Pre-prepare one scene regeneration instruction.
-- Keep Cloud Run and Cloud Storage console tabs open for proof.
-- Disable noisy notifications.
+- **Landing Page**: Start at the root URL showing the new Mandelbrot/Vitruvian UI.
+- **Sample Document**: Have a long technical brief (e.g., "The Future of Quantum Computing") ready to paste.
+- **API URL**: Ensure `NEXT_PUBLIC_API_URL` is pointing to the Cloud Run endpoint.
+- **Tabs**: Keep Cloud Run console and the Architecture diagram ready.
 
 ## Live Script With Timing
 
-### 0:00 - 0:20 | Hook
+### 0:00 - 0:25 | Hook & The "Director" Concept
 
 **On screen**
-- ExplainFlow home screen.
+- ExplainFlow landing page (Mandelbrot/Vitruvian theme).
 
 **Say**
-- "ExplainFlow turns one idea into a complete visual narrative pipeline, from signal extraction to final media bundle."
-- "The core value is live, controllable explainers instead of one-shot static outputs."
+- "This is ExplainFlow. It’s an 'Explainer Director' that turns complex ideas into visual narrative pipelines."
+- "Unlike one-shot static generators, we stream interleaved text, cinematic visuals, and professional audio in real-time."
 
-### 0:20 - 0:45 | Quick Generate (Conventional UX)
+### 0:25 - 0:50 | Quick Generate (Conventional UX)
 
 **On screen**
-- Use Quick Generate form:
-  - Topic
-  - Audience
-  - Tone
-  - Duration
+- Click `Start Creating` -> Quick Generate.
+- Enter Topic: "How Photosynthesis powers life".
 - Click `Generate`.
 
 **Say**
-- "First, you can use ExplainFlow like a standard prompt tool."
-- "I enter a topic, audience, tone, and duration, then generate."
+- "For rapid ideas, the Quick Generate path turns a simple prompt into a 4-scene storyboard instantly."
+- "You'll see the scenes queue up immediately as the backend begins the orchestration."
 
-### 0:45 - 1:35 | Live Interleaved Output
-
-**On screen**
-- Timeline events appear:
-  - `scene_start`
-  - `story_text_delta`
-  - `diagram_ready`
-  - `audio_ready`
-  - `caption_ready`
-- Scene cards update live.
-
-**Say**
-- "Output streams live as scenes, not as a single final blob."
-- "Each scene combines narration, visuals, and captions in one flow."
-
-### 1:35 - 2:05 | Advanced Studio (Long Input + Style Controls)
+### 0:50 - 1:30 | Multimodal Interleaving (The "Nano Banana")
 
 **On screen**
-- Switch to Advanced Studio.
-- Paste long document.
-- Set render profile:
-  - visual mode
-  - style descriptors
-  - fidelity
-  - density
-  - palette
-  - audience level
+- Watch Scene 1 and 2 stream:
+  - Text deltas appear first.
+  - High-quality 3D visual appears *immediately* after.
+  - Audio badge turns green.
 
 **Say**
-- "For deeper use cases, I can provide long source content and explicit style controls."
-- "This makes output quality and taste predictable across different users."
+- "Notice the interleaving. Using our 'Nano Banana' orchestration, the model emits narration text followed immediately by high-fidelity image bytes."
+- "There’s no waiting for a massive final blob; the story comes to life scene by scene."
 
-### 2:05 - 2:35 | Signal Extraction Layer
+### 1:30 - 2:15 | Advanced Studio (The "Lab" Logic)
 
 **On screen**
-- Show `content_signal` preview:
-  - thesis
-  - key claims
-  - visual candidates
-  - narrative beats
+- Navigate to `Advanced Studio`.
+- Paste the Quantum Computing document.
+- **Crucial**: Set Persona to "Venture Capitalist" and Taste Bar to "Very High".
+- Add Must Include: "ROI timelines".
+- Add Must Avoid: "Complex math".
+- Click `Extract Content Signal`.
 
 **Say**
-- "ExplainFlow extracts a style-agnostic signal pack once."
-- "That lets us iterate output style without reprocessing the full document every time."
+- "In the Advanced Studio, we take control. I can ingest long-form technical documents and define a strict Persona."
+- "We’re targeting a Venture Capitalist here, with a 'Very High' taste bar for visuals and a rule to avoid complex math."
 
-### 2:35 - 3:00 | Scene-Level Regenerate (Key Differentiator)
+### 2:15 - 2:45 | Signal Extraction & Traceability
 
 **On screen**
-- Select one scene.
-- Apply targeted instruction, for example:
-  - "Make this scene diagram-first and simpler for beginners."
-- Trigger `Regenerate Scene`.
+- Show the JSON Signal (Thesis, Claims, Beats).
+- Point to `claim_refs` in the JSON.
 
 **Say**
-- "Now I regenerate only one scene with a specific instruction."
-- "This is directed iteration, not a full rerun."
+- "Before generating a single pixel, we extract a style-agnostic Content Signal."
+- "This locks the logic, claims, and narrative beats, ensuring every scene is grounded in the source document."
 
-### 3:00 - 3:25 | Source Traceability + Final Bundle
+### 2:45 - 3:15 | Directed Iteration (Regenerate)
 
 **On screen**
-- Open trace panel for a scene:
-  - claim refs
-  - supporting snippet
-- Open final bundle:
-  - transcript
-  - scene manifest
-  - caption pack
+- Click `Generate Explainer Stream`.
+- Select one generated scene and click `Regenerate`.
+- Input: "Make the visual more abstract and focus on the software moat."
 
 **Say**
-- "Each scene is traceable to extracted claims."
-- "Final output is packaged for presentation and publishing."
+- "If a scene isn't perfect, I don't rerun the whole app. I use directed iteration."
+- "I’m asking the Director to refine just this scene’s visual focus while maintaining the overall narrative consistency."
 
-### 3:25 - 3:50 | Architecture + Cloud Proof
+### 3:15 - 3:45 | Architecture & GCP Proof
 
 **On screen**
-- Show architecture slide briefly.
-- Switch to Cloud Run service and Cloud Storage bucket.
+- Show the Architecture diagram (Mermaid).
+- Switch to Cloud Run console showing the `explainflow-api` service.
 
 **Say**
-- "The app uses a Next.js frontend and a FastAPI streaming backend on Cloud Run."
-- "Generated assets are stored in Cloud Storage."
+- "Under the hood, we’re running a FastAPI backend on Google Cloud Run with a 300-second timeout to handle high-tier multimodal 'thinking' time."
+- "This architecture is built for the high-latency requirements of the most advanced Gemini models."
 
-### 3:50 - 4:00 | Close
+### 3:45 - 4:00 | Close
 
 **On screen**
-- Return to product screen with final bundle.
+- Return to the beautiful Mandelbrot Landing Page.
 
 **Say**
-- "ExplainFlow makes complex ideas easier to communicate through controllable, live visual storytelling."
+- "ExplainFlow turns the complexity of AI into a repeatable, controllable director’s console. Communicate your ideas clearly, one scene at a time."
 
-## Backup Lines (If Latency Hits)
+## Recommended Inputs for Demo
 
-- "I’ll switch to the prepared sample run to keep the flow concise."
-- "The same pipeline is running, this is just a cached input for recording reliability."
-
-## Recommended Demo Inputs
-
-### Quick Generate Input
-
-- Topic: "How retrieval-augmented generation improves enterprise search"
-- Audience: "Product managers"
-- Tone: "Clear and practical"
-- Duration: "90 seconds"
-
-### Advanced Studio Input
-
-- A 2-4 page technical brief with multiple claims and examples.
-- Render profile example:
-  - visual mode: `hybrid`
-  - style: `clean`, `editorial`, `high-contrast`
-  - fidelity: `high`
-  - density: `standard`
-  - palette: brand/custom
-  - audience level: `intermediate`
-
-## Recording Checklist
-
-1. Keep total runtime under 4:00.
-2. Avoid dead air while events stream.
-3. Keep architecture section under 25 seconds.
-4. Keep cloud proof visible and explicit.
-5. Record one backup take immediately after primary take.
+- **Topic**: "The mechanics of Starship orbital launch"
+- **Advanced Persona**: "Aerospace Investor"
+- **Taste Bar**: "Very High"
+- **Visual Mode**: `Hybrid` (to show 3D + UI overlays)
