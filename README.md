@@ -15,6 +15,10 @@ The product focus is not just generation. It is directed generation:
 - regenerate a single scene without rerunning everything,
 - and trace each scene back to extracted claims.
 
+Pipeline versions in this repo:
+- **Legacy (v1):** extraction -> planning -> per-scene interleaved generation.
+- **Current (v2):** adds script-pack compilation, continuity memory, and automatic QA with one retry on failure.
+
 ## How to Run Locally
 
 To run this system on another machine, follow these steps to start both the Python backend and the Next.js frontend.
@@ -68,7 +72,7 @@ npm run dev
 In one run, a user can:
 1. Provide input (prompt or long document).
 2. Define a render profile (audience/style/fidelity/density/palette).
-3. Click generate and watch a 6-scene interleaved stream.
+3. Click generate and watch a dynamic-scene interleaved stream (typically 3-8 scenes).
 4. Regenerate one specific scene with a targeted edit instruction.
 5. Export a final explainer bundle.
 
@@ -115,6 +119,23 @@ In one run, a user can:
 - Scene manifest (image/audio assets)
 - Social caption pack
 
+8. Script Pack Transparency (Current v2)
+- Planner output is compiled into a runtime `script_pack` with:
+  - normalized scene IDs
+  - scene goals
+  - continuity references
+  - acceptance checks
+- The `script_pack` is streamed to UI before generation completes.
+
+9. Scene QA Gate + Auto Retry (Current v2)
+- Each scene is auto-evaluated (`PASS`, `WARN`, `FAIL`) on:
+  - narration/image presence
+  - length/structure
+  - focus alignment
+  - `must_include` / `must_avoid` alignment
+  - continuity strength
+- One automatic retry is executed on first `FAIL`, then surfaced in UI.
+
 ## Data Contracts
 
 Canonical schemas live in:
@@ -126,7 +147,9 @@ Matching typed models:
 - TypeScript: `/Users/rk/Desktop/Gemini Live Agent Challenge/schemas/schema-types.ts`
 - Pydantic: `/Users/rk/Desktop/Gemini Live Agent Challenge/schemas/schema-models.py`
 
-## Architecture (MVP)
+## Architecture (Compare)
+
+### Legacy (v1)
 
 - Frontend: Next.js timeline UI (Quick Generate + Advanced Studio).
 - Backend: FastAPI with SSE streaming endpoints.
@@ -135,10 +158,31 @@ Matching typed models:
 
 Core pipeline:
 1. `extract_signal` -> `content_signal`
-2. combine `content_signal + render_profile` -> `scene_plan`
-3. stream interleaved scene events
+2. combine `content_signal + render_profile` -> outline/scene plan
+3. per-scene interleaved generation stream
 4. optional scene-level regenerate
 5. publish final bundle
+
+### Current (v2)
+
+- Adds `script_pack` compile stage between planning and generation.
+- Adds continuity memory carried across scenes.
+- Adds scene-level QA gate and one automatic retry on first failure.
+- Adds UI transparency for `script_pack` and QA outcomes.
+
+Core pipeline:
+1. `extract_signal` -> `content_signal`
+2. `content_signal + render_profile` -> dynamic scene planning
+3. compile `script_pack` (`continuity_refs`, `acceptance_checks`)
+4. scene loop:
+   - interleaved generation (text + image)
+   - audio generation
+   - QA evaluate (`PASS|WARN|FAIL`)
+   - one retry if first attempt is `FAIL`
+5. scene done + final bundle
+
+For detailed diagrams and sequence flows, see:
+- `/Users/rk/Desktop/Gemini Live Agent Challenge/docs/architecture.md`
 
 ## Implementation Plan (48 Hours)
 
@@ -183,6 +227,31 @@ Core pipeline:
 - Add sample input fallback, retries, and graceful loading states.
 - Record <= 4 minute demo plus backup take.
 
+## SSE Event Contract (Compare)
+
+### Legacy (v1)
+- `scene_queue_ready`
+- `scene_start`
+- `story_text_delta`
+- `diagram_ready`
+- `audio_ready`
+- `scene_done`
+- `final_bundle_ready`
+
+### Current (v2)
+- `script_pack_ready`
+- `scene_queue_ready`
+- `scene_start`
+- `story_text_delta`
+- `diagram_ready`
+- `audio_ready`
+- `qa_status`
+- `qa_retry`
+- `scene_retry_reset`
+- `scene_done`
+- `final_bundle_ready`
+- `error`
+
 ## Demo Flow (4 Minutes)
 
 1. Quick Generate: enter prompt and click generate.
@@ -199,7 +268,9 @@ Keep for MVP:
 - scene-level regeneration
 - source traceability
 
-Defer post-MVP:
-- full video compositor
-- multi-agent orchestration
-- auth/collaboration
+## TODO / Post-MVP Enhancements
+
+- [ ] **Credit Protection**: Add a simple "Access PIN" field on the landing page (e.g., `GEMINI_JUDGE_2026`) to gate the "Generate" button and prevent unauthorized API usage during the public demo phase.
+- [ ] **Multimodal Ingestion**: Support PDF and Markdown uploads. Use Gemini's multimodal vision to extract logic directly from charts and diagrams in the source material, ensuring "Visual-to-Visual" continuity in the generated output.
+- [ ] **Full Video Compositor**: Automate the stitching of generated images and audio into a final `.mp4` file.
+- [ ] **Multi-Agent Orchestration**: Introduce specialized agents for fact-checking and automated visual critique.
