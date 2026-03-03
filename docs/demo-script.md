@@ -4,9 +4,9 @@
 
 Show a clear story in 4 minutes:
 1. High-impact, modern visual branding.
-2. Live multimodal streaming (The "Nano Banana" Pattern).
-3. Advanced Studio for professional persona-driven generation.
-4. Directed iteration through scene-level regeneration.
+2. Advanced Studio: Script Pack Compilation & Review.
+3. Live multimodal streaming (The "Nano Banana" Pattern).
+4. **Auto QA Gate & Correction Retries** (The "Self-Healing Director").
 5. Deployed GCP architecture proof.
 
 ## Demo Setup (Before Recording)
@@ -25,65 +25,43 @@ Show a clear story in 4 minutes:
 
 **Say**
 - "This is ExplainFlow. It’s an 'Explainer Director' that turns complex ideas into visual narrative pipelines."
-- "Unlike one-shot static generators, we stream interleaved text, cinematic visuals, and professional audio in real-time."
+- "Unlike one-shot static generators, we use a specialized 'Director's Console' to plan, generate, and self-correct mixed-media stories."
 
-### 0:25 - 0:50 | Quick Generate (Conventional UX)
-
-**On screen**
-- Click `Start Creating` -> Quick Generate.
-- Enter Topic: "How Photosynthesis powers life".
-- Click `Generate`.
-
-**Say**
-- "For rapid ideas, the Quick Generate path turns a simple prompt into a 4-scene storyboard instantly."
-- "You'll see the scenes queue up immediately as the backend begins the orchestration."
-
-### 0:50 - 1:30 | Multimodal Interleaving (The "Nano Banana")
-
-**On screen**
-- Watch Scene 1 and 2 stream:
-  - Text deltas appear first.
-  - High-quality 3D visual appears *immediately* after.
-  - Audio badge turns green.
-
-**Say**
-- "Notice the interleaving. Using our 'Nano Banana' orchestration, the model emits narration text followed immediately by high-fidelity image bytes."
-- "There’s no waiting for a massive final blob; the story comes to life scene by scene."
-
-### 1:30 - 2:15 | Advanced Studio (The "Lab" Logic)
+### 0:25 - 1:15 | Advanced Studio: Script Pack & Approval
 
 **On screen**
 - Navigate to `Advanced Studio`.
 - Paste the Quantum Computing document.
-- **Crucial**: Set Persona to "Venture Capitalist" and Taste Bar to "Very High".
-- Add Must Include: "ROI timelines".
-- Add Must Avoid: "Complex math".
+- Set Persona: "Venture Capitalist", Taste Bar: "Very High".
 - Click `Extract Content Signal`.
+- Click `Generate Script Pack`.
+- **Scroll through the Script Pack JSON.**
 
 **Say**
-- "In the Advanced Studio, we take control. I can ingest long-form technical documents and define a strict Persona."
-- "We’re targeting a Venture Capitalist here, with a 'Very High' taste bar for visuals and a rule to avoid complex math."
+- "In the Advanced Studio, we don't just generate; we plan. After extracting the core claims, we generate a Script Pack."
+- "This is our production manifest. It includes continuity references and strict 'acceptance checks' for every scene, ensuring the story remains coherent from start to finish."
 
-### 2:15 - 2:45 | Signal Extraction & Traceability
-
-**On screen**
-- Show the JSON Signal (Thesis, Claims, Beats).
-- Point to `claim_refs` in the JSON.
-
-**Say**
-- "Before generating a single pixel, we extract a style-agnostic Content Signal."
-- "This locks the logic, claims, and narrative beats, ensuring every scene is grounded in the source document."
-
-### 2:45 - 3:15 | Directed Iteration (Regenerate)
+### 1:15 - 2:30 | Multimodal Interleaving & Auto QA
 
 **On screen**
 - Click `Generate Explainer Stream`.
+- Watch Scene 1 stream (Text then Image).
+- **Point out the "QA PASS" badge when it appears.**
+- If a "QA FAIL" or "Correction Retry" occurs, highlight it immediately.
+
+**Say**
+- "Notice the interleaving. Our 'Nano Banana' orchestration emits narration followed immediately by high-fidelity image bytes."
+- "But watch the badges. Every scene passes through an 'Auto QA Gate'. The system scores its own output against our acceptance checks."
+- "If the director detects narrative drift or technical errors, it automatically triggers a 'Correction Retry' to fix the scene in real-time."
+
+### 2:30 - 3:15 | Directed Iteration (Regenerate)
+
+**On screen**
 - Select one generated scene and click `Regenerate`.
 - Input: "Make the visual more abstract and focus on the software moat."
 
 **Say**
-- "If a scene isn't perfect, I don't rerun the whole app. I use directed iteration."
-- "I’m asking the Director to refine just this scene’s visual focus while maintaining the overall narrative consistency."
+- "Even with Auto QA, we keep the human in the loop. I can use directed iteration to refine specific scenes while the rest of the production remains locked and stable."
 
 ### 3:15 - 3:45 | Architecture & GCP Proof
 
@@ -92,8 +70,7 @@ Show a clear story in 4 minutes:
 - Switch to Cloud Run console showing the `explainflow-api` service.
 
 **Say**
-- "Under the hood, we’re running a FastAPI backend on Google Cloud Run with a 300-second timeout to handle high-tier multimodal 'thinking' time."
-- "This architecture is built for the high-latency requirements of the most advanced Gemini models."
+- "This self-healing pipeline runs on FastAPI and Google Cloud Run. We've optimized the request timeouts to 300 seconds to handle the deep 'thinking' time required for high-tier multimodal generation."
 
 ### 3:45 - 4:00 | Close
 
@@ -101,7 +78,7 @@ Show a clear story in 4 minutes:
 - Return to the beautiful Mandelbrot Landing Page.
 
 **Say**
-- "ExplainFlow turns the complexity of AI into a repeatable, controllable director’s console. Communicate your ideas clearly, one scene at a time."
+- "ExplainFlow turns AI into a repeatable, controllable production studio. It’s not just a storyteller; it’s a director. Thank you."
 
 ## Recommended Inputs for Demo
 
