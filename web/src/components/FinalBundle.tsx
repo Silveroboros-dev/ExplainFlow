@@ -11,11 +11,33 @@ interface FinalBundleProps {
 }
 
 export default function FinalBundle({ scenes, topic }: FinalBundleProps) {
-  const sceneList = Object.values(scenes);
+  const sceneOrder = (id: string): number => {
+    const match = id.match(/scene-(\d+)/i);
+    return match ? Number.parseInt(match[1], 10) : Number.MAX_SAFE_INTEGER;
+  };
+
+  const formatFallbackTitle = (id: string): string => (
+    id
+      .replace(/[_-]/g, ' ')
+      .replace(/\b\w/g, (char) => char.toUpperCase())
+  );
+
+  const sceneList = Object.values(scenes).sort((a, b) => {
+    const bySceneNumber = sceneOrder(a.id) - sceneOrder(b.id);
+    if (bySceneNumber !== 0) return bySceneNumber;
+    return a.id.localeCompare(b.id);
+  });
   
   if (sceneList.length === 0) return null;
 
-  const fullTranscript = sceneList.map((s, i) => `Scene ${i + 1}: ${s.title || ''}\n\n${s.text}`).join('\\n\\n---\\n\\n');
+  const fullTranscript = sceneList
+    .map((scene, index) => {
+      const sceneTitle = (scene.title && scene.title.trim())
+        ? scene.title
+        : formatFallbackTitle(scene.id);
+      return `Scene ${index + 1}: ${sceneTitle}\n\n${scene.text}`;
+    })
+    .join('\n\n---\n\n');
 
   const handleDownloadTranscript = () => {
     const blob = new Blob([fullTranscript], { type: 'text/plain' });
@@ -75,12 +97,18 @@ export default function FinalBundle({ scenes, topic }: FinalBundleProps) {
                 <div className="space-y-6">
                   {sceneList.map((scene, i) => (
                     <div key={scene.id} className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
-                      <h4 className="font-semibold text-slate-900 mb-3">Scene {i + 1}: {scene.title}</h4>
+                      <h4 className="font-semibold text-slate-900 mb-3">
+                        Scene {i + 1}: {(scene.title && scene.title.trim()) ? scene.title : formatFallbackTitle(scene.id)}
+                      </h4>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {scene.imageUrl && (
                           <div className="flex flex-col gap-2">
                             <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Visual Asset</span>
-                            <img src={scene.imageUrl} alt={`Scene ${i + 1}`} className="rounded-md w-full object-cover aspect-video border border-slate-100" />
+                            <img
+                              src={scene.imageUrl}
+                              alt={`Scene ${i + 1}`}
+                              className="rounded-md w-full aspect-video object-contain bg-slate-100 border border-slate-100"
+                            />
                             <a href={scene.imageUrl} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline flex items-center">
                               Open Original <Download className="ml-1 h-3 w-3" />
                             </a>

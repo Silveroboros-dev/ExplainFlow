@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2 } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { Loader2, Mic, Square } from "lucide-react";
 
 type QuickScene = {
   id: string;
@@ -26,6 +27,33 @@ type SceneQueueItem = {
   narration_focus?: string;
 };
 
+type BrowserSpeechResult = {
+  transcript: string;
+};
+
+type BrowserSpeechRecognitionEvent = {
+  results: ArrayLike<ArrayLike<BrowserSpeechResult>>;
+};
+
+type BrowserSpeechRecognitionErrorEvent = {
+  error: string;
+};
+
+type BrowserSpeechRecognition = {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onstart: (() => void) | null;
+  onend: (() => void) | null;
+  onresult: ((event: BrowserSpeechRecognitionEvent) => void) | null;
+  onerror: ((event: BrowserSpeechRecognitionErrorEvent) => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+type BrowserSpeechRecognitionCtor = new () => BrowserSpeechRecognition;
+
 export default function QuickGenerate() {
   const [topic, setTopic] = useState('');
   const [audience, setAudience] = useState('Beginner');
@@ -33,9 +61,14 @@ export default function QuickGenerate() {
   const [tone, setTone] = useState('');
   const [visualMode, setVisualMode] = useState('illustration');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationStatus, setGenerationStatus] = useState('');
+  const [generationError, setGenerationError] = useState('');
+  const [isListening, setIsListening] = useState(false);
+  const [speechError, setSpeechError] = useState('');
   const [scenes, setScenes] = useState<Record<string, QuickScene>>({});
 
   const fullTextBuffer = React.useRef<Record<string, string>>({});
+  const recognitionRef = React.useRef<BrowserSpeechRecognition | null>(null);
 
   const updateSceneMetadata = (
     sceneId: string,
@@ -81,11 +114,79 @@ export default function QuickGenerate() {
     return () => cancelAnimationFrame(animationFrameId);
   }, []);
 
+  React.useEffect(() => {
+    return () => {
+      recognitionRef.current?.stop();
+      recognitionRef.current = null;
+    };
+  }, []);
+
+  const toggleVoiceInput = () => {
+    if (typeof window === 'undefined') return;
+
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      return;
+    }
+
+    setSpeechError('');
+    const speechWindow = window as unknown as {
+      SpeechRecognition?: BrowserSpeechRecognitionCtor;
+      webkitSpeechRecognition?: BrowserSpeechRecognitionCtor;
+    };
+    const SpeechRecognitionCtor = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) {
+      setSpeechError('Voice input is not supported in this browser.');
+      return;
+    }
+
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = 'en-US';
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      setGenerationStatus('Listening for prompt...');
+    };
+
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results)
+        .map(result => result[0]?.transcript ?? '')
+        .join(' ')
+        .trim();
+      if (transcript) {
+        setTopic(transcript);
+      }
+      setGenerationStatus('');
+    };
+
+    recognition.onerror = (event) => {
+      setSpeechError(`Voice input failed: ${event.error}`);
+      setGenerationStatus('');
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+      setGenerationStatus(prev => (prev === 'Listening for prompt...' ? '' : prev));
+    };
+
+    recognitionRef.current = recognition;
+    recognition.start();
+  };
+
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!topic) return;
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
     
     setIsGenerating(true);
+    setGenerationError('');
+    setGenerationStatus('Connecting to generation stream...');
     setScenes({}); 
     fullTextBuffer.current = {};
     
@@ -110,12 +211,22 @@ export default function QuickGenerate() {
         fullTextBuffer.current[s.scene_id] = s.narration_focus || ''; 
       });
       setScenes(initialScenes);
+      setGenerationStatus('Scene queue ready. Starting generation...');
     });
 
     eventSource.addEventListener('scene_start', (event) => {
       const data = JSON.parse(event.data);
       fullTextBuffer.current[data.scene_id] = ''; 
-      updateSceneMetadata(data.scene_id, { title: data.title, status: 'generating' });
+      const patch: Partial<{ id: string, title?: string, imageUrl?: string, audioUrl?: string, status: string }> = {
+        status: 'generating',
+      };
+      if (typeof data.title === 'string' && data.title.trim()) {
+        patch.title = data.title;
+      }
+      updateSceneMetadata(data.scene_id, patch);
+      if (data.title) {
+        setGenerationStatus(`Generating ${data.title}...`);
+      }
     });
 
     eventSource.addEventListener('story_text_delta', (event) => {
@@ -138,13 +249,37 @@ export default function QuickGenerate() {
       updateSceneMetadata(data.scene_id, { status: 'ready' });
     });
 
+    eventSource.addEventListener('status', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data) as { message?: string };
+        if (data.message) {
+          setGenerationStatus(data.message);
+        }
+      } catch {
+        // Ignore malformed status chunks.
+      }
+    });
+
     eventSource.addEventListener('final_bundle_ready', () => {
       eventSource.close();
+      setGenerationStatus('Generation complete.');
       setIsGenerating(false);
     });
 
-    eventSource.addEventListener('error', (event) => {
+    eventSource.addEventListener('error', (event: Event) => {
       console.error("SSE Error:", event);
+      const messageEvent = event as MessageEvent;
+      let serverError = '';
+      if (typeof messageEvent.data === 'string' && messageEvent.data.trim()) {
+        try {
+          const parsed = JSON.parse(messageEvent.data) as { error?: string };
+          serverError = parsed.error || '';
+        } catch {
+          serverError = '';
+        }
+      }
+      setGenerationError(serverError || 'Stream connection interrupted.');
+      setGenerationStatus('');
       eventSource.close();
       setIsGenerating(false);
     });
@@ -157,6 +292,12 @@ export default function QuickGenerate() {
       [sceneId]: { ...prev[sceneId], text: '', imageUrl: newImageUrl, audioUrl: newAudioUrl, status: 'ready' }
     }));
   };
+
+  const totalSceneCount = Object.keys(scenes).length;
+  const completedSceneCount = Object.values(scenes).filter(scene => scene.status === 'ready').length;
+  const generationProgress = totalSceneCount > 0
+    ? Math.round((completedSceneCount / totalSceneCount) * 100)
+    : (isGenerating ? 8 : 0);
 
   return (
     <main className="relative isolate min-h-screen overflow-x-clip bg-[#05070f] py-12 px-4 sm:px-6 lg:px-8 font-sans text-slate-100">
@@ -199,15 +340,42 @@ export default function QuickGenerate() {
             <form onSubmit={handleGenerate} className="high-contrast-form-labels grid grid-cols-1 md:grid-cols-2 gap-6">
               
               <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="topic">Topic</Label>
-                <Input 
-                  id="topic" 
-                  value={topic} 
-                  onChange={e => setTopic(e.target.value)} 
-                  placeholder="e.g. How does photosynthesis work?" 
-                  required 
+                <div className="flex items-center justify-between gap-3">
+                  <Label htmlFor="topic">Prompt</Label>
+                  <Button
+                    type="button"
+                    variant={isListening ? "default" : "outline"}
+                    size="sm"
+                    onClick={toggleVoiceInput}
+                    className="shrink-0"
+                  >
+                    {isListening ? (
+                      <>
+                        <Square className="mr-2 h-4 w-4" />
+                        Stop Listening
+                      </>
+                    ) : (
+                      <>
+                        <Mic className="mr-2 h-4 w-4" />
+                        Voice Prompt
+                      </>
+                    )}
+                  </Button>
+                </div>
+                <Input
+                  id="topic"
+                  value={topic}
+                  onChange={e => setTopic(e.target.value)}
+                  placeholder="Create visuals that explain [topic/problem] for [audience], tone [tone]."
+                  required
                   className="text-lg bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
                 />
+                <p className="text-xs text-slate-600">
+                  Example: &quot;Create visuals explaining model context protocols for PMs, tone practical and clear.&quot;
+                </p>
+                {speechError && (
+                  <p className="text-xs text-rose-600 font-medium">{speechError}</p>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -276,6 +444,25 @@ export default function QuickGenerate() {
                   )}
                 </Button>
               </div>
+
+              {(generationStatus || generationError || isGenerating) && (
+                <div className="md:col-span-2 space-y-2">
+                  {generationStatus && (
+                    <p className="text-sm text-blue-700 font-medium">{generationStatus}</p>
+                  )}
+                  {isGenerating && (
+                    <>
+                      <Progress value={generationProgress} className="h-2 bg-blue-100 [&>*]:bg-blue-500" />
+                      <p className="text-xs text-slate-600">
+                        Scenes complete: {completedSceneCount}/{Math.max(totalSceneCount, completedSceneCount)}
+                      </p>
+                    </>
+                  )}
+                  {generationError && (
+                    <p className="text-sm text-rose-600 font-medium">{generationError}</p>
+                  )}
+                </div>
+              )}
             </form>
           </CardContent>
         </Card>

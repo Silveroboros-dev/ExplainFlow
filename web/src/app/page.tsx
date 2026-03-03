@@ -184,7 +184,7 @@ export default function Home() {
       </main>
 
       <footer className="relative z-10 border-t border-slate-500/30 py-12 text-center text-slate-300">
-        <p>© 2026 ExplainFlow • Built for the Gemini API Developer Competition</p>
+        <p>© 2026 ExplainFlow • Built for Gemini Live Agent Challenge</p>
         <p className="mt-2 text-xs text-slate-400">Collage includes Wikimedia Commons assets + custom formula art.</p>
       </footer>
     </div>

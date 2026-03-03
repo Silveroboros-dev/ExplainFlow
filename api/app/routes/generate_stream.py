@@ -527,6 +527,13 @@ async def generate_stream_advanced(request: Request):
     body = await request.json()
     content_signal = body.get("content_signal", {})
     render_profile = body.get("render_profile", {})
+    approved_script_pack_raw = body.get("script_pack")
+    approved_script_pack: ScriptPack | None = None
+    if isinstance(approved_script_pack_raw, dict):
+        try:
+            approved_script_pack = ScriptPack.model_validate(approved_script_pack_raw)
+        except Exception:
+            approved_script_pack = None
     
     # Extract exact settings from the strict Render Profile
     visual_mode = render_profile.get("visual_mode", "illustration")
@@ -596,36 +603,43 @@ async def generate_stream_advanced(request: Request):
             planning_prompt += f" Must avoid: {', '.join(must_avoid)}."
         
         try:
-            plan_response = await client.aio.models.generate_content(
-                model='gemini-3.1-pro-preview',
-                contents=planning_prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.7,
-                    response_mime_type="application/json",
-                    response_schema=OutlineSchema,
+            if approved_script_pack is not None and approved_script_pack.scenes:
+                script_pack = approved_script_pack
+                yield {
+                    "event": "status",
+                    "data": json.dumps({"message": "Using approved script pack. Starting scene generation..."}),
+                }
+            else:
+                plan_response = await client.aio.models.generate_content(
+                    model='gemini-3.1-pro-preview',
+                    contents=planning_prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.7,
+                        response_mime_type="application/json",
+                        response_schema=OutlineSchema,
+                    )
                 )
-            )
-            parsed_outline = OutlineSchema.model_validate_json(plan_response.text)
-            scenes = parsed_outline.scenes[:scene_count]
-            
-            while len(scenes) < scene_count:
-                idx = len(scenes) + 1
-                scenes.append(ScenePlanSchema(
-                    scene_id=f"scene-{idx}",
-                    title=f"Explainer Point {idx}",
-                    narration_focus=f"Further detail on {thesis}.",
-                    visual_prompt="A relevant educational visual.",
-                    claim_refs=[]
-                ))
+                parsed_outline = OutlineSchema.model_validate_json(plan_response.text)
+                scenes = parsed_outline.scenes[:scene_count]
+                
+                while len(scenes) < scene_count:
+                    idx = len(scenes) + 1
+                    scenes.append(ScenePlanSchema(
+                        scene_id=f"scene-{idx}",
+                        title=f"Explainer Point {idx}",
+                        narration_focus=f"Further detail on {thesis}.",
+                        visual_prompt="A relevant educational visual.",
+                        claim_refs=[]
+                    ))
 
-            script_pack = _compile_script_pack(
-                plan_id=f"script-pack-{int(time.time())}",
-                thesis=thesis,
-                audience_descriptor=audience_descriptor,
-                scenes=scenes,
-                must_include=must_include,
-                must_avoid=must_avoid,
-            )
+                script_pack = _compile_script_pack(
+                    plan_id=f"script-pack-{int(time.time())}",
+                    thesis=thesis,
+                    audience_descriptor=audience_descriptor,
+                    scenes=scenes,
+                    must_include=must_include,
+                    must_avoid=must_avoid,
+                )
             yield {"event": "script_pack_ready", "data": json.dumps({"script_pack": script_pack.model_dump()})}
 
             # 1. Emit the entire queue instantly
@@ -762,6 +776,97 @@ async def generate_stream_advanced(request: Request):
             message = _friendly_quota_error_message() if _is_resource_exhausted(exc) else str(exc)
             yield {"event": "error", "data": json.dumps({"error": message})}
     return EventSourceResponse(event_generator())
+
+
+@router.post("/generate-script-pack-advanced")
+async def generate_script_pack_advanced(request: Request):
+    body = await request.json()
+    content_signal = body.get("content_signal", {})
+    render_profile = body.get("render_profile", {})
+
+    audience_cfg = render_profile.get("audience", {})
+    audience_level = str(audience_cfg.get("level", "beginner")).lower()
+    audience_persona = str(audience_cfg.get("persona", "General audience")).strip()
+    domain_context = str(audience_cfg.get("domain_context", "")).strip()
+    taste_bar = str(audience_cfg.get("taste_bar", "standard")).lower()
+    must_include = [
+        str(item).strip()
+        for item in audience_cfg.get("must_include", [])
+        if isinstance(item, str) and str(item).strip()
+    ][:8]
+    must_avoid = [
+        str(item).strip()
+        for item in audience_cfg.get("must_avoid", [])
+        if isinstance(item, str) and str(item).strip()
+    ][:8]
+
+    thesis = content_signal.get("thesis", {}).get("one_liner", "A generic topic")
+    beats = content_signal.get("narrative_beats", [])
+    audience_descriptor = f"{audience_persona} ({audience_level})"
+    if domain_context:
+        audience_descriptor += f" in {domain_context}"
+
+    output_controls = render_profile.get("output_controls", {})
+    target_duration = output_controls.get("target_duration_sec", 60)
+    density = render_profile.get("density", "standard")
+    sec_per_scene = 10 if density == "detailed" else (18 if density == "simple" else 14)
+
+    import math
+    base_scenes = math.ceil(target_duration / sec_per_scene)
+    claims_count = len(content_signal.get("key_claims", []))
+    if claims_count > 5:
+        base_scenes += 1
+    if audience_level == "beginner":
+        base_scenes -= 1
+    scene_count = max(3, min(base_scenes, 8))
+
+    planning_prompt = (
+        f"Given this core thesis: '{thesis}' and these narrative beats: {json.dumps(beats[:10])}, "
+        f"create a specific {scene_count}-scene storyboard outline for the audience persona '{audience_descriptor}'. "
+        f"Audience taste bar is '{taste_bar}'. Ensure every scene has a descriptive title and a clear narration focus."
+    )
+    if must_include:
+        planning_prompt += f" Must include: {', '.join(must_include)}."
+    if must_avoid:
+        planning_prompt += f" Must avoid: {', '.join(must_avoid)}."
+
+    try:
+        plan_response = await client.aio.models.generate_content(
+            model='gemini-3.1-pro-preview',
+            contents=planning_prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.7,
+                response_mime_type="application/json",
+                response_schema=OutlineSchema,
+            )
+        )
+        parsed_outline = OutlineSchema.model_validate_json(plan_response.text)
+        scenes = parsed_outline.scenes[:scene_count]
+
+        while len(scenes) < scene_count:
+            idx = len(scenes) + 1
+            scenes.append(ScenePlanSchema(
+                scene_id=f"scene-{idx}",
+                title=f"Explainer Point {idx}",
+                narration_focus=f"Further detail on {thesis}.",
+                visual_prompt="A relevant educational visual.",
+                claim_refs=[],
+            ))
+
+        script_pack = _compile_script_pack(
+            plan_id=f"script-pack-{int(time.time())}",
+            thesis=thesis,
+            audience_descriptor=audience_descriptor,
+            scenes=scenes,
+            must_include=must_include,
+            must_avoid=must_avoid,
+        )
+        return {"status": "success", "script_pack": script_pack.model_dump()}
+    except Exception as exc:
+        print(f"Error generating script pack: {exc}")
+        message = _friendly_quota_error_message() if _is_resource_exhausted(exc) else str(exc)
+        return {"status": "error", "message": message}
+
 
 @router.post("/regenerate-scene")
 async def regenerate_scene(payload: RegenerateSceneRequest, request: Request):

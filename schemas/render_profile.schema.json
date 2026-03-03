@@ -62,6 +62,16 @@
       "type": "string",
       "enum": ["diagram", "illustration", "hybrid"]
     },
+    "artifact_type": {
+      "type": "string",
+      "enum": [
+        "storyboard_grid",
+        "technical_infographic",
+        "process_diagram",
+        "comparison_one_pager",
+        "slide_thumbnail"
+      ]
+    },
     "style": {
       "type": "object",
       "additionalProperties": false,

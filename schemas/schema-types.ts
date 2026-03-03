@@ -103,6 +103,12 @@ export type RenderGoal = "teach" | "persuade" | "summarize" | "pitch";
 export type AudienceLevel = "beginner" | "intermediate" | "expert";
 export type TasteBar = "standard" | "high" | "very_high";
 export type VisualMode = "diagram" | "illustration" | "hybrid";
+export type ArtifactType =
+  | "storyboard_grid"
+  | "technical_infographic"
+  | "process_diagram"
+  | "comparison_one_pager"
+  | "slide_thumbnail";
 export type Fidelity = "low" | "medium" | "high";
 export type Density = "simple" | "standard" | "detailed";
 export type PaletteMode = "auto" | "brand" | "custom";
@@ -164,6 +170,7 @@ export interface RenderProfile {
   goal: RenderGoal;
   audience: RenderAudience;
   visual_mode: VisualMode;
+  artifact_type?: ArtifactType;
   style: RenderStyle;
   fidelity: Fidelity;
   density: Density;

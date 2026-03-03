@@ -163,6 +163,13 @@ class RenderProfile(StrictModel):
     goal: Literal["teach", "persuade", "summarize", "pitch"]
     audience: RenderAudience
     visual_mode: Literal["diagram", "illustration", "hybrid"]
+    artifact_type: Literal[
+        "storyboard_grid",
+        "technical_infographic",
+        "process_diagram",
+        "comparison_one_pager",
+        "slide_thumbnail",
+    ] | None = None
     style: RenderStyle
     fidelity: Literal["low", "medium", "high"]
     density: Literal["simple", "standard", "detailed"]
