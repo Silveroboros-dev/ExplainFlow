@@ -3,7 +3,7 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.routes import generate_stream, sessions, assets
+from app.routes import assets, generate_stream, sessions, workflow
 
 from fastapi.staticfiles import StaticFiles
 import os
@@ -27,6 +27,7 @@ app.add_middleware(
 app.include_router(generate_stream.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
 app.include_router(assets.router, prefix="/api")
+app.include_router(workflow.router, prefix="/api")
 
 @app.get("/")
 def read_root():

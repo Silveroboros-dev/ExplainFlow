@@ -271,6 +271,7 @@ Keep for MVP:
 ## TODO / Post-MVP Enhancements
 
 - [ ] **Credit Protection**: Add a simple "Access PIN" field on the landing page (e.g., `GEMINI_JUDGE_2026`) to gate the "Generate" button and prevent unauthorized API usage during the public demo phase.
+- [ ] **Optional HD Upscale Pass (Vertex AI)**: After scene approval, upscale approved images with `imagen-4.0-upscale-preview` (`x2`/`x3`/`x4`) for final-bundle quality without re-generating composition.
 - [ ] **Multimodal Ingestion**: Support PDF and Markdown uploads. Use Gemini's multimodal vision to extract logic directly from charts and diagrams in the source material, ensuring "Visual-to-Visual" continuity in the generated output.
 - [ ] **Full Video Compositor**: Automate the stitching of generated images and audio into a final `.mp4` file.
 - [ ] **Multi-Agent Orchestration**: Introduce specialized agents for fact-checking and automated visual critique.

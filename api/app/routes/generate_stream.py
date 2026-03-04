@@ -12,6 +12,21 @@ from app.services import GeminiStoryAgent
 router = APIRouter()
 agent = GeminiStoryAgent()
 
+ALLOWED_ARTIFACTS = {
+    "thumbnail",
+    "story_cards",
+    "storyboard",
+    "voiceover",
+    "social_caption",
+}
+
+
+def _artifact_scope_from_body(body: dict) -> list[str]:
+    raw_scope = body.get("artifact_scope")
+    if not isinstance(raw_scope, list):
+        return []
+    return [item for item in raw_scope if isinstance(item, str) and item in ALLOWED_ARTIFACTS]
+
 
 @router.post("/extract-signal")
 async def extract_signal(payload: SignalExtractionRequest):
@@ -47,6 +62,7 @@ async def generate_stream_advanced(request: Request):
         content_signal=body.get("content_signal", {}) if isinstance(body.get("content_signal"), dict) else {},
         render_profile=body.get("render_profile", {}) if isinstance(body.get("render_profile"), dict) else {},
         script_pack=body.get("script_pack") if isinstance(body.get("script_pack"), dict) else None,
+        artifact_scope=_artifact_scope_from_body(body),
     )
 
     return EventSourceResponse(
@@ -66,6 +82,7 @@ async def generate_script_pack_advanced(request: Request):
     payload = ScriptPackRequest(
         content_signal=body.get("content_signal", {}) if isinstance(body.get("content_signal"), dict) else {},
         render_profile=body.get("render_profile", {}) if isinstance(body.get("render_profile"), dict) else {},
+        artifact_scope=_artifact_scope_from_body(body),
     )
     return await agent.generate_script_pack_advanced(payload)
 

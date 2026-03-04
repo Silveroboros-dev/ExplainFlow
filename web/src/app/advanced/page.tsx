@@ -40,6 +40,32 @@ const SIGNAL_JSON_PREVIEW = `{
   "signal_quality": { "coverage_score": 0.9, "ambiguity_score": 0.2, "hallucination_risk": 0.1 }
 }`;
 
+const SCRIPT_EXPLAINER_TEXT = [
+  "Building script pack from your locked signal and render profile.",
+  "",
+  "What happens now:",
+  "- Map claims to scenes",
+  "- Build narration focus + visual directives",
+  "- Add continuity hints and acceptance checks",
+  "",
+  "Result:",
+  "- Scene-by-scene script ready for interleaved generation",
+].join("\n");
+
+const SCRIPT_JSON_PREVIEW = `{
+  "plan_id": "script-pack-...",
+  "scene_count": 4,
+  "scenes": [
+    {
+      "scene_id": "scene-1",
+      "title": "...",
+      "narration_focus": "...",
+      "visual_prompt": "...",
+      "claim_refs": ["c1"]
+    }
+  ]
+}`;
+
 type ExtractedSignal = {
   thesis?: { one_liner?: string };
   [key: string]: unknown;
@@ -93,15 +119,23 @@ type ScriptPackPayload = {
   }>;
 };
 
+type WorkflowSnapshot = {
+  workflow_id: string;
+  checkpoint_state: Record<string, string>;
+  join_gate_ready: boolean;
+  ready_for_script_pack: boolean;
+  ready_for_stream: boolean;
+  trace?: unknown;
+};
+
 type AdvancedPanel = 'source' | 'profile' | 'signal' | 'stream' | 'script';
-type ActionDialogStage = 'extract' | 'profile' | 'signal' | 'script' | 'stream';
+type ActionDialogStage = 'extract' | 'profile' | 'script' | 'stream';
 
 export default function AdvancedStudio() {
   const [sourceDoc, setSourceDoc] = useState('');
   const [visualMode, setVisualMode] = useState('illustration');
   const [artifactType, setArtifactType] = useState('storyboard_grid');
-  const [lowKeyPreview, setLowKeyPreview] = useState(true);
-  const [fidelity, setFidelity] = useState('high');
+  const [fidelityPreference, setFidelityPreference] = useState<'preview' | 'high'>('preview');
   const [density, setDensity] = useState('standard');
   const [audienceLevel, setAudienceLevel] = useState('intermediate');
   const [audiencePersona, setAudiencePersona] = useState('Product manager');
@@ -122,11 +156,17 @@ export default function AdvancedStudio() {
   const [generationStatus, setGenerationStatus] = useState('');
   const [typedExplainer, setTypedExplainer] = useState('');
   const [typedPreview, setTypedPreview] = useState('');
+  const [typedScriptExplainer, setTypedScriptExplainer] = useState('');
+  const [typedScriptPreview, setTypedScriptPreview] = useState('');
+  const [scriptPresentationMode, setScriptPresentationMode] = useState<'review' | 'auto'>('auto');
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [isGeneratingScriptPack, setIsGeneratingScriptPack] = useState(false);
+  const [isApplyingProfile, setIsApplyingProfile] = useState(false);
   const [scenes, setScenes] = useState<Record<string, SceneViewModel>>({});
   const [scriptPack, setScriptPack] = useState<ScriptPackPayload | null>(null);
+  const [workflowId, setWorkflowId] = useState<string | null>(null);
+  const [workflowSnapshot, setWorkflowSnapshot] = useState<WorkflowSnapshot | null>(null);
   
   // Ref for the typewriter effect to track full text without causing infinite re-renders
   const fullTextBuffer = React.useRef<Record<string, string>>({});
@@ -134,6 +174,27 @@ export default function AdvancedStudio() {
   const asStringArray = (value: unknown): string[] => (
     Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
   );
+
+  const mapArtifactScope = (selectedArtifactType: string): string[] => {
+    if (selectedArtifactType === 'slide_thumbnail') {
+      return ['thumbnail', 'social_caption'];
+    }
+    if (selectedArtifactType === 'storyboard_grid') {
+      return ['storyboard', 'voiceover', 'social_caption'];
+    }
+    if (selectedArtifactType === 'comparison_one_pager') {
+      return ['story_cards', 'social_caption'];
+    }
+    return ['story_cards', 'voiceover'];
+  };
+
+  const updateWorkflowSnapshot = (snapshot: unknown) => {
+    if (!snapshot || typeof snapshot !== 'object') return;
+    const candidate = snapshot as WorkflowSnapshot;
+    if (!candidate.workflow_id || typeof candidate.workflow_id !== 'string') return;
+    setWorkflowSnapshot(candidate);
+    setWorkflowId(candidate.workflow_id);
+  };
 
   const updateSceneMetadata = (
     sceneId: string,
@@ -149,6 +210,13 @@ export default function AdvancedStudio() {
         }
       };
     });
+  };
+
+  const fetchWorkflowSnapshot = async (workflowIdValue: string): Promise<void> => {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const response = await fetch(`${apiUrl}/api/workflow/${workflowIdValue}`);
+    const snapshot = await response.json();
+    updateWorkflowSnapshot(snapshot);
   };
 
   // Typewriter effect loop
@@ -247,6 +315,40 @@ export default function AdvancedStudio() {
     return () => window.clearInterval(intervalId);
   }, [isExtracting]);
 
+  React.useEffect(() => {
+    const scriptTypingEnabled = isGeneratingScriptPack;
+    if (!scriptTypingEnabled) {
+      setTypedScriptExplainer('');
+      setTypedScriptPreview('');
+      return;
+    }
+
+    setTypedScriptExplainer('');
+    setTypedScriptPreview('');
+
+    const targetDurationMs = 12000;
+    const tickMs = 60;
+    const totalChars = SCRIPT_EXPLAINER_TEXT.length + SCRIPT_JSON_PREVIEW.length;
+    const totalTicks = Math.max(1, Math.ceil(targetDurationMs / tickMs));
+    const charsPerTick = totalChars / totalTicks;
+    let cursor = 0;
+
+    const intervalId = window.setInterval(() => {
+      cursor = Math.min(totalChars, cursor + charsPerTick);
+      const shownChars = Math.floor(cursor);
+      const explainerChars = Math.min(shownChars, SCRIPT_EXPLAINER_TEXT.length);
+      const previewChars = Math.max(0, shownChars - SCRIPT_EXPLAINER_TEXT.length);
+      setTypedScriptExplainer(SCRIPT_EXPLAINER_TEXT.slice(0, explainerChars));
+      setTypedScriptPreview(SCRIPT_JSON_PREVIEW.slice(0, previewChars));
+
+      if (cursor >= totalChars) {
+        window.clearInterval(intervalId);
+      }
+    }, tickMs);
+
+    return () => window.clearInterval(intervalId);
+  }, [isGeneratingScriptPack, scriptPresentationMode]);
+
   const openActionDialog = (stage: ActionDialogStage) => {
     setActionDialogStage(stage);
     setShowAmendHelp(false);
@@ -271,25 +373,55 @@ export default function AdvancedStudio() {
     setGenerationStatus('');
     setScenes({});
     setScriptPack(null);
+    setFidelityPreference('preview');
+    setWorkflowId(null);
+    setWorkflowSnapshot(null);
     fullTextBuffer.current = {};
     
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const response = await fetch(`${apiUrl}/api/extract-signal`, {
+      const startResponse = await fetch(`${apiUrl}/api/workflow/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input_text: sourceDoc })
+        body: JSON.stringify({ source_text: sourceDoc })
       });
-      
+      const startData: {
+        workflow_id?: string;
+        workflow?: WorkflowSnapshot;
+        status?: string;
+      } = await startResponse.json();
+      if (!startResponse.ok || startData.status !== 'success' || !startData.workflow_id) {
+        setError('Unable to initialize workflow.');
+        setSignalStage('error');
+        setExtractProgress(0);
+        return false;
+      }
+      setWorkflowId(startData.workflow_id);
+      if (startData.workflow) {
+        updateWorkflowSnapshot(startData.workflow);
+      }
+
+      const extractResponse = await fetch(`${apiUrl}/api/workflow/${startData.workflow_id}/extract-signal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_text: sourceDoc })
+      });
+
       const data: {
+        workflow_id?: string;
+        workflow?: WorkflowSnapshot;
         status?: string;
         content_signal?: ExtractedSignal;
         message?: string;
-      } = await response.json();
+      } = await extractResponse.json();
+      if (data.workflow) {
+        updateWorkflowSnapshot(data.workflow);
+      }
       if (data.status === 'success') {
         setExtractedSignal(data.content_signal ?? null);
         setSignalStage('ready');
         setExtractProgress(100);
+        setGenerationStatus('Signal extracted. Next: lock artifact scope and render profile.');
         return true;
       } else {
         setError(data.message || 'Extraction failed');
@@ -314,6 +446,10 @@ export default function AdvancedStudio() {
       return;
     }
     setActivePanel('profile');
+    if (!extractedSignal) {
+      void runExtraction();
+      return;
+    }
     openActionDialog('extract');
   };
 
@@ -322,16 +458,21 @@ export default function AdvancedStudio() {
     openActionDialog('profile');
   };
 
-  const handleConfirmSignal = () => {
+  const handleConfirmSignal = async () => {
     if (!extractedSignal) {
       setGenerationStatus('Extract signal first.');
       return;
     }
+    if (!workflowSnapshot?.ready_for_script_pack) {
+      setGenerationStatus('Workflow gate not ready. Lock artifact scope and render profile first.');
+      return;
+    }
     setActivePanel('script');
-    openActionDialog('signal');
+    setGenerationStatus('Signal confirmed. Generating script pack...');
+    await handleGenerateScriptPack(scriptPresentationMode);
   };
 
-  const buildRenderProfilePayload = () => ({
+  const buildRenderProfilePayload = (mode: 'preview' | 'high' = fidelityPreference) => ({
     profile_id: `rp_custom_${Date.now()}`,
     goal: "teach",
     audience: {
@@ -348,11 +489,11 @@ export default function AdvancedStudio() {
     },
     visual_mode: visualMode,
     artifact_type: artifactType,
-    low_key_preview: lowKeyPreview,
+    low_key_preview: true,
     style: {
       descriptors: [visualMode === "illustration" ? "cinematic" : "clean", "modern"]
     },
-    fidelity: fidelity,
+    fidelity: mode === 'high' ? 'high' : 'medium',
     density: density,
     palette: {
       mode: "auto"
@@ -369,30 +510,127 @@ export default function AdvancedStudio() {
     }
   });
 
-  const handleGenerateScriptPack = async () => {
-    if (!extractedSignal) return;
+  const applyProfileToWorkflow = async (mode: 'preview' | 'high' = fidelityPreference): Promise<boolean> => {
+    if (!workflowId) {
+      setGenerationStatus('Start with extraction first so a workflow can be created.');
+      return false;
+    }
 
-    setIsGeneratingScriptPack(true);
+    setIsApplyingProfile(true);
     setGenerationError('');
-    setGenerationStatus('Generating script pack from extracted signal...');
-    setScriptPack(null);
+    setGenerationStatus('Locking artifact scope and render profile...');
 
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const response = await fetch(`${apiUrl}/api/generate-script-pack-advanced`, {
+      const artifactScope = mapArtifactScope(artifactType);
+
+      const artifactRes = await fetch(`${apiUrl}/api/workflow/${workflowId}/lock-artifacts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content_signal: extractedSignal,
-          render_profile: buildRenderProfilePayload()
-        })
+        body: JSON.stringify({ artifact_scope: artifactScope })
+      });
+      const artifactData = await artifactRes.json();
+      if (!artifactRes.ok || artifactData?.status !== 'success') {
+        const detail = typeof artifactData?.detail === 'string'
+          ? artifactData.detail
+          : (typeof artifactData?.message === 'string' ? artifactData.message : 'Artifact scope lock failed.');
+        setGenerationError(detail);
+        setGenerationStatus('');
+        return false;
+      }
+      if (artifactData.workflow) {
+        updateWorkflowSnapshot(artifactData.workflow);
+      }
+
+      const renderProfile = buildRenderProfilePayload(mode);
+      const renderRes = await fetch(`${apiUrl}/api/workflow/${workflowId}/lock-render`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ render_profile: renderProfile })
+      });
+      const renderData = await renderRes.json();
+      if (!renderRes.ok || renderData?.status !== 'success') {
+        const detail = typeof renderData?.detail === 'string'
+          ? renderData.detail
+          : (typeof renderData?.message === 'string' ? renderData.message : 'Render profile lock failed.');
+        setGenerationError(detail);
+        setGenerationStatus('');
+        return false;
+      }
+
+      if (renderData.workflow) {
+        updateWorkflowSnapshot(renderData.workflow);
+      }
+      const cp3Status = typeof renderData?.workflow?.checkpoint_state?.CP3_RENDER_LOCKED === 'string'
+        ? renderData.workflow.checkpoint_state.CP3_RENDER_LOCKED
+        : '';
+      if (cp3Status === 'passed') {
+        setGenerationStatus(
+          mode === 'high'
+            ? 'High-fidelity profile locked. Regenerate script and stream for upgraded bundle.'
+            : 'Render profile locked. Continue to signal confirmation and script planning.'
+        );
+      } else {
+        setGenerationStatus('Artifacts locked. Render profile queued and will auto-lock when signal extraction completes.');
+      }
+      return true;
+    } catch (err) {
+      console.error('Apply profile error:', err);
+      setGenerationError('Unable to lock render profile in workflow.');
+      setGenerationStatus('');
+      return false;
+    } finally {
+      setIsApplyingProfile(false);
+    }
+  };
+
+  const handleGenerateScriptPack = async (mode: 'review' | 'auto' = 'review') => {
+    if (!workflowId) {
+      setGenerationStatus('Run extraction first to initialize workflow.');
+      return;
+    }
+    if (!workflowSnapshot?.ready_for_script_pack) {
+      setGenerationStatus('Workflow gate not ready. Lock artifacts and render profile first.');
+      return;
+    }
+
+    setIsGeneratingScriptPack(true);
+    setScriptPresentationMode(mode);
+    setGenerationError('');
+    setGenerationStatus(
+      mode === 'review'
+        ? 'Preparing script pack for your confirmation...'
+        : 'Preparing script pack for immediate use...'
+    );
+    setScriptPack(null);
+    if (mode === 'review') {
+      setActivePanel('script');
+    }
+
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${apiUrl}/api/workflow/${workflowId}/generate-script-pack`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
       });
       const data = await response.json();
+      if (data?.workflow) {
+        updateWorkflowSnapshot(data.workflow);
+      }
       if (data?.status === 'success' && data?.script_pack) {
         setScriptPack(data.script_pack as ScriptPackPayload);
-        setGenerationStatus('Script pack is ready. Review and amend before starting stream generation.');
+        if (mode === 'review') {
+          setGenerationStatus('Script pack is ready. Review and amend before starting stream generation.');
+          setActivePanel('script');
+        } else {
+          setGenerationStatus('Script pack is ready and locked for stream generation.');
+          setActivePanel('stream');
+        }
       } else {
-        setGenerationError(typeof data?.message === 'string' ? data.message : 'Script pack generation failed.');
+        const detail = typeof data?.detail === 'string'
+          ? data.detail
+          : (typeof data?.message === 'string' ? data.message : 'Script pack generation failed.');
+        setGenerationError(detail);
         setGenerationStatus('');
       }
     } catch (err) {
@@ -404,8 +642,34 @@ export default function AdvancedStudio() {
     }
   };
 
+  const handleEnableHighFidelity = async () => {
+    if (!workflowId || isGenerating || isGeneratingScriptPack || isApplyingProfile) {
+      return;
+    }
+
+    setFidelityPreference('high');
+    setGenerationError('');
+    setGenerationStatus('Switching to high-fidelity mode...');
+    const applied = await applyProfileToWorkflow('high');
+    if (!applied) {
+      return;
+    }
+    setScriptPack(null);
+    setScenes({});
+    fullTextBuffer.current = {};
+    setActivePanel('script');
+    setGenerationStatus('High-fidelity profile locked. Generate script pack, then generate stream for upgraded bundle.');
+  };
+
   const handleGenerateStream = async () => {
-    if (!extractedSignal) return;
+    if (!workflowId) {
+      setGenerationStatus('Run extraction first to initialize workflow.');
+      return;
+    }
+    if (!workflowSnapshot?.ready_for_stream) {
+      setGenerationStatus('Workflow gate not ready for stream. Confirm script pack first.');
+      return;
+    }
     
     setIsGenerating(true);
     setGenerationError('');
@@ -415,12 +679,10 @@ export default function AdvancedStudio() {
     
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const response = await fetch(`${apiUrl}/api/generate-stream-advanced`, {
+      const response = await fetch(`${apiUrl}/api/workflow/${workflowId}/generate-stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          content_signal: extractedSignal,
-          render_profile: buildRenderProfilePayload(),
           script_pack: scriptPack ?? undefined
         })
       });
@@ -549,13 +811,33 @@ export default function AdvancedStudio() {
                 if (typeof data.message === 'string' && data.message.trim()) {
                   setGenerationStatus(data.message);
                 }
+              } else if (currentEvent === 'checkpoint') {
+                const checkpoint = typeof data.checkpoint === 'string' ? data.checkpoint : '';
+                const status = typeof data.status === 'string' ? data.status : '';
+                if (checkpoint && status) {
+                  setGenerationStatus(`${checkpoint}: ${status}`);
+                }
               } else if (currentEvent === 'final_bundle_ready') {
                 setGenerationStatus('');
                 setIsGenerating(false);
+                if (workflowId) {
+                  try {
+                    await fetchWorkflowSnapshot(workflowId);
+                  } catch {
+                    // Snapshot refresh is best-effort.
+                  }
+                }
               } else if (currentEvent === 'error') {
                 setGenerationError(typeof data.error === 'string' ? data.error : 'Generation failed.');
                 setGenerationStatus('');
                 setIsGenerating(false);
+                if (workflowId) {
+                  try {
+                    await fetchWorkflowSnapshot(workflowId);
+                  } catch {
+                    // Snapshot refresh is best-effort.
+                  }
+                }
               }
             } catch (e) {
               console.error("Error parsing SSE data:", e);
@@ -573,12 +855,16 @@ export default function AdvancedStudio() {
   };
 
   const handleScriptPackAction = () => {
-    if (!extractedSignal || isGeneratingScriptPack || isGenerating) return;
-    openActionDialog('script');
+    if (!workflowSnapshot?.ready_for_script_pack || isGeneratingScriptPack || isGenerating) return;
+    void handleGenerateScriptPack('review');
   };
 
   const handleGenerateStreamAction = () => {
-    if (!extractedSignal || !scriptPack || isGenerating) return;
+    if (!workflowSnapshot?.ready_for_stream || !scriptPack || isGenerating) return;
+    if (scriptPresentationMode === 'auto') {
+      void handleGenerateStream();
+      return;
+    }
     openActionDialog('stream');
   };
 
@@ -592,13 +878,8 @@ export default function AdvancedStudio() {
       return;
     }
     if (stage === 'profile') {
-      setGenerationStatus('Render profile saved for next generation run.');
       closeActionDialog();
-      return;
-    }
-    if (stage === 'signal') {
-      setGenerationStatus('Signal confirmed for planning and generation.');
-      closeActionDialog();
+      await applyProfileToWorkflow();
       return;
     }
     if (stage === 'script' || stage === 'stream') {
@@ -612,10 +893,7 @@ export default function AdvancedStudio() {
   };
 
   const handleDialogGoBack = () => {
-    if (actionDialogStage === 'signal') {
-      setActivePanel('source');
-      setGenerationStatus('Update source material or profile, then extract signal again.');
-    } else if (actionDialogStage === 'script') {
+    if (actionDialogStage === 'script') {
       setActivePanel('profile');
       setGenerationStatus('Adjust render profile and regenerate script pack.');
     }
@@ -623,18 +901,6 @@ export default function AdvancedStudio() {
   };
 
   const handleDialogRelaunch = async () => {
-    if (actionDialogStage === 'signal') {
-      if (!sourceDoc.trim()) {
-        setActivePanel('source');
-        setGenerationStatus('Add source material first, then rerun signal extraction.');
-        closeActionDialog();
-        return;
-      }
-      closeActionDialog();
-      setActivePanel('profile');
-      await runExtraction();
-      return;
-    }
     if (actionDialogStage === 'script') {
       closeActionDialog();
       await handleGenerateScriptPack();
@@ -663,11 +929,25 @@ export default function AdvancedStudio() {
       : signalStage === 'error'
         ? 'Error'
         : 'Idle';
+  const profileStatusLabel = workflowSnapshot?.checkpoint_state?.CP3_RENDER_LOCKED === 'passed'
+    ? 'Locked'
+    : workflowSnapshot?.checkpoint_state?.CP3_RENDER_LOCKED === 'failed'
+      ? 'Error'
+      : isApplyingProfile
+        ? 'Locking'
+        : 'Idle';
+  const scriptStatusLabel = workflowSnapshot?.checkpoint_state?.CP4_SCRIPT_LOCKED === 'passed'
+    ? 'Ready'
+    : workflowSnapshot?.checkpoint_state?.CP4_SCRIPT_LOCKED === 'failed'
+      ? 'Error'
+      : isGeneratingScriptPack
+        ? 'Planning'
+        : 'Idle';
   const streamStatusLabel = isGenerating
     ? 'Generating'
     : generationError
       ? 'Error'
-      : totalSceneCount > 0
+      : workflowSnapshot?.checkpoint_state?.CP5_STREAM_COMPLETE === 'passed' || totalSceneCount > 0
         ? 'Complete'
         : 'Idle';
   const extractionPhaseText = signalStage === 'sending'
@@ -695,11 +975,13 @@ export default function AdvancedStudio() {
 
   const stageProgress = (() => {
     if (!sourceDoc.trim()) return 0;
+    if (workflowSnapshot?.checkpoint_state?.CP6_BUNDLE_FINALIZED === 'passed') return 100;
     if (scriptPack) return 88;
     if (generationError) return 88;
     if (totalSceneCount > 0 && !isGenerating) return 100;
     if (isGenerating) return Math.max(80, generationProgress);
-    if (extractedSignal) return 70;
+    if (workflowSnapshot?.checkpoint_state?.CP3_RENDER_LOCKED === 'passed') return 62;
+    if (extractedSignal) return 52;
     if (isExtracting) return 35;
     if (activePanel === 'profile') return 45;
     if (activePanel === 'signal') return 60;
@@ -707,18 +989,25 @@ export default function AdvancedStudio() {
   })();
 
   const stageBadgeClass = (panel: AdvancedPanel): string => {
+    if (panel === 'profile') {
+      if (profileStatusLabel === 'Locked') return 'border-emerald-300 bg-emerald-100 text-emerald-800';
+      if (profileStatusLabel === 'Locking') return 'border-blue-300 bg-blue-100 text-blue-900';
+      if (profileStatusLabel === 'Error') return 'border-rose-300 bg-rose-100 text-rose-900';
+    }
     if (panel === 'signal') {
       if (signalStatusLabel === 'Ready') return 'border-emerald-300 bg-emerald-100 text-emerald-800';
       if (signalStatusLabel === 'Extracting') return 'border-amber-300 bg-amber-100 text-amber-900';
       if (signalStatusLabel === 'Error') return 'border-rose-300 bg-rose-100 text-rose-900';
     }
+    if (panel === 'script') {
+      if (scriptStatusLabel === 'Ready') return 'border-indigo-300 bg-indigo-100 text-indigo-900';
+      if (scriptStatusLabel === 'Planning') return 'border-blue-300 bg-blue-100 text-blue-900';
+      if (scriptStatusLabel === 'Error') return 'border-rose-300 bg-rose-100 text-rose-900';
+    }
     if (panel === 'stream') {
       if (streamStatusLabel === 'Complete') return 'border-emerald-300 bg-emerald-100 text-emerald-800';
       if (streamStatusLabel === 'Generating') return 'border-blue-300 bg-blue-100 text-blue-900';
       if (streamStatusLabel === 'Error') return 'border-rose-300 bg-rose-100 text-rose-900';
-    }
-    if (panel === 'script' && scriptPack) {
-      return 'border-indigo-300 bg-indigo-100 text-indigo-900';
     }
     if (activePanel === panel) return 'border-blue-300 bg-blue-100 text-blue-900';
     return 'border-slate-300 bg-slate-100 text-slate-700';
@@ -728,7 +1017,7 @@ export default function AdvancedStudio() {
     : activePanel === 'profile'
       ? 'Stage 2: Set audience and style controls while extraction continues.'
       : activePanel === 'signal'
-        ? 'Stage 3: Review extracted signal and confirm readiness for stream generation.'
+        ? 'Stage 3: Review extracted signal and confirm to auto-generate script pack.'
         : activePanel === 'script'
           ? 'Stage 4: Inspect planner output generated from signal + render profile.'
           : 'Stage 5: Generate interleaved scenes and monitor stream progress.';
@@ -748,15 +1037,7 @@ export default function AdvancedStudio() {
         amendLabel: null as string | null,
         amendHelp: '',
       }
-      : actionDialogStage === 'signal'
-        ? {
-          title: 'Confirm Signal?',
-          description: 'You moved to Script Pack. Continue to confirm this signal, or amend and relaunch extraction.',
-          continueLabel: 'Confirm and Continue',
-          amendLabel: 'Amend Signal',
-          amendHelp: 'If the signal is off, update source material or profile controls, then relaunch extraction to rebuild claims, concepts, and narrative beats.',
-        }
-        : actionDialogStage === 'script'
+    : actionDialogStage === 'script'
           ? {
             title: 'Generate Script Pack?',
             description: 'Continue to generate the script pack first. You can review and amend it before stream generation.',
@@ -775,9 +1056,9 @@ export default function AdvancedStudio() {
             : null;
   const dialogContinueDisabled = !dialogMeta
     || (actionDialogStage === 'extract' && (!sourceDoc.trim() || isExtracting))
-    || (actionDialogStage === 'signal' && !extractedSignal)
-    || (actionDialogStage === 'script' && (!extractedSignal || isGeneratingScriptPack || isGenerating))
-    || (actionDialogStage === 'stream' && (!extractedSignal || !scriptPack || isGenerating));
+    || (actionDialogStage === 'profile' && (!workflowId || isApplyingProfile))
+    || (actionDialogStage === 'script' && (!workflowSnapshot?.ready_for_script_pack || isGeneratingScriptPack || isGenerating))
+    || (actionDialogStage === 'stream' && (!workflowSnapshot?.ready_for_stream || !scriptPack || isGenerating));
 
   return (
     <main className="relative isolate min-h-screen overflow-x-clip bg-[#05070f] py-12 px-4 sm:px-6 lg:px-8 font-sans text-slate-100">
@@ -931,31 +1212,6 @@ export default function AdvancedStudio() {
                         </Select>
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="fidelity">Fidelity</Label>
-                        <Select value={fidelity} onValueChange={setFidelity}>
-                          <SelectTrigger id="fidelity" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
-                            <SelectValue placeholder="Select..." />
-                          </SelectTrigger>
-                          <SelectContent className="bg-white text-slate-900 border-slate-300">
-                            <SelectItem value="low">Low (Draft)</SelectItem>
-                            <SelectItem value="medium">Medium</SelectItem>
-                            <SelectItem value="high">High (Final)</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="lowKeyPreview">Low-Key Preview</Label>
-                        <Select value={lowKeyPreview ? "on" : "off"} onValueChange={(v) => setLowKeyPreview(v === "on")}>
-                          <SelectTrigger id="lowKeyPreview" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
-                            <SelectValue placeholder="Select mode" />
-                          </SelectTrigger>
-                          <SelectContent className="bg-white text-slate-900 border-slate-300">
-                            <SelectItem value="on">On (Faster Draft)</SelectItem>
-                            <SelectItem value="off">Off (Higher Quality)</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
                         <Label htmlFor="density">Information Density</Label>
                         <Select value={density} onValueChange={setDensity}>
                           <SelectTrigger id="density" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
@@ -1041,13 +1297,18 @@ export default function AdvancedStudio() {
                       />
                     </div>
 
+                    <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                      Low-key preview is always enabled for speed. You can request a high-fidelity rerun at Final Bundle stage.
+                    </div>
+
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                       <Button
                         type="button"
                         className="w-full"
                         onClick={handleApplyRenderProfile}
+                        disabled={isApplyingProfile || !workflowId}
                       >
-                        Apply Render Profile
+                        {isApplyingProfile ? 'Locking Profile...' : 'Apply Render Profile'}
                       </Button>
                       <Button
                         type="button"
@@ -1109,7 +1370,7 @@ export default function AdvancedStudio() {
                       <Button
                         type="button"
                         className="w-full"
-                        onClick={handleConfirmSignal}
+                        onClick={() => void handleConfirmSignal()}
                         disabled={!extractedSignal}
                       >
                         Confirm Signal
@@ -1137,7 +1398,7 @@ export default function AdvancedStudio() {
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <Button className="w-full" size="lg" onClick={() => void handleGenerateStreamAction()} disabled={isGenerating || !extractedSignal || !scriptPack || isGeneratingScriptPack}>
+                      <Button className="w-full" size="lg" onClick={() => void handleGenerateStreamAction()} disabled={isGenerating || !workflowSnapshot?.ready_for_stream || !scriptPack || isGeneratingScriptPack}>
                         {isGenerating ? (
                           <>
                             <Loader2 className="mr-2 h-5 w-5 animate-spin" />
@@ -1145,10 +1406,12 @@ export default function AdvancedStudio() {
                           </>
                         ) : isGeneratingScriptPack ? (
                           'Script Pack in Progress...'
+                        ) : !workflowSnapshot?.ready_for_script_pack ? (
+                          'Lock Signal + Artifacts + Profile First'
                         ) : !scriptPack ? (
                           'Generate Script Pack First'
-                        ) : !extractedSignal ? (
-                          'Extract Signal First'
+                        ) : !workflowSnapshot?.ready_for_stream ? (
+                          'Script Pack Must Be Locked'
                         ) : (
                           'Generate Explainer Stream'
                         )}
@@ -1199,6 +1462,22 @@ export default function AdvancedStudio() {
                           Change render profile settings and run generation again to regenerate this script pack.
                         </p>
                       </div>
+                    ) : isGeneratingScriptPack ? (
+                      <div className="space-y-4">
+                        <div className="p-4 bg-blue-50 text-blue-900 rounded-md border border-blue-200">
+                          <h4 className="font-semibold mb-2">Drafting Script Pack...</h4>
+                          <p className="text-sm whitespace-pre-wrap font-mono leading-6">
+                            {typedScriptExplainer}
+                            <span className="animate-pulse">|</span>
+                          </p>
+                        </div>
+                        <div className="bg-slate-900 text-slate-50 p-4 rounded-md overflow-auto max-h-[360px] text-xs font-mono">
+                          <pre>
+                            {typedScriptPreview}
+                            <span className="animate-pulse">|</span>
+                          </pre>
+                        </div>
+                      </div>
                     ) : (
                       <div className="flex min-h-[220px] flex-col items-center justify-center rounded-md border-2 border-dashed border-slate-300 p-8 text-slate-500">
                         <p className="text-center font-medium">Script pack not available yet.</p>
@@ -1210,7 +1489,7 @@ export default function AdvancedStudio() {
                         type="button"
                         className="w-full"
                         onClick={() => void handleScriptPackAction()}
-                        disabled={isGeneratingScriptPack || isGenerating || !extractedSignal}
+                        disabled={isGeneratingScriptPack || isGenerating || !workflowSnapshot?.ready_for_script_pack}
                       >
                         {isGeneratingScriptPack ? 'Generating Script Pack...' : scriptPack ? 'Regenerate Script Pack' : 'Generate Script Pack'}
                       </Button>
@@ -1267,7 +1546,32 @@ export default function AdvancedStudio() {
           </div>
 
           {!isGenerating && Object.values(scenes).length > 0 && (
-            <FinalBundle scenes={scenes} topic={extractedSignal?.thesis?.one_liner || 'Advanced Explainer'} />
+            <>
+              {fidelityPreference !== 'high' ? (
+                <Card className="bg-white text-slate-900 border-slate-300 shadow-md">
+                  <CardContent className="pt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="font-semibold">Need a higher-quality final bundle?</p>
+                      <p className="text-sm text-slate-600">
+                        Current run used low-key preview mode for speed. You can regenerate with high fidelity now.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={() => void handleEnableHighFidelity()}
+                      disabled={isApplyingProfile || isGenerating || isGeneratingScriptPack}
+                    >
+                      Generate High-Fidelity Bundle
+                    </Button>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                  High-fidelity mode is active for this bundle.
+                </div>
+              )}
+              <FinalBundle scenes={scenes} topic={extractedSignal?.thesis?.one_liner || 'Advanced Explainer'} />
+            </>
           )}
         </div>
 
@@ -1314,7 +1618,7 @@ export default function AdvancedStudio() {
                 <Button
                   type="button"
                   onClick={() => void handleDialogRelaunch()}
-                  disabled={actionDialogStage === 'script' ? isGenerating || !extractedSignal : isExtracting}
+                  disabled={actionDialogStage === 'script' ? isGenerating || !workflowSnapshot?.ready_for_script_pack : isExtracting}
                 >
                   Relaunch Segment
                 </Button>

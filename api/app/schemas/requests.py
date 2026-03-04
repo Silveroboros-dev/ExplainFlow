@@ -1,6 +1,26 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+
+CheckpointName = Literal[
+    "CP1_SIGNAL_READY",
+    "CP2_ARTIFACTS_LOCKED",
+    "CP3_RENDER_LOCKED",
+    "CP4_SCRIPT_LOCKED",
+    "CP5_STREAM_COMPLETE",
+    "CP6_BUNDLE_FINALIZED",
+]
+
+CheckpointStatus = Literal["pending", "passed", "failed", "skipped"]
+
+ArtifactName = Literal[
+    "thumbnail",
+    "story_cards",
+    "storyboard",
+    "voiceover",
+    "social_caption",
+]
 
 
 class SignalExtractionRequest(BaseModel):
@@ -57,8 +77,52 @@ class AdvancedStreamRequest(BaseModel):
     content_signal: dict[str, Any] = Field(default_factory=dict)
     render_profile: dict[str, Any] = Field(default_factory=dict)
     script_pack: dict[str, Any] | None = None
+    artifact_scope: list[ArtifactName] = Field(default_factory=list)
 
 
 class ScriptPackRequest(BaseModel):
     content_signal: dict[str, Any] = Field(default_factory=dict)
     render_profile: dict[str, Any] = Field(default_factory=dict)
+    artifact_scope: list[ArtifactName] = Field(default_factory=list)
+
+
+class WorkflowStartRequest(BaseModel):
+    source_text: str
+
+
+class WorkflowArtifactLockRequest(BaseModel):
+    artifact_scope: list[ArtifactName]
+
+
+class WorkflowRenderLockRequest(BaseModel):
+    render_profile: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowStreamRequest(BaseModel):
+    script_pack: dict[str, Any] | None = None
+
+
+class CheckpointRecord(BaseModel):
+    checkpoint: CheckpointName
+    status: CheckpointStatus
+    timestamp_utc: str
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class SceneTraceRecord(BaseModel):
+    scene_id: str
+    scene_trace_id: str
+    claim_refs: list[str] = Field(default_factory=list)
+    qa_history: list[dict[str, Any]] = Field(default_factory=list)
+    retries_used: int = 0
+    word_count: int = 0
+
+
+class TraceEnvelope(BaseModel):
+    trace_id: str
+    run_id: str
+    flow: str
+    started_at_utc: str
+    artifact_scope: list[ArtifactName] = Field(default_factory=list)
+    checkpoints: list[CheckpointRecord] = Field(default_factory=list)
+    scenes: list[SceneTraceRecord] = Field(default_factory=list)

@@ -4,14 +4,23 @@ import math
 import re
 import time
 from typing import Any, AsyncIterator
+from uuid import uuid4
 
 from fastapi import Request
 from google.genai import types
 
 from app.config import SCHEMAS_DIR, get_gemini_client
-from app.schemas.events import build_sse_event
+from app.schemas.events import (
+    add_checkpoint,
+    add_or_update_scene_trace,
+    build_checkpoint_event,
+    build_sse_event,
+    init_trace_envelope,
+    trace_meta,
+)
 from app.schemas.requests import (
     AdvancedStreamRequest,
+    ArtifactName,
     OutlineSchema,
     RegenerateSceneRequest,
     ScenePlanSchema,
@@ -94,6 +103,55 @@ class GeminiStoryAgent:
         )
 
     @staticmethod
+    def _new_run_id(prefix: str) -> str:
+        return f"{prefix}-{int(time.time())}-{uuid4().hex[:8]}"
+
+    @staticmethod
+    def _resolve_artifact_scope(
+        requested_scope: list[ArtifactName] | None,
+        render_profile: dict[str, Any] | None = None,
+        default_scope: list[ArtifactName] | None = None,
+    ) -> list[ArtifactName]:
+        if requested_scope:
+            return requested_scope
+
+        profile = render_profile or {}
+        output_controls = profile.get("output_controls", {})
+        raw_artifacts = output_controls.get("artifacts", [])
+        if isinstance(raw_artifacts, list):
+            normalized = [
+                item
+                for item in raw_artifacts
+                if item in {"thumbnail", "story_cards", "storyboard", "voiceover", "social_caption"}
+            ]
+            if normalized:
+                return normalized  # type: ignore[return-value]
+
+        return default_scope or ["story_cards", "voiceover"]
+
+    @staticmethod
+    def _claim_traceability_summary(
+        *,
+        claim_ids: list[str],
+        scene_claim_map: dict[str, list[str]],
+    ) -> dict[str, Any]:
+        referenced_claims = sorted(
+            {
+                claim_ref
+                for scene_claims in scene_claim_map.values()
+                for claim_ref in scene_claims
+                if claim_ref
+            }
+        )
+        unmapped_claims = [claim_id for claim_id in claim_ids if claim_id not in referenced_claims]
+        return {
+            "claims_total": len(claim_ids),
+            "claims_referenced": len(referenced_claims),
+            "unmapped_claims": unmapped_claims,
+            "scene_claim_map": scene_claim_map,
+        }
+
+    @staticmethod
     def _compile_script_pack(
         *,
         plan_id: str,
@@ -174,6 +232,7 @@ class GeminiStoryAgent:
         continuity_hints: list[str] | None = None,
         extra_constraints: list[str] | None = None,
         result_collector: dict[str, Any] | None = None,
+        trace_payload: dict[str, Any] | None = None,
     ) -> AsyncIterator[dict[str, str]]:
         continuity_block = ""
         if continuity_hints:
@@ -232,9 +291,12 @@ class GeminiStoryAgent:
 
                     for text in text_parts:
                         current_scene_text += text
+                        payload: dict[str, Any] = {"scene_id": scene_id, "delta": text}
+                        if trace_payload:
+                            payload["trace"] = trace_payload
                         yield build_sse_event(
                             "story_text_delta",
-                            {"scene_id": scene_id, "delta": text},
+                            payload,
                         )
 
                     for image_bytes in image_parts:
@@ -244,9 +306,12 @@ class GeminiStoryAgent:
                             image_bytes=image_bytes,
                             prefix=image_prefix,
                         )
+                        payload = {"scene_id": scene_id, "url": latest_image_url}
+                        if trace_payload:
+                            payload["trace"] = trace_payload
                         yield build_sse_event(
                             "diagram_ready",
-                            {"scene_id": scene_id, "url": latest_image_url},
+                            payload,
                         )
                 break
             except Exception as exc:
@@ -265,6 +330,7 @@ class GeminiStoryAgent:
                     {
                         "scene_id": scene_id,
                         "message": f"Rate limit reached. Retrying this scene in {int(round(delay_sec))}s...",
+                        **({"trace": trace_payload} if trace_payload else {}),
                     },
                 )
                 await asyncio.sleep(delay_sec)
@@ -277,7 +343,10 @@ class GeminiStoryAgent:
                 prefix=audio_prefix,
             )
             if audio_url:
-                yield build_sse_event("audio_ready", {"scene_id": scene_id, "url": audio_url})
+                payload = {"scene_id": scene_id, "url": audio_url}
+                if trace_payload:
+                    payload["trace"] = trace_payload
+                yield build_sse_event("audio_ready", payload)
 
         if result_collector is not None:
             result_collector["text"] = current_scene_text
@@ -286,6 +355,13 @@ class GeminiStoryAgent:
             result_collector["word_count"] = len(re.findall(r"\b[\w'-]+\b", current_scene_text))
 
     async def extract_signal(self, payload: SignalExtractionRequest) -> dict[str, Any]:
+        run_id = self._new_run_id("extract-run")
+        trace = init_trace_envelope(
+            trace_id=f"trace-{uuid4().hex[:12]}",
+            run_id=run_id,
+            flow="extract_signal",
+            artifact_scope=[],
+        )
         try:
             schema_str = self._load_schema_text("content_signal.schema.json")
             extraction_prompt = (
@@ -304,10 +380,29 @@ class GeminiStoryAgent:
                 ),
             )
             signal_data = json.loads(response.text)
-            return {"status": "success", "content_signal": signal_data}
+            add_checkpoint(
+                trace,
+                checkpoint="CP1_SIGNAL_READY",
+                status="passed",
+                details={
+                    "schema": "content_signal.schema.json",
+                    "source_length": len(payload.input_text),
+                },
+            )
+            return {
+                "status": "success",
+                "content_signal": signal_data,
+                "trace": trace.model_dump(),
+            }
         except Exception as exc:
             print(f"Extraction error: {exc}")
-            return {"status": "error", "message": str(exc)}
+            add_checkpoint(
+                trace,
+                checkpoint="CP1_SIGNAL_READY",
+                status="failed",
+                details={"error": str(exc)},
+            )
+            return {"status": "error", "message": str(exc), "trace": trace.model_dump()}
 
     async def generate_stream_events(
         self,
@@ -318,6 +413,19 @@ class GeminiStoryAgent:
         tone: str,
         visual_mode: str = "illustration",
     ) -> AsyncIterator[dict[str, str]]:
+        run_id = self._new_run_id("interleaved-run")
+        artifact_scope = self._resolve_artifact_scope(
+            requested_scope=None,
+            render_profile=None,
+            default_scope=["story_cards", "voiceover"],
+        )
+        trace = init_trace_envelope(
+            trace_id=f"trace-{uuid4().hex[:12]}",
+            run_id=run_id,
+            flow="quick_stream",
+            artifact_scope=artifact_scope,
+        )
+
         style_guide = self._style_guide_for_mode(visual_mode)
         planning_prompt = (
             f"Create a 4-scene outline for a visual explainer about '{topic}'. "
@@ -325,6 +433,22 @@ class GeminiStoryAgent:
             "You MUST generate EXACTLY 4 scenes.\n\n"
             f"Visual rule: {style_guide}"
         )
+
+        cp2 = add_checkpoint(
+            trace,
+            checkpoint="CP2_ARTIFACTS_LOCKED",
+            status="passed",
+            details={"artifact_scope": artifact_scope, "source": "quick_defaults"},
+        )
+        yield build_checkpoint_event(trace, cp2)
+
+        cp3 = add_checkpoint(
+            trace,
+            checkpoint="CP3_RENDER_LOCKED",
+            status="passed",
+            details={"visual_mode": visual_mode},
+        )
+        yield build_checkpoint_event(trace, cp3)
 
         try:
             plan_response = await self.client.aio.models.generate_content(
@@ -338,6 +462,14 @@ class GeminiStoryAgent:
             )
             parsed_outline = OutlineSchema.model_validate_json(plan_response.text)
             scenes = parsed_outline.scenes[:4]
+
+            cp1 = add_checkpoint(
+                trace,
+                checkpoint="CP1_SIGNAL_READY",
+                status="passed",
+                details={"source": "quick_prompt_planning", "planned_scenes": len(scenes)},
+            )
+            yield build_checkpoint_event(trace, cp1)
 
             while len(scenes) < 4:
                 idx = len(scenes) + 1
@@ -355,9 +487,19 @@ class GeminiStoryAgent:
                 {
                     "scenes": [scene.model_dump() for scene in scenes],
                     "optimized_count": len(scenes),
+                    "trace": trace_meta(trace, checkpoint="CP4_SCRIPT_LOCKED"),
                 },
             )
 
+            cp4 = add_checkpoint(
+                trace,
+                checkpoint="CP4_SCRIPT_LOCKED",
+                status="passed",
+                details={"scene_count": len(scenes), "mode": "quick_auto_outline"},
+            )
+            yield build_checkpoint_event(trace, cp4)
+
+            scene_claim_map: dict[str, list[str]] = {}
             for idx, scene in enumerate(scenes, start=1):
                 if await request.is_disconnected():
                     return
@@ -366,8 +508,28 @@ class GeminiStoryAgent:
                 title = scene.title or f"Scene {idx}"
                 narration_focus = scene.narration_focus or f"Explain key point {idx}."
                 visual_prompt = scene.visual_prompt or ""
+                claim_refs = [ref for ref in scene.claim_refs if ref]
+                scene_trace_id = f"{trace.trace_id}-{scene_id}-{uuid4().hex[:8]}"
+                scene_claim_map[scene_id] = claim_refs
+                add_or_update_scene_trace(
+                    trace,
+                    scene_id=scene_id,
+                    scene_trace_id=scene_trace_id,
+                    claim_refs=claim_refs,
+                )
+                scene_trace_payload = trace_meta(trace, scene_trace_id=scene_trace_id)
 
-                yield build_sse_event("scene_start", {"scene_id": scene_id, "title": title})
+                yield build_sse_event(
+                    "scene_start",
+                    {
+                        "scene_id": scene_id,
+                        "title": title,
+                        "claim_refs": claim_refs,
+                        "trace": scene_trace_payload,
+                    },
+                )
+
+                scene_result: dict[str, Any] = {}
 
                 async for event in self._stream_scene_assets(
                     request=request,
@@ -381,22 +543,68 @@ class GeminiStoryAgent:
                     visual_prompt=visual_prompt,
                     image_prefix="interleaved",
                     audio_prefix="audio",
+                    result_collector=scene_result,
+                    trace_payload=scene_trace_payload,
                 ):
                     yield event
 
-                yield build_sse_event("scene_done", {"scene_id": scene_id})
+                add_or_update_scene_trace(
+                    trace,
+                    scene_id=scene_id,
+                    scene_trace_id=scene_trace_id,
+                    word_count=int(scene_result.get("word_count", 0)),
+                )
+                yield build_sse_event(
+                    "scene_done",
+                    {"scene_id": scene_id, "trace": scene_trace_payload},
+                )
+
+            cp5 = add_checkpoint(
+                trace,
+                checkpoint="CP5_STREAM_COMPLETE",
+                status="passed",
+                details={"scene_count": len(scenes)},
+            )
+            yield build_checkpoint_event(trace, cp5)
+
+            traceability = self._claim_traceability_summary(
+                claim_ids=[],
+                scene_claim_map=scene_claim_map,
+            )
+
+            cp6 = add_checkpoint(
+                trace,
+                checkpoint="CP6_BUNDLE_FINALIZED",
+                status="passed",
+                details={"bundle_url": f"/api/final-bundle/{run_id}"},
+            )
+            yield build_checkpoint_event(trace, cp6)
 
             yield build_sse_event(
                 "final_bundle_ready",
                 {
-                    "run_id": "interleaved-run-123",
-                    "bundle_url": "/api/final-bundle/interleaved-run-123",
+                    "run_id": run_id,
+                    "bundle_url": f"/api/final-bundle/{run_id}",
+                    "trace": trace.model_dump(),
+                    "claim_traceability": traceability,
                 },
             )
         except Exception as exc:
             print(f"Error generating stream: {exc}")
+            cp1_passed = any(
+                checkpoint.checkpoint == "CP1_SIGNAL_READY" and checkpoint.status == "passed"
+                for checkpoint in trace.checkpoints
+            )
+            failed_checkpoint = "CP5_STREAM_COMPLETE" if cp1_passed else "CP1_SIGNAL_READY"
+            failed_record = add_checkpoint(
+                trace,
+                checkpoint=failed_checkpoint,
+                status="failed",
+                details={"error": str(exc)},
+            )
+            yield build_checkpoint_event(trace, failed_record)
             message = self._friendly_quota_error_message() if self._is_resource_exhausted(exc) else str(exc)
-            yield build_sse_event("error", {"error": message})
+            yield build_sse_event("error", {"error": message, "trace": trace.model_dump()})
 
     async def generate_stream_advanced_events(
         self,
@@ -406,6 +614,18 @@ class GeminiStoryAgent:
     ) -> AsyncIterator[dict[str, str]]:
         content_signal = payload.content_signal
         render_profile = payload.render_profile
+        run_id = self._new_run_id("advanced-run")
+        artifact_scope = self._resolve_artifact_scope(
+            requested_scope=payload.artifact_scope,
+            render_profile=render_profile,
+            default_scope=["story_cards", "voiceover", "social_caption"],
+        )
+        trace = init_trace_envelope(
+            trace_id=f"trace-{uuid4().hex[:12]}",
+            run_id=run_id,
+            flow="advanced_stream",
+            artifact_scope=artifact_scope,
+        )
 
         approved_script_pack_raw = payload.script_pack
         approved_script_pack: ScriptPack | None = None
@@ -414,6 +634,36 @@ class GeminiStoryAgent:
                 approved_script_pack = ScriptPack.model_validate(approved_script_pack_raw)
             except Exception:
                 approved_script_pack = None
+
+        has_signal = bool(
+            content_signal.get("thesis")
+            or content_signal.get("key_claims")
+            or content_signal.get("narrative_beats")
+        )
+        cp1 = add_checkpoint(
+            trace,
+            checkpoint="CP1_SIGNAL_READY",
+            status="passed" if has_signal else "failed",
+            details={"source": "content_signal_payload", "has_signal": has_signal},
+        )
+        yield build_checkpoint_event(trace, cp1)
+        if not has_signal:
+            yield build_sse_event(
+                "error",
+                {
+                    "error": "Signal is missing. Run extraction and provide content_signal before generation.",
+                    "trace": trace.model_dump(),
+                },
+            )
+            return
+
+        cp2 = add_checkpoint(
+            trace,
+            checkpoint="CP2_ARTIFACTS_LOCKED",
+            status="passed",
+            details={"artifact_scope": artifact_scope},
+        )
+        yield build_checkpoint_event(trace, cp2)
 
         visual_mode = render_profile.get("visual_mode", "illustration")
         audience_cfg = render_profile.get("audience", {})
@@ -457,8 +707,21 @@ class GeminiStoryAgent:
         elif visual_mode == "hybrid":
             style_guide += "CRITICAL: Blend 3D objects with floating holographic UI elements or charts."
 
+        cp3 = add_checkpoint(
+            trace,
+            checkpoint="CP3_RENDER_LOCKED",
+            status="passed",
+            details={"visual_mode": visual_mode, "goal": str(render_profile.get("goal", "teach"))},
+        )
+        yield build_checkpoint_event(trace, cp3)
+
         thesis = content_signal.get("thesis", {}).get("one_liner", "A generic topic")
         beats = content_signal.get("narrative_beats", [])
+        claim_ids = [
+            str(claim.get("claim_id")).strip()
+            for claim in content_signal.get("key_claims", [])
+            if isinstance(claim, dict) and str(claim.get("claim_id", "")).strip()
+        ]
         audience_descriptor = f"{audience_persona} ({audience_level})"
         if domain_context:
             audience_descriptor += f" in {domain_context}"
@@ -492,7 +755,10 @@ class GeminiStoryAgent:
                 script_pack = approved_script_pack
                 yield build_sse_event(
                     "status",
-                    {"message": "Using approved script pack. Starting scene generation..."},
+                    {
+                        "message": "Using approved script pack. Starting scene generation...",
+                        "trace": trace_meta(trace, checkpoint="CP4_SCRIPT_LOCKED"),
+                    },
                 )
             else:
                 plan_response = await self.client.aio.models.generate_content(
@@ -528,7 +794,21 @@ class GeminiStoryAgent:
                     must_avoid=must_avoid,
                 )
 
-            yield build_sse_event("script_pack_ready", {"script_pack": script_pack.model_dump()})
+            yield build_sse_event(
+                "script_pack_ready",
+                {
+                    "script_pack": script_pack.model_dump(),
+                    "trace": trace_meta(trace, checkpoint="CP4_SCRIPT_LOCKED"),
+                },
+            )
+
+            cp4 = add_checkpoint(
+                trace,
+                checkpoint="CP4_SCRIPT_LOCKED",
+                status="passed",
+                details={"scene_count": script_pack.scene_count, "approved_script_pack": approved_script_pack is not None},
+            )
+            yield build_checkpoint_event(trace, cp4)
 
             yield build_sse_event(
                 "scene_queue_ready",
@@ -540,13 +820,15 @@ class GeminiStoryAgent:
                             "claim_refs": scene.claim_refs,
                             "narration_focus": scene.narration_focus,
                         }
-                        for scene in script_pack.scenes
+                            for scene in script_pack.scenes
                     ],
                     "optimized_count": script_pack.scene_count,
+                    "trace": trace_meta(trace, checkpoint="CP4_SCRIPT_LOCKED"),
                 },
             )
 
             continuity_memory: list[str] = []
+            scene_claim_map: dict[str, list[str]] = {}
 
             for scene in script_pack.scenes:
                 if await request.is_disconnected():
@@ -554,13 +836,24 @@ class GeminiStoryAgent:
 
                 scene_id = scene.scene_id
                 title = scene.title
+                scene_trace_id = f"{trace.trace_id}-{scene_id}-{uuid4().hex[:8]}"
+                claim_refs = [claim_ref for claim_ref in scene.claim_refs if claim_ref]
+                scene_claim_map[scene_id] = claim_refs
+                add_or_update_scene_trace(
+                    trace,
+                    scene_id=scene_id,
+                    scene_trace_id=scene_trace_id,
+                    claim_refs=claim_refs,
+                )
+                scene_trace_payload = trace_meta(trace, scene_trace_id=scene_trace_id)
 
                 yield build_sse_event(
                     "scene_start",
                     {
                         "scene_id": scene_id,
                         "title": title,
-                        "claim_refs": scene.claim_refs,
+                        "claim_refs": claim_refs,
+                        "trace": scene_trace_payload,
                     },
                 )
 
@@ -588,7 +881,11 @@ class GeminiStoryAgent:
                     if attempt_index > 0:
                         yield build_sse_event(
                             "scene_retry_reset",
-                            {"scene_id": scene_id, "retry_index": attempt_index},
+                            {
+                                "scene_id": scene_id,
+                                "retry_index": attempt_index,
+                                "trace": scene_trace_payload,
+                            },
                         )
 
                     async for event in self._stream_scene_assets(
@@ -606,6 +903,7 @@ class GeminiStoryAgent:
                         continuity_hints=active_continuity,
                         extra_constraints=attempt_constraints,
                         result_collector=scene_result,
+                        trace_payload=scene_trace_payload,
                     ):
                         yield event
 
@@ -618,7 +916,19 @@ class GeminiStoryAgent:
                         continuity_hints=active_continuity,
                         attempt=attempt_index + 1,
                     )
-                    yield build_sse_event("qa_status", qa_result)
+                    add_or_update_scene_trace(
+                        trace,
+                        scene_id=scene_id,
+                        scene_trace_id=scene_trace_id,
+                        qa_result=qa_result,
+                    )
+                    yield build_sse_event(
+                        "qa_status",
+                        {
+                            **qa_result,
+                            "trace": scene_trace_payload,
+                        },
+                    )
 
                     if qa_result["status"] != "FAIL":
                         break
@@ -632,6 +942,7 @@ class GeminiStoryAgent:
                                 "scene_id": scene_id,
                                 "retry_index": 1,
                                 "reasons": qa_result["reasons"],
+                                "trace": scene_trace_payload,
                             },
                         )
 
@@ -639,6 +950,13 @@ class GeminiStoryAgent:
                 if continuity_tokens:
                     continuity_memory.append(f"{title}: {', '.join(continuity_tokens)}")
                     continuity_memory = continuity_memory[-8:]
+                add_or_update_scene_trace(
+                    trace,
+                    scene_id=scene_id,
+                    scene_trace_id=scene_trace_id,
+                    retries_used=retries_used,
+                    word_count=int(scene_result.get("word_count", 0)),
+                )
 
                 yield build_sse_event(
                     "scene_done",
@@ -646,24 +964,72 @@ class GeminiStoryAgent:
                         "scene_id": scene_id,
                         "qa_status": qa_result["status"],
                         "auto_retries": retries_used,
+                        "trace": scene_trace_payload,
                     },
                 )
+
+            cp5 = add_checkpoint(
+                trace,
+                checkpoint="CP5_STREAM_COMPLETE",
+                status="passed",
+                details={"scene_count": script_pack.scene_count},
+            )
+            yield build_checkpoint_event(trace, cp5)
+
+            traceability = self._claim_traceability_summary(
+                claim_ids=claim_ids,
+                scene_claim_map=scene_claim_map,
+            )
+
+            cp6 = add_checkpoint(
+                trace,
+                checkpoint="CP6_BUNDLE_FINALIZED",
+                status="passed",
+                details={"bundle_url": f"/api/final-bundle/{run_id}"},
+            )
+            yield build_checkpoint_event(trace, cp6)
 
             yield build_sse_event(
                 "final_bundle_ready",
                 {
-                    "run_id": "advanced-run-123",
-                    "bundle_url": "/api/final-bundle/advanced-run-123",
+                    "run_id": run_id,
+                    "bundle_url": f"/api/final-bundle/{run_id}",
+                    "trace": trace.model_dump(),
+                    "claim_traceability": traceability,
                 },
             )
         except Exception as exc:
             print(f"Error in advanced stream: {exc}")
+            cp4_passed = any(
+                checkpoint.checkpoint == "CP4_SCRIPT_LOCKED" and checkpoint.status == "passed"
+                for checkpoint in trace.checkpoints
+            )
+            failed_checkpoint = "CP5_STREAM_COMPLETE" if cp4_passed else "CP4_SCRIPT_LOCKED"
+            failed_record = add_checkpoint(
+                trace,
+                checkpoint=failed_checkpoint,
+                status="failed",
+                details={"error": str(exc)},
+            )
+            yield build_checkpoint_event(trace, failed_record)
             message = self._friendly_quota_error_message() if self._is_resource_exhausted(exc) else str(exc)
-            yield build_sse_event("error", {"error": message})
+            yield build_sse_event("error", {"error": message, "trace": trace.model_dump()})
 
     async def generate_script_pack_advanced(self, payload: ScriptPackRequest) -> dict[str, Any]:
         content_signal = payload.content_signal
         render_profile = payload.render_profile
+        run_id = self._new_run_id("script-pack-run")
+        artifact_scope = self._resolve_artifact_scope(
+            requested_scope=payload.artifact_scope,
+            render_profile=render_profile,
+            default_scope=["story_cards", "voiceover"],
+        )
+        trace = init_trace_envelope(
+            trace_id=f"trace-{uuid4().hex[:12]}",
+            run_id=run_id,
+            flow="script_pack_only",
+            artifact_scope=artifact_scope,
+        )
 
         audience_cfg = render_profile.get("audience", {})
         audience_level = str(audience_cfg.get("level", "beginner")).lower()
@@ -681,8 +1047,44 @@ class GeminiStoryAgent:
             if isinstance(item, str) and str(item).strip()
         ][:8]
 
+        has_signal = bool(
+            content_signal.get("thesis")
+            or content_signal.get("key_claims")
+            or content_signal.get("narrative_beats")
+        )
+        add_checkpoint(
+            trace,
+            checkpoint="CP1_SIGNAL_READY",
+            status="passed" if has_signal else "failed",
+            details={"source": "content_signal_payload", "has_signal": has_signal},
+        )
+        if not has_signal:
+            return {
+                "status": "error",
+                "message": "Signal is missing. Run extraction and provide content_signal before script planning.",
+                "trace": trace.model_dump(),
+            }
+
+        add_checkpoint(
+            trace,
+            checkpoint="CP2_ARTIFACTS_LOCKED",
+            status="passed",
+            details={"artifact_scope": artifact_scope},
+        )
+        add_checkpoint(
+            trace,
+            checkpoint="CP3_RENDER_LOCKED",
+            status="passed",
+            details={"density": str(render_profile.get("density", "standard"))},
+        )
+
         thesis = content_signal.get("thesis", {}).get("one_liner", "A generic topic")
         beats = content_signal.get("narrative_beats", [])
+        claim_ids = [
+            str(claim.get("claim_id")).strip()
+            for claim in content_signal.get("key_claims", [])
+            if isinstance(claim, dict) and str(claim.get("claim_id", "")).strip()
+        ]
         audience_descriptor = f"{audience_persona} ({audience_level})"
         if domain_context:
             audience_descriptor += f" in {domain_context}"
@@ -744,21 +1146,54 @@ class GeminiStoryAgent:
                 must_include=must_include,
                 must_avoid=must_avoid,
             )
-            return {"status": "success", "script_pack": script_pack.model_dump()}
+            add_checkpoint(
+                trace,
+                checkpoint="CP4_SCRIPT_LOCKED",
+                status="passed",
+                details={"scene_count": script_pack.scene_count},
+            )
+            scene_claim_map = {
+                scene.scene_id: [claim_ref for claim_ref in scene.claim_refs if claim_ref]
+                for scene in script_pack.scenes
+            }
+            claim_traceability = self._claim_traceability_summary(
+                claim_ids=claim_ids,
+                scene_claim_map=scene_claim_map,
+            )
+            return {
+                "status": "success",
+                "script_pack": script_pack.model_dump(),
+                "trace": trace.model_dump(),
+                "claim_traceability": claim_traceability,
+            }
         except Exception as exc:
             print(f"Error generating script pack: {exc}")
+            add_checkpoint(
+                trace,
+                checkpoint="CP4_SCRIPT_LOCKED",
+                status="failed",
+                details={"error": str(exc)},
+            )
             message = self._friendly_quota_error_message() if self._is_resource_exhausted(exc) else str(exc)
-            return {"status": "error", "message": message}
+            return {"status": "error", "message": message, "trace": trace.model_dump()}
 
     async def regenerate_scene(
         self,
         payload: RegenerateSceneRequest,
         request: Request,
     ) -> dict[str, Any]:
+        run_id = self._new_run_id("regen-run")
+        trace = init_trace_envelope(
+            trace_id=f"trace-{uuid4().hex[:12]}",
+            run_id=run_id,
+            flow="scene_regeneration",
+            artifact_scope=["story_cards", "voiceover"],
+        )
         scene_id = payload.scene_id
         current_text = payload.current_text
         instruction = payload.instruction
         visual_mode = payload.visual_mode
+        scene_trace_id = f"{trace.trace_id}-{scene_id}-{uuid4().hex[:8]}"
 
         try:
             style_guide = self._style_guide_for_mode(visual_mode)
@@ -794,6 +1229,18 @@ class GeminiStoryAgent:
                 text=updated_text,
                 prefix="regen_audio",
             )
+            add_or_update_scene_trace(
+                trace,
+                scene_id=scene_id,
+                scene_trace_id=scene_trace_id,
+                word_count=len(re.findall(r"\b[\w'-]+\b", updated_text)),
+            )
+            add_checkpoint(
+                trace,
+                checkpoint="CP5_STREAM_COMPLETE",
+                status="passed",
+                details={"mode": "scene_regen"},
+            )
 
             return {
                 "status": "success",
@@ -801,7 +1248,14 @@ class GeminiStoryAgent:
                 "text": updated_text,
                 "imageUrl": image_url,
                 "audioUrl": audio_url,
+                "trace": trace.model_dump(),
             }
         except Exception as exc:
             print(f"Regeneration error: {exc}")
-            return {"status": "error", "message": str(exc)}
+            add_checkpoint(
+                trace,
+                checkpoint="CP5_STREAM_COMPLETE",
+                status="failed",
+                details={"mode": "scene_regen", "error": str(exc)},
+            )
+            return {"status": "error", "message": str(exc), "trace": trace.model_dump()}
