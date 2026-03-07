@@ -1,277 +1,90 @@
-# ExplainFlow
+# ExplainFlow: AI Production Studio
 
-ExplainFlow turns one idea into a complete visual narrative pipeline from core signal extraction to final media bundle.
+ExplainFlow is an agent-coordinated AI Production Studio that transforms complex documents and prompts into high-fidelity, interleaved visual explainer streams.
 
-## Product
+## Product Vision: The Explainer Director
 
-ExplainFlow is a Creative Storyteller agent that converts either:
-- a short prompt, or
-- a long document
+ExplainFlow represents a pivot from simple "generation" to **"Directed Production."** The system acts as an autonomous studio where a central coordinator manages the entire lifecycle of a visual narrative—from core signal extraction to final validated asset packaging.
 
-into a live, controllable explainer stream with scene-by-scene narration, visuals, and captions.
+### Key Capabilities (Architecture v3)
+- **Agentic Coordination**: A persistent `AgentCoordinator` manages production "Gates" (Signal, Profile, Script) using a state-aware `workflow_id`.
+- **Conversational Co-Direction**: Interact with the studio via the `WorkflowChatAgent` to adjust styles, personas, or narrative focus through natural language.
+- **Self-Healing Production**: An **Auto QA Gate** scores every scene. If quality or alignment fails, the director automatically triggers a **Correction Retry** to fix the scene in real-time.
+- **Visual Chaining**: Advanced multimodal continuity that passes visual anchor terms between scenes to prevent narrative drift.
+- **Production-Grade Export**: Package your validated explainer into a professional ZIP bundle containing the script, high-res images, and synchronized audio.
 
-The product focus is not just generation. It is directed generation:
-- users can define output style and quality,
-- regenerate a single scene without rerunning everything,
-- and trace each scene back to extracted claims.
+## Pipeline Evolution
 
-Pipeline versions in this repo:
-- **Legacy (v1):** extraction -> planning -> per-scene interleaved generation.
-- **Current (v2):** adds script-pack compilation, continuity memory, and automatic QA with one retry on failure.
+- **Legacy (v1/v2):** Linear extraction -> planning -> interleaved generation with basic QA.
+- **Current (v3):** State-aware **Agentic Studio** with conversational control, checkpoint gates, and coordinated multi-agent logic.
+
+---
 
 ## How to Run Locally
 
-To run this system on another machine, follow these steps to start both the Python backend and the Next.js frontend.
-
 ### Prerequisites
 - Python 3.10+
-- Node.js 18+ and `npm`
+- Node.js 20+ and `npm`
 - A Google GenAI API Key (with access to `gemini-3.1-pro-preview` and `gemini-3-pro-image-preview`)
 
 ### 1. Set up the Backend (FastAPI)
-The backend handles the AI extraction, the multimodal streaming logic, and static asset serving.
-
 ```bash
 cd api
-
-# Create and activate a virtual environment
 python3 -m venv venv
-source venv/bin/activate  # On Windows use `venv\Scripts\activate`
-
-# Install dependencies
+source venv/bin/activate
 pip install -r requirements.txt
-
-# Create your environment file
 echo "GEMINI_API_KEY=your_api_key_here" > .env
-
-# Start the FastAPI server
 uvicorn app.main:app --reload --port 8000
 ```
-*The backend will now be running at `http://localhost:8000`. It will save generated images and audio to `api/app/static/assets`.*
 
 ### 2. Set up the Frontend (Next.js)
-The frontend handles the UI, the Server-Sent Events (SSE) parsing, and the Scene Inspector.
-
 ```bash
 cd web
-
-# Install dependencies
 npm install
-
-# Start the development server
 npm run dev
 ```
-*The frontend will now be running at `http://localhost:3000`.*
+*Frontend runs at `http://localhost:3000`. Backend runs at `http://localhost:8000`.*
 
-### 3. Usage
-1. Open `http://localhost:3000/quick` for the prompt-based generator.
-2. Open `http://localhost:3000/advanced` to test the long-document extraction and traceability features.
+---
 
-## MVP (Locked)
+## Technical Core
 
-In one run, a user can:
-1. Provide input (prompt or long document).
-2. Define a render profile (audience/style/fidelity/density/palette).
-3. Click generate and watch a dynamic-scene interleaved stream (typically 3-8 scenes).
-4. Regenerate one specific scene with a targeted edit instruction.
-5. Export a final explainer bundle.
+### 1. Signal Extraction Layer
+Extracts a style-agnostic `content_signal` (Thesis, Key Claims, Narrative Beats) using `gemini-3.1-pro-preview`.
 
-## Main Features
+### 2. Guided Render Profiling
+A multi-stage intake process to define:
+- **Audience Persona**: (e.g., Venture Capitalist, Student, Engineer)
+- **Art Direction**: (Diagram, Illustration, Hybrid)
+- **Constraints**: `must_include` and `must_avoid` rules for strict content alignment.
 
-1. Quick Generate
-- Input: `topic`, `audience`, `tone`, `duration`.
-- One-click generation for judge-friendly conventional UX.
+### 3. Script Pack Compilation
+The planner compiles a production manifest before generation, ensuring every scene has clear goals and "Acceptance Checks."
 
-2. Advanced Studio
-- Long-document input.
-- Explicit render profile controls:
-  - `visual_mode` (`diagram`, `illustration`, `hybrid`)
-  - `style` descriptors
-  - `fidelity` (`low`, `medium`, `high`)
-  - `density` (`simple`, `standard`, `detailed`)
-  - `palette` (auto/brand/custom)
-  - `audience` object:
-    - `level` (`beginner`, `intermediate`, `expert`)
-    - `persona` (open-ended, e.g. "Product manager")
-    - `taste_bar` (`standard`, `high`, `very_high`)
-    - optional `domain_context`, `must_include`, `must_avoid`
+### 4. Live Multimodal Streaming
+The "Nano Banana" orchestration loop delivers narration text interleaved with high-fidelity visuals from `gemini-3-pro-image-preview`.
 
-3. Signal Extraction Layer
-- Extract once into `content_signal`:
-  - thesis
-  - key claims
-  - concepts
-  - visual candidates
-  - narrative beats
+---
 
-4. Live Interleaved Scene Stream
-- Event-driven timeline renders text, visual, caption, and audio artifacts per scene.
+## Architecture (Agentic Studio v3)
 
-5. Scene-Level Regeneration
-- Regenerate scene `N` only.
-- Keep prior extraction and unaffected scenes intact for speed and control.
+- **Frontend**: Next.js Studio UI with `AgentActivityPanel` for 100% transparency of agent decisions.
+- **Backend**: FastAPI with `AgentCoordinator` service layer and SSE streaming.
+- **Orchestration**:
+    - **Planner**: Gemini 3.1 Pro (Logic & Extraction)
+    - **Director**: Gemini 3 Pro Image (Multimodal Generation)
+    - **Co-Director**: Gemini 3.1 Pro (Conversational Control)
+- **Infrastructure**: Cloud Run (300s timeouts) + Cloud Storage.
 
-6. Source Traceability
-- Each scene surfaces `claim_refs` and supporting snippets from `content_signal`.
+For detailed sequence diagrams, see: `/docs/architecture.md`
 
-7. Final Bundle
-- Transcript
-- Scene manifest (image/audio assets)
-- Social caption pack
+---
 
-8. Script Pack Transparency (Current v2)
-- Planner output is compiled into a runtime `script_pack` with:
-  - normalized scene IDs
-  - scene goals
-  - continuity references
-  - acceptance checks
-- The `script_pack` is streamed to UI before generation completes.
+## TODO / Roadmap
 
-9. Scene QA Gate + Auto Retry (Current v2)
-- Each scene is auto-evaluated (`PASS`, `WARN`, `FAIL`) on:
-  - narration/image presence
-  - length/structure
-  - focus alignment
-  - `must_include` / `must_avoid` alignment
-  - continuity strength
-- One automatic retry is executed on first `FAIL`, then surfaced in UI.
+- [ ] **Optional HD Upscale Pass**: Use `imagen-4.0-upscale-preview` for final-bundle quality.
+- [ ] **Multimodal Ingestion**: Support PDF logic extraction from charts and diagrams.
+- [ ] **Full Video Compositor**: Automated `.mp4` stitching of visuals and audio.
+- [ ] **Credit Protection**: Gated access PIN for public demos.
 
-## Data Contracts
-
-Canonical schemas live in:
-- `/Users/rk/Desktop/Gemini Live Agent Challenge/schemas/content_signal.schema.json`
-- `/Users/rk/Desktop/Gemini Live Agent Challenge/schemas/render_profile.schema.json`
-- `/Users/rk/Desktop/Gemini Live Agent Challenge/schemas/scene_plan.schema.json`
-
-Matching typed models:
-- TypeScript: `/Users/rk/Desktop/Gemini Live Agent Challenge/schemas/schema-types.ts`
-- Pydantic: `/Users/rk/Desktop/Gemini Live Agent Challenge/schemas/schema-models.py`
-
-## Architecture (Compare)
-
-### Legacy (v1)
-
-- Frontend: Next.js timeline UI (Quick Generate + Advanced Studio).
-- Backend: FastAPI with SSE streaming endpoints.
-- Model integration: Gemini via Google GenAI SDK.
-- Cloud deployment: Cloud Run (API) + Cloud Storage (generated assets).
-
-Core pipeline:
-1. `extract_signal` -> `content_signal`
-2. combine `content_signal + render_profile` -> outline/scene plan
-3. per-scene interleaved generation stream
-4. optional scene-level regenerate
-5. publish final bundle
-
-### Current (v2)
-
-- Adds `script_pack` compile stage between planning and generation.
-- Adds continuity memory carried across scenes.
-- Adds scene-level QA gate and one automatic retry on first failure.
-- Adds UI transparency for `script_pack` and QA outcomes.
-
-Core pipeline:
-1. `extract_signal` -> `content_signal`
-2. `content_signal + render_profile` -> dynamic scene planning
-3. compile `script_pack` (`continuity_refs`, `acceptance_checks`)
-4. scene loop:
-   - interleaved generation (text + image)
-   - audio generation
-   - QA evaluate (`PASS|WARN|FAIL`)
-   - one retry if first attempt is `FAIL`
-5. scene done + final bundle
-
-For detailed diagrams and sequence flows, see:
-- `/Users/rk/Desktop/Gemini Live Agent Challenge/docs/architecture.md`
-
-## Implementation Plan (48 Hours)
-
-1. Contract freeze
-- Lock schemas and event contracts.
-
-2. Backend scaffolding
-- Implement endpoints:
-  - `POST /extract-signal`
-  - `POST /generate-stream`
-  - `POST /regenerate-scene`
-  - `GET /final-bundle/{run_id}`
-
-3. Frontend scaffolding
-- Build Quick Generate and Advanced Studio entry paths.
-- Build timeline UI and scene cards.
-
-4. Extraction and planning
-- Wire long-input extraction to `content_signal`.
-- Build planner to create `scene_plan` from `content_signal + render_profile`.
-
-5. Streaming generation
-- Emit and render events:
-  - `scene_start`
-  - `story_text_delta`
-  - `diagram_ready`
-  - `caption_ready`
-  - `audio_ready`
-  - `scene_done`
-  - `final_bundle_ready`
-
-6. Scene-level regenerate + traceability
-- Add per-scene targeted regeneration.
-- Add claim/snippet trace panel per scene.
-
-7. Cloud deploy and proof
-- Deploy backend to Cloud Run.
-- Store generated assets in Cloud Storage.
-- Capture proof artifacts for submission.
-
-8. Demo hardening
-- Add sample input fallback, retries, and graceful loading states.
-- Record <= 4 minute demo plus backup take.
-
-## SSE Event Contract (Compare)
-
-### Legacy (v1)
-- `scene_queue_ready`
-- `scene_start`
-- `story_text_delta`
-- `diagram_ready`
-- `audio_ready`
-- `scene_done`
-- `final_bundle_ready`
-
-### Current (v2)
-- `script_pack_ready`
-- `scene_queue_ready`
-- `scene_start`
-- `story_text_delta`
-- `diagram_ready`
-- `audio_ready`
-- `qa_status`
-- `qa_retry`
-- `scene_retry_reset`
-- `scene_done`
-- `final_bundle_ready`
-- `error`
-
-## Demo Flow (4 Minutes)
-
-1. Quick Generate: enter prompt and click generate.
-2. Live stream: show interleaved scene output.
-3. Advanced mode: show long-doc + render profile controls.
-4. Regenerate one scene with a style/complexity tweak.
-5. Final bundle: transcript + assets + captions.
-6. Cloud proof: Cloud Run + Storage.
-
-## Scope Guardrails
-
-Keep for MVP:
-- single orchestrator service
-- scene-level regeneration
-- source traceability
-
-## TODO / Post-MVP Enhancements
-
-- [ ] **Credit Protection**: Add a simple "Access PIN" field on the landing page (e.g., `GEMINI_JUDGE_2026`) to gate the "Generate" button and prevent unauthorized API usage during the public demo phase.
-- [ ] **Optional HD Upscale Pass (Vertex AI)**: After scene approval, upscale approved images with `imagen-4.0-upscale-preview` (`x2`/`x3`/`x4`) for final-bundle quality without re-generating composition.
-- [ ] **Multimodal Ingestion**: Support PDF and Markdown uploads. Use Gemini's multimodal vision to extract logic directly from charts and diagrams in the source material, ensuring "Visual-to-Visual" continuity in the generated output.
-- [ ] **Full Video Compositor**: Automate the stitching of generated images and audio into a final `.mp4` file.
-- [ ] **Multi-Agent Orchestration**: Introduce specialized agents for fact-checking and automated visual critique.
+Built for the **Gemini API Developer Competition**.
