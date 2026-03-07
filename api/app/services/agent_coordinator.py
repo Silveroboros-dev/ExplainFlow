@@ -188,6 +188,15 @@ class AgentCoordinator:
                 raise KeyError(f"Unknown workflow_id: {workflow_id}")
             return self._snapshot(state)
 
+    async def get_script_pack(self, workflow_id: str) -> dict[str, Any] | None:
+        async with self._lock:
+            state = self._states.get(workflow_id)
+            if state is None:
+                raise KeyError(f"Unknown workflow_id: {workflow_id}")
+            if isinstance(state.script_pack, dict):
+                return deepcopy(state.script_pack)
+            return None
+
     async def record_signal_result(
         self,
         workflow_id: str,

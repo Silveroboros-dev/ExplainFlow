@@ -5,7 +5,9 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from app.schemas.events import build_sse_event
 from app.schemas.requests import ScriptPackScene
+from app.services.gemini_story_agent import GeminiStoryAgent
 from app.services.interleaved_parser import (
+    append_text_part,
     evaluate_scene_quality,
     extract_anchor_terms,
     normalized_scene_id,
@@ -57,3 +59,46 @@ def test_build_sse_event_serializes_payload() -> None:
     event = build_sse_event("status", {"message": "ok"})
     assert event["event"] == "status"
     assert event["data"] == '{"message": "ok"}'
+
+
+def test_append_text_part_handles_incremental_chunks() -> None:
+    text, delta = append_text_part("", "Hello")
+    assert text == "Hello"
+    assert delta == "Hello"
+
+    text, delta = append_text_part(text, " world")
+    assert text == "Hello world"
+    assert delta == " world"
+
+
+def test_append_text_part_handles_cumulative_chunks_without_duplication() -> None:
+    text, delta = append_text_part("", "Hello")
+    assert text == "Hello"
+    assert delta == "Hello"
+
+    text, delta = append_text_part(text, "Hello world")
+    assert text == "Hello world"
+    assert delta == " world"
+
+    text, delta = append_text_part(text, "Hello world")
+    assert text == "Hello world"
+    assert delta == ""
+
+
+def test_signal_extraction_prompt_versions_are_available() -> None:
+    schema = '{"type":"object"}'
+    source = "Sample source text."
+    v1_prompt = GeminiStoryAgent._build_signal_extraction_prompt(
+        document_text=source,
+        schema_text=schema,
+        version="v1",
+    )
+    v2_prompt = GeminiStoryAgent._build_signal_extraction_prompt(
+        document_text=source,
+        schema_text=schema,
+        version="v2",
+    )
+    assert "Analyze the following document" in v1_prompt
+    assert "ONE RUN" in v2_prompt
+    assert "JSON SCHEMA" in v1_prompt
+    assert "JSON SCHEMA" in v2_prompt

@@ -154,6 +154,33 @@ def extract_parts_from_chunk(chunk: Any) -> tuple[list[str], list[bytes]]:
     return text_parts, image_parts
 
 
+def append_text_part(current_text: str, text_part: str) -> tuple[str, str]:
+    """Merge a model-emitted text fragment and return (updated_full_text, incremental_delta).
+
+    Gemini responses may arrive as strict deltas OR as cumulative text snapshots.
+    This helper normalizes both into a stable incremental delta stream.
+    """
+    if not text_part:
+        return current_text, ""
+
+    if text_part.startswith(current_text):
+        delta = text_part[len(current_text):]
+        return text_part, delta
+
+    if current_text.startswith(text_part):
+        return current_text, ""
+
+    max_overlap = min(len(current_text), len(text_part))
+    overlap = 0
+    for idx in range(max_overlap, 0, -1):
+        if current_text.endswith(text_part[:idx]):
+            overlap = idx
+            break
+
+    delta = text_part[overlap:]
+    return current_text + delta, delta
+
+
 def extract_parts_from_response(response: Any) -> tuple[str, bytes | None]:
     full_text = ""
     image_bytes: bytes | None = None
@@ -164,7 +191,7 @@ def extract_parts_from_response(response: Any) -> tuple[str, bytes | None]:
         for part in parts:
             text = getattr(part, "text", None)
             if text:
-                full_text += text
+                full_text, _ = append_text_part(full_text, text)
             inline_data = getattr(part, "inline_data", None)
             if inline_data and getattr(inline_data, "data", None):
                 image_bytes = inline_data.data

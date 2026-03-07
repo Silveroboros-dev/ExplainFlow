@@ -7,15 +7,17 @@ from sse_starlette.sse import EventSourceResponse
 from app.schemas.requests import (
     SignalExtractionRequest,
     WorkflowArtifactLockRequest,
+    WorkflowAgentChatRequest,
     WorkflowRenderLockRequest,
     WorkflowStartRequest,
     WorkflowStreamRequest,
 )
-from app.services import AgentCoordinator, GeminiStoryAgent
+from app.services import AgentCoordinator, GeminiStoryAgent, WorkflowChatAgent
 
 router = APIRouter()
 agent = GeminiStoryAgent()
 coordinator = AgentCoordinator()
+chat_agent = WorkflowChatAgent(coordinator=coordinator, story_agent=agent)
 
 
 def _handle_error(exc: Exception, status_code: int = 409) -> HTTPException:
@@ -186,3 +188,12 @@ async def workflow_generate_stream(workflow_id: str, request: Request):
                 pass
 
     return EventSourceResponse(event_generator())
+
+
+@router.post("/workflow/agent/chat")
+async def workflow_agent_chat(payload: WorkflowAgentChatRequest):
+    try:
+        response = await chat_agent.handle_chat_turn(payload)
+        return response.model_dump()
+    except Exception as exc:
+        raise _handle_error(exc, status_code=500) from exc

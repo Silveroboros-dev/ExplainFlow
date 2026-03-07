@@ -4,6 +4,7 @@ import Image from 'next/image';
 import React, { useState } from 'react';
 import SceneCard from '@/components/SceneCard';
 import FinalBundle from '@/components/FinalBundle';
+import AgentActivityPanel, { AgentNote, AgentNoteType } from '@/components/AgentActivityPanel';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -54,6 +55,15 @@ type BrowserSpeechRecognition = {
 
 type BrowserSpeechRecognitionCtor = new () => BrowserSpeechRecognition;
 
+const CHECKPOINT_LABELS: Record<string, string> = {
+  CP1_SIGNAL_READY: "Signal Ready",
+  CP2_ARTIFACTS_LOCKED: "Artifacts Locked",
+  CP3_RENDER_LOCKED: "Render Locked",
+  CP4_SCRIPT_LOCKED: "Script Pack Ready",
+  CP5_STREAM_COMPLETE: "Stream Complete",
+  CP6_BUNDLE_FINALIZED: "Final Bundle Ready",
+};
+
 export default function QuickGenerate() {
   const [topic, setTopic] = useState('');
   const [audience, setAudience] = useState('Beginner');
@@ -66,9 +76,21 @@ export default function QuickGenerate() {
   const [isListening, setIsListening] = useState(false);
   const [speechError, setSpeechError] = useState('');
   const [scenes, setScenes] = useState<Record<string, QuickScene>>({});
+  const [agentNotes, setAgentNotes] = useState<AgentNote[]>([]);
 
   const fullTextBuffer = React.useRef<Record<string, string>>({});
   const recognitionRef = React.useRef<BrowserSpeechRecognition | null>(null);
+
+  const pushAgentNote = (type: AgentNoteType, stage: string, message: string) => {
+    const note: AgentNote = {
+      id: `note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type,
+      stage,
+      message,
+      timestamp: Date.now(),
+    };
+    setAgentNotes((prev) => [note, ...prev].slice(0, 60));
+  };
 
   const updateSceneMetadata = (
     sceneId: string,
@@ -188,7 +210,9 @@ export default function QuickGenerate() {
     setGenerationError('');
     setGenerationStatus('Connecting to generation stream...');
     setScenes({}); 
+    setAgentNotes([]);
     fullTextBuffer.current = {};
+    pushAgentNote("info", "Session", "Quick generation started. Planning scene outline.");
     
     const url = new URL('http://localhost:8000/api/generate-stream');
     url.searchParams.append('topic', topic);
@@ -212,6 +236,7 @@ export default function QuickGenerate() {
       });
       setScenes(initialScenes);
       setGenerationStatus('Scene queue ready. Starting generation...');
+      pushAgentNote("info", "Planning", `Scene queue ready with ${Object.keys(initialScenes).length} scenes.`);
     });
 
     eventSource.addEventListener('scene_start', (event) => {
@@ -226,6 +251,7 @@ export default function QuickGenerate() {
       updateSceneMetadata(data.scene_id, patch);
       if (data.title) {
         setGenerationStatus(`Generating ${data.title}...`);
+        pushAgentNote("info", data.scene_id ?? "Scene", `Generating ${data.title}.`);
       }
     });
 
@@ -247,6 +273,7 @@ export default function QuickGenerate() {
     eventSource.addEventListener('scene_done', (event) => {
       const data = JSON.parse(event.data);
       updateSceneMetadata(data.scene_id, { status: 'ready' });
+      pushAgentNote("info", data.scene_id ?? "Scene", "Scene generation completed.");
     });
 
     eventSource.addEventListener('status', (event: MessageEvent) => {
@@ -254,15 +281,68 @@ export default function QuickGenerate() {
         const data = JSON.parse(event.data) as { message?: string };
         if (data.message) {
           setGenerationStatus(data.message);
+          pushAgentNote("info", "Agent", data.message);
         }
       } catch {
         // Ignore malformed status chunks.
       }
     });
 
-    eventSource.addEventListener('final_bundle_ready', () => {
+    eventSource.addEventListener('checkpoint', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data) as { checkpoint?: string; status?: string };
+        const checkpoint = typeof data.checkpoint === "string" ? data.checkpoint : "";
+        const status = typeof data.status === "string" ? data.status.toUpperCase() : "";
+        if (!checkpoint || !status) return;
+        const label = CHECKPOINT_LABELS[checkpoint] ?? checkpoint;
+        const noteType: AgentNoteType = status === "FAILED" ? "error" : "checkpoint";
+        pushAgentNote(noteType, "Checkpoint", `${label}: ${status}`);
+      } catch {
+        // Ignore malformed checkpoint chunks.
+      }
+    });
+
+    eventSource.addEventListener('qa_status', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data) as { scene_id?: string; status?: string; reasons?: string[] };
+        const sceneId = typeof data.scene_id === "string" ? data.scene_id : "Scene";
+        const status = typeof data.status === "string" ? data.status.toUpperCase() : "WARN";
+        const reason = Array.isArray(data.reasons) && data.reasons.length > 0 ? data.reasons[0] : "Quality check update received.";
+        pushAgentNote("qa", sceneId, `QA ${status}: ${reason}`);
+      } catch {
+        // Ignore malformed QA chunks.
+      }
+    });
+
+    eventSource.addEventListener('qa_retry', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data) as { scene_id?: string };
+        const sceneId = typeof data.scene_id === "string" ? data.scene_id : "Scene";
+        pushAgentNote("qa", sceneId, "QA requested a retry for this scene.");
+      } catch {
+        // Ignore malformed retry chunks.
+      }
+    });
+
+    eventSource.addEventListener('final_bundle_ready', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data) as {
+          claim_traceability?: { claims_total?: number; claims_referenced?: number };
+        };
+        const traceability = data.claim_traceability;
+        if (traceability && typeof traceability.claims_total === "number" && typeof traceability.claims_referenced === "number") {
+          pushAgentNote(
+            "trace",
+            "Traceability",
+            `Claims covered: ${traceability.claims_referenced}/${traceability.claims_total}.`
+          );
+        }
+      } catch {
+        // Ignore malformed final bundle chunks.
+      }
       eventSource.close();
       setGenerationStatus('Generation complete.');
+      pushAgentNote("checkpoint", "Session", "Generation complete. Final bundle is ready.");
       setIsGenerating(false);
     });
 
@@ -280,6 +360,7 @@ export default function QuickGenerate() {
       }
       setGenerationError(serverError || 'Stream connection interrupted.');
       setGenerationStatus('');
+      pushAgentNote("error", "Session", serverError || "Stream connection interrupted.");
       eventSource.close();
       setIsGenerating(false);
     });
@@ -466,6 +547,13 @@ export default function QuickGenerate() {
             </form>
           </CardContent>
         </Card>
+
+        <AgentActivityPanel
+          title="Agent Session Notes"
+          subtitle="Checkpoint, QA, and traceability events while the stream runs."
+          notes={agentNotes}
+          currentStatus={generationStatus}
+        />
 
         <div className="space-y-6 mt-12">
           {Object.values(scenes).length > 0 && (

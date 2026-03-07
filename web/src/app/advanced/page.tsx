@@ -4,6 +4,7 @@ import Image from 'next/image';
 import React, { useState } from 'react';
 import SceneCard from '@/components/SceneCard';
 import FinalBundle from '@/components/FinalBundle';
+import AgentActivityPanel, { AgentNote, AgentNoteType } from '@/components/AgentActivityPanel';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -11,8 +12,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Loader2 } from "lucide-react";
+import { Toaster, toast } from "sonner";
 
 const SIGNAL_EXPLAINER_TEXT = [
   "Structured extraction converts long input into a stable JSON contract.",
@@ -130,6 +135,52 @@ type WorkflowSnapshot = {
 
 type AdvancedPanel = 'source' | 'profile' | 'signal' | 'stream' | 'script';
 type ActionDialogStage = 'extract' | 'profile' | 'script' | 'stream';
+type RenderProfileStep = 'output' | 'audience' | 'style' | 'constraints';
+type ChatRole = 'agent' | 'user' | 'system';
+
+type ChatMessage = {
+  id: string;
+  role: ChatRole;
+  text: string;
+  timestamp: number;
+};
+
+type WorkflowAgentApiTurn = {
+  role: 'user' | 'agent' | 'system';
+  text: string;
+};
+
+type WorkflowAgentChatResponse = {
+  status?: 'success' | 'error';
+  assistant_message?: string;
+  selected_action?: string;
+  workflow_id?: string | null;
+  workflow?: WorkflowSnapshot;
+  content_signal?: ExtractedSignal | null;
+  script_pack?: ScriptPackPayload | null;
+  ui?: {
+    active_panel?: AdvancedPanel | null;
+    start_stream?: boolean;
+  };
+  message?: string | null;
+};
+
+const CHECKPOINT_LABELS: Record<string, string> = {
+  CP1_SIGNAL_READY: "Signal Ready",
+  CP2_ARTIFACTS_LOCKED: "Artifacts Locked",
+  CP3_RENDER_LOCKED: "Render Locked",
+  CP4_SCRIPT_LOCKED: "Script Pack Ready",
+  CP5_STREAM_COMPLETE: "Stream Complete",
+  CP6_BUNDLE_FINALIZED: "Final Bundle Ready",
+};
+
+const RENDER_PROFILE_STEPS: RenderProfileStep[] = ['output', 'audience', 'style', 'constraints'];
+const RENDER_PROFILE_STEP_LABELS: Record<RenderProfileStep, string> = {
+  output: '1. Output Goal',
+  audience: '2. Audience',
+  style: '3. Style',
+  constraints: '4. Constraints',
+};
 
 export default function AdvancedStudio() {
   const [sourceDoc, setSourceDoc] = useState('');
@@ -144,6 +195,7 @@ export default function AdvancedStudio() {
   const [mustIncludeText, setMustIncludeText] = useState('');
   const [mustAvoidText, setMustAvoidText] = useState('');
   const [activePanel, setActivePanel] = useState<AdvancedPanel>('source');
+  const [profileStep, setProfileStep] = useState<RenderProfileStep>('output');
   const [actionDialogStage, setActionDialogStage] = useState<ActionDialogStage | null>(null);
   const [showAmendHelp, setShowAmendHelp] = useState(false);
   
@@ -167,6 +219,17 @@ export default function AdvancedStudio() {
   const [scriptPack, setScriptPack] = useState<ScriptPackPayload | null>(null);
   const [workflowId, setWorkflowId] = useState<string | null>(null);
   const [workflowSnapshot, setWorkflowSnapshot] = useState<WorkflowSnapshot | null>(null);
+  const [agentNotes, setAgentNotes] = useState<AgentNote[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
+    {
+      id: 'chat-welcome',
+      role: 'agent',
+      text: 'Hi, I will help you onboard ExplainFlow and get maximum value from your request. ExplainFlow turns source material into a structured signal, script pack, and interleaved text-image-audio output. Shall we start?',
+      timestamp: Date.now(),
+    },
+  ]);
+  const chatScrollAnchorRef = React.useRef<HTMLDivElement | null>(null);
   
   // Ref for the typewriter effect to track full text without causing infinite re-renders
   const fullTextBuffer = React.useRef<Record<string, string>>({});
@@ -174,6 +237,40 @@ export default function AdvancedStudio() {
   const asStringArray = (value: unknown): string[] => (
     Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
   );
+
+  const pushChatMessage = (role: ChatRole, text: string) => {
+    const message: ChatMessage = {
+      id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      role,
+      text,
+      timestamp: Date.now(),
+    };
+    setChatMessages((prev) => {
+      const withoutSameRole = prev.filter((item) => item.role !== role);
+      const next = [...withoutSameRole, message].sort((a, b) => a.timestamp - b.timestamp);
+      return next.slice(-2);
+    });
+  };
+
+  const pushAgentNote = (type: AgentNoteType, stage: string, message: string) => {
+    const note: AgentNote = {
+      id: `note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type,
+      stage,
+      message,
+      timestamp: Date.now(),
+    };
+    setAgentNotes((prev) => [note, ...prev].slice(0, 80));
+    if (type === 'checkpoint') {
+      toast.success(`${stage}`, { description: message, duration: 2600 });
+    } else if (type === 'error') {
+      toast.error(`${stage}`, { description: message, duration: 3400 });
+    }
+  };
+
+  React.useEffect(() => {
+    chatScrollAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [chatMessages.length, isExtracting, isApplyingProfile, isGeneratingScriptPack, isGenerating]);
 
   const mapArtifactScope = (selectedArtifactType: string): string[] => {
     if (selectedArtifactType === 'slide_thumbnail') {
@@ -364,6 +461,8 @@ export default function AdvancedStudio() {
       return false;
     }
 
+    setAgentNotes([]);
+    pushAgentNote('info', 'Extraction', 'Signal extraction started from source material.');
     setIsExtracting(true);
     setSignalStage('sending');
     setExtractProgress(8);
@@ -392,6 +491,7 @@ export default function AdvancedStudio() {
       } = await startResponse.json();
       if (!startResponse.ok || startData.status !== 'success' || !startData.workflow_id) {
         setError('Unable to initialize workflow.');
+        pushAgentNote('error', 'Extraction', 'Workflow initialization failed.');
         setSignalStage('error');
         setExtractProgress(0);
         return false;
@@ -422,9 +522,11 @@ export default function AdvancedStudio() {
         setSignalStage('ready');
         setExtractProgress(100);
         setGenerationStatus('Signal extracted. Next: lock artifact scope and render profile.');
+        pushAgentNote('checkpoint', 'Extraction', 'Signal extracted and schema validation passed.');
         return true;
       } else {
         setError(data.message || 'Extraction failed');
+        pushAgentNote('error', 'Extraction', data.message || 'Signal extraction failed.');
         setSignalStage('error');
         setExtractProgress(0);
         return false;
@@ -432,6 +534,7 @@ export default function AdvancedStudio() {
     } catch (err) {
       console.error(err);
       setError('Network error during extraction');
+      pushAgentNote('error', 'Extraction', 'Network error during signal extraction.');
       setSignalStage('error');
       setExtractProgress(0);
       return false;
@@ -450,25 +553,46 @@ export default function AdvancedStudio() {
       void runExtraction();
       return;
     }
+    pushAgentNote('info', 'Extraction', 'Re-extraction requested. Waiting for confirmation.');
     openActionDialog('extract');
   };
 
   const handleApplyRenderProfile = () => {
     setActivePanel('signal');
+    pushAgentNote('info', 'Render Profile', 'Render profile ready. Waiting for lock confirmation.');
     openActionDialog('profile');
+  };
+
+  const handleProfileStepBack = () => {
+    if (!canMoveProfileBack) return;
+    const previousStep = RENDER_PROFILE_STEPS[profileStepIndex - 1];
+    if (previousStep) {
+      setProfileStep(previousStep);
+    }
+  };
+
+  const handleProfileStepNext = () => {
+    if (!canMoveProfileNext) return;
+    const nextStep = RENDER_PROFILE_STEPS[profileStepIndex + 1];
+    if (nextStep) {
+      setProfileStep(nextStep);
+    }
   };
 
   const handleConfirmSignal = async () => {
     if (!extractedSignal) {
       setGenerationStatus('Extract signal first.');
+      pushAgentNote('error', 'Signal', 'Signal confirmation blocked: extract signal first.');
       return;
     }
     if (!workflowSnapshot?.ready_for_script_pack) {
       setGenerationStatus('Workflow gate not ready. Lock artifact scope and render profile first.');
+      pushAgentNote('error', 'Signal', 'Signal confirmation blocked by join gate (artifacts/render not locked).');
       return;
     }
     setActivePanel('script');
     setGenerationStatus('Signal confirmed. Generating script pack...');
+    pushAgentNote('checkpoint', 'Signal', 'Signal confirmed. Script pack generation started.');
     await handleGenerateScriptPack(scriptPresentationMode);
   };
 
@@ -513,12 +637,14 @@ export default function AdvancedStudio() {
   const applyProfileToWorkflow = async (mode: 'preview' | 'high' = fidelityPreference): Promise<boolean> => {
     if (!workflowId) {
       setGenerationStatus('Start with extraction first so a workflow can be created.');
+      pushAgentNote('error', 'Render Profile', 'Cannot lock render profile before workflow start.');
       return false;
     }
 
     setIsApplyingProfile(true);
     setGenerationError('');
     setGenerationStatus('Locking artifact scope and render profile...');
+    pushAgentNote('info', 'Render Profile', 'Locking artifact scope and render profile for this run.');
 
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -535,6 +661,7 @@ export default function AdvancedStudio() {
           ? artifactData.detail
           : (typeof artifactData?.message === 'string' ? artifactData.message : 'Artifact scope lock failed.');
         setGenerationError(detail);
+        pushAgentNote('error', 'Render Profile', detail);
         setGenerationStatus('');
         return false;
       }
@@ -554,6 +681,7 @@ export default function AdvancedStudio() {
           ? renderData.detail
           : (typeof renderData?.message === 'string' ? renderData.message : 'Render profile lock failed.');
         setGenerationError(detail);
+        pushAgentNote('error', 'Render Profile', detail);
         setGenerationStatus('');
         return false;
       }
@@ -570,13 +698,16 @@ export default function AdvancedStudio() {
             ? 'High-fidelity profile locked. Regenerate script and stream for upgraded bundle.'
             : 'Render profile locked. Continue to signal confirmation and script planning.'
         );
+        pushAgentNote('checkpoint', 'Render Profile', 'Render profile locked and ready.');
       } else {
         setGenerationStatus('Artifacts locked. Render profile queued and will auto-lock when signal extraction completes.');
+        pushAgentNote('info', 'Render Profile', 'Artifacts locked. Render lock is queued until signal is ready.');
       }
       return true;
     } catch (err) {
       console.error('Apply profile error:', err);
       setGenerationError('Unable to lock render profile in workflow.');
+      pushAgentNote('error', 'Render Profile', 'Unable to lock render profile in workflow.');
       setGenerationStatus('');
       return false;
     } finally {
@@ -587,10 +718,12 @@ export default function AdvancedStudio() {
   const handleGenerateScriptPack = async (mode: 'review' | 'auto' = 'review') => {
     if (!workflowId) {
       setGenerationStatus('Run extraction first to initialize workflow.');
+      pushAgentNote('error', 'Script Pack', 'Cannot generate script pack before extraction workflow starts.');
       return;
     }
     if (!workflowSnapshot?.ready_for_script_pack) {
       setGenerationStatus('Workflow gate not ready. Lock artifacts and render profile first.');
+      pushAgentNote('error', 'Script Pack', 'Script pack generation blocked by workflow gate.');
       return;
     }
 
@@ -601,6 +734,13 @@ export default function AdvancedStudio() {
       mode === 'review'
         ? 'Preparing script pack for your confirmation...'
         : 'Preparing script pack for immediate use...'
+    );
+    pushAgentNote(
+      'info',
+      'Script Pack',
+      mode === 'review'
+        ? 'Generating script pack for review.'
+        : 'Generating script pack for immediate streaming.'
     );
     setScriptPack(null);
     if (mode === 'review') {
@@ -622,20 +762,24 @@ export default function AdvancedStudio() {
         if (mode === 'review') {
           setGenerationStatus('Script pack is ready. Review and amend before starting stream generation.');
           setActivePanel('script');
+          pushAgentNote('checkpoint', 'Script Pack', 'Script pack ready for review.');
         } else {
           setGenerationStatus('Script pack is ready and locked for stream generation.');
           setActivePanel('stream');
+          pushAgentNote('checkpoint', 'Script Pack', 'Script pack ready and auto-approved for stream.');
         }
       } else {
         const detail = typeof data?.detail === 'string'
           ? data.detail
           : (typeof data?.message === 'string' ? data.message : 'Script pack generation failed.');
         setGenerationError(detail);
+        pushAgentNote('error', 'Script Pack', detail);
         setGenerationStatus('');
       }
     } catch (err) {
       console.error("Script pack error:", err);
       setGenerationError('Unable to generate script pack.');
+      pushAgentNote('error', 'Script Pack', 'Unable to generate script pack.');
       setGenerationStatus('');
     } finally {
       setIsGeneratingScriptPack(false);
@@ -650,6 +794,7 @@ export default function AdvancedStudio() {
     setFidelityPreference('high');
     setGenerationError('');
     setGenerationStatus('Switching to high-fidelity mode...');
+    pushAgentNote('info', 'Final Bundle', 'Switching to high-fidelity mode.');
     const applied = await applyProfileToWorkflow('high');
     if (!applied) {
       return;
@@ -659,15 +804,18 @@ export default function AdvancedStudio() {
     fullTextBuffer.current = {};
     setActivePanel('script');
     setGenerationStatus('High-fidelity profile locked. Generate script pack, then generate stream for upgraded bundle.');
+    pushAgentNote('checkpoint', 'Final Bundle', 'High-fidelity render profile locked.');
   };
 
-  const handleGenerateStream = async () => {
+  const handleGenerateStream = async (scriptPackOverride?: ScriptPackPayload | null) => {
     if (!workflowId) {
       setGenerationStatus('Run extraction first to initialize workflow.');
+      pushAgentNote('error', 'Generation', 'Cannot start generation before extraction workflow starts.');
       return;
     }
     if (!workflowSnapshot?.ready_for_stream) {
       setGenerationStatus('Workflow gate not ready for stream. Confirm script pack first.');
+      pushAgentNote('error', 'Generation', 'Generation blocked by workflow gate (script pack not locked).');
       return;
     }
     
@@ -676,6 +824,7 @@ export default function AdvancedStudio() {
     setGenerationStatus('Preparing generation pipeline...');
     setScenes({});
     fullTextBuffer.current = {};
+    pushAgentNote('info', 'Generation', 'Interleaved generation stream started.');
     
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -683,7 +832,7 @@ export default function AdvancedStudio() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          script_pack: scriptPack ?? undefined
+          script_pack: scriptPackOverride ?? scriptPack ?? undefined
         })
       });
 
@@ -731,10 +880,16 @@ export default function AdvancedStudio() {
                   fullTextBuffer.current[sceneItem.scene_id] = sceneItem.narration_focus || '';
                 });
                 setScenes(initialScenes);
+                pushAgentNote(
+                  'info',
+                  'Planning',
+                  `Scene queue ready with ${Object.keys(initialScenes).length} scenes.`
+                );
               } else if (currentEvent === 'script_pack_ready') {
                 const rawPack = data.script_pack;
                 if (rawPack && typeof rawPack === 'object') {
                   setScriptPack(rawPack as ScriptPackPayload);
+                  pushAgentNote('checkpoint', 'Script Pack', 'Script pack received in stream context.');
                 }
               } else if (currentEvent === 'scene_start') {
                 const sceneId = typeof data.scene_id === 'string' ? data.scene_id : '';
@@ -742,6 +897,7 @@ export default function AdvancedStudio() {
                 fullTextBuffer.current[sceneId] = '';
                 if (typeof data.title === 'string' && data.title.trim()) {
                   setGenerationStatus(`Generating ${data.title}...`);
+                  pushAgentNote('info', sceneId, `Generating ${data.title}.`);
                 }
                 const patch: Partial<SceneViewModel> = {
                   claim_refs: asStringArray(data.claim_refs),
@@ -774,6 +930,8 @@ export default function AdvancedStudio() {
                   qa_word_count: typeof qa.word_count === 'number' ? qa.word_count : undefined,
                   status: qa.status === 'FAIL' ? 'qa-failed' : 'generating',
                 });
+                const qaReason = Array.isArray(qa.reasons) && qa.reasons.length > 0 ? qa.reasons[0] : 'Quality check updated.';
+                pushAgentNote('qa', qa.scene_id, `QA ${qa.status}: ${qaReason}`);
               } else if (currentEvent === 'qa_retry') {
                 const sceneId = typeof data.scene_id === 'string' ? data.scene_id : '';
                 if (!sceneId) continue;
@@ -788,6 +946,7 @@ export default function AdvancedStudio() {
                     },
                   };
                 });
+                pushAgentNote('qa', sceneId, 'QA requested a retry for this scene.');
               } else if (currentEvent === 'scene_retry_reset') {
                 const sceneId = typeof data.scene_id === 'string' ? data.scene_id : '';
                 if (!sceneId) continue;
@@ -807,19 +966,42 @@ export default function AdvancedStudio() {
                   status: qaStatus === 'FAIL' ? 'qa-failed' : 'ready',
                   auto_retry_count: autoRetries,
                 });
+                if (qaStatus) {
+                  pushAgentNote('info', sceneId, `Scene done with QA ${qaStatus}.`);
+                }
               } else if (currentEvent === 'status') {
                 if (typeof data.message === 'string' && data.message.trim()) {
                   setGenerationStatus(data.message);
+                  pushAgentNote('info', 'Agent', data.message);
                 }
               } else if (currentEvent === 'checkpoint') {
                 const checkpoint = typeof data.checkpoint === 'string' ? data.checkpoint : '';
                 const status = typeof data.status === 'string' ? data.status : '';
                 if (checkpoint && status) {
                   setGenerationStatus(`${checkpoint}: ${status}`);
+                  const checkpointLabel = CHECKPOINT_LABELS[checkpoint] ?? checkpoint;
+                  const normalizedStatus = status.toUpperCase();
+                  pushAgentNote(
+                    normalizedStatus === 'FAILED' ? 'error' : 'checkpoint',
+                    'Checkpoint',
+                    `${checkpointLabel}: ${normalizedStatus}`
+                  );
                 }
               } else if (currentEvent === 'final_bundle_ready') {
                 setGenerationStatus('');
                 setIsGenerating(false);
+                const traceabilityRaw = data.claim_traceability;
+                if (traceabilityRaw && typeof traceabilityRaw === 'object') {
+                  const traceability = traceabilityRaw as { claims_total?: number; claims_referenced?: number };
+                  if (typeof traceability.claims_total === 'number' && typeof traceability.claims_referenced === 'number') {
+                    pushAgentNote(
+                      'trace',
+                      'Traceability',
+                      `Claims covered: ${traceability.claims_referenced}/${traceability.claims_total}.`
+                    );
+                  }
+                }
+                pushAgentNote('checkpoint', 'Generation', 'Final bundle ready.');
                 if (workflowId) {
                   try {
                     await fetchWorkflowSnapshot(workflowId);
@@ -829,6 +1011,7 @@ export default function AdvancedStudio() {
                 }
               } else if (currentEvent === 'error') {
                 setGenerationError(typeof data.error === 'string' ? data.error : 'Generation failed.');
+                pushAgentNote('error', 'Generation', typeof data.error === 'string' ? data.error : 'Generation failed.');
                 setGenerationStatus('');
                 setIsGenerating(false);
                 if (workflowId) {
@@ -849,6 +1032,7 @@ export default function AdvancedStudio() {
     } catch (err) {
       console.error("Stream error:", err);
       setGenerationError('Unable to connect to generation stream.');
+      pushAgentNote('error', 'Generation', 'Unable to connect to generation stream.');
       setGenerationStatus('');
       setIsGenerating(false);
     }
@@ -905,6 +1089,88 @@ export default function AdvancedStudio() {
       closeActionDialog();
       await handleGenerateScriptPack();
     }
+  };
+
+  const handleChatCommand = async (rawInput: string) => {
+    const message = rawInput.trim();
+    if (!message) return;
+
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const conversation: WorkflowAgentApiTurn[] = chatMessages.slice(-10).map((turn) => ({
+      role: turn.role === 'agent' ? 'agent' : turn.role === 'system' ? 'system' : 'user',
+      text: turn.text,
+    }));
+
+    try {
+      setGenerationError('');
+      const response = await fetch(`${apiUrl}/api/workflow/agent/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message,
+          context: {
+            workflow_id: workflowId,
+            active_panel: activePanel,
+            source_text: sourceDoc,
+            render_profile: buildRenderProfilePayload(),
+            artifact_scope: mapArtifactScope(artifactType),
+            script_presentation_mode: scriptPresentationMode,
+          },
+          conversation,
+        }),
+      });
+      const data = await response.json() as WorkflowAgentChatResponse;
+
+      if (typeof data.workflow_id === 'string') {
+        setWorkflowId(data.workflow_id);
+      }
+      if (data.workflow && typeof data.workflow === 'object') {
+        updateWorkflowSnapshot(data.workflow);
+      }
+      if (data.content_signal && typeof data.content_signal === 'object') {
+        setExtractedSignal(data.content_signal);
+        setSignalStage('ready');
+        setExtractProgress(100);
+      }
+      let scriptPackOverride: ScriptPackPayload | null = null;
+      if (data.script_pack && typeof data.script_pack === 'object') {
+        scriptPackOverride = data.script_pack as ScriptPackPayload;
+        setScriptPack(scriptPackOverride);
+      }
+      if (data.ui?.active_panel) {
+        setActivePanel(data.ui.active_panel);
+      }
+      if (typeof data.assistant_message === 'string' && data.assistant_message.trim()) {
+        pushChatMessage('agent', data.assistant_message.trim());
+      }
+
+      const detail = typeof data.message === 'string'
+        ? data.message
+        : (!response.ok ? 'Agent request failed.' : '');
+      if (detail) {
+        setGenerationError(detail);
+        pushAgentNote('error', 'Agent', detail);
+      } else if (typeof data.assistant_message === 'string' && data.assistant_message.trim()) {
+        setGenerationStatus(data.assistant_message.trim());
+      }
+
+      if (data.ui?.start_stream) {
+        await handleGenerateStream(scriptPackOverride ?? scriptPack ?? null);
+      }
+    } catch (err) {
+      console.error("Agent chat error:", err);
+      setGenerationError('Unable to contact agent.');
+      pushAgentNote('error', 'Agent', 'Unable to contact agent.');
+    }
+  };
+
+  const handleChatSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const text = chatInput.trim();
+    if (!text) return;
+    pushChatMessage('user', text);
+    setChatInput('');
+    await handleChatCommand(text);
   };
 
   const handleRegenerate = (sceneId: string, newText: string, newImageUrl: string, newAudioUrl: string) => {
@@ -972,7 +1238,35 @@ export default function AdvancedStudio() {
     script: 'stream',
     stream: 'script',
   };
-
+  const profileStepIndex = RENDER_PROFILE_STEPS.indexOf(profileStep);
+  const canMoveProfileBack = profileStepIndex > 0;
+  const canMoveProfileNext = profileStepIndex < RENDER_PROFILE_STEPS.length - 1;
+  const agentIsWorking = isExtracting || isApplyingProfile || isGeneratingScriptPack || isGenerating;
+  const chatRoleMeta = (role: ChatRole): {
+    rowClassName: string;
+    bubbleClassName: string;
+    label: string;
+  } => {
+    if (role === 'user') {
+      return {
+        rowClassName: 'justify-end',
+        bubbleClassName: 'border-blue-300 bg-blue-50 text-blue-950',
+        label: 'You',
+      };
+    }
+    if (role === 'system') {
+      return {
+        rowClassName: 'justify-center',
+        bubbleClassName: 'border-slate-300 bg-slate-100 text-slate-700',
+        label: 'System',
+      };
+    }
+    return {
+      rowClassName: 'justify-start',
+      bubbleClassName: 'border-slate-200 bg-white text-slate-900',
+      label: 'ExplainFlow',
+    };
+  };
   const stageProgress = (() => {
     if (!sourceDoc.trim()) return 0;
     if (workflowSnapshot?.checkpoint_state?.CP6_BUNDLE_FINALIZED === 'passed') return 100;
@@ -1093,6 +1387,65 @@ export default function AdvancedStudio() {
           <p className="text-lg text-slate-200/95 drop-shadow-[0_1px_8px_rgba(2,6,23,0.6)]">Long-document input and granular render profile control.</p>
         </div>
 
+        <div className="grid items-start gap-6 lg:grid-cols-[1.2fr_1fr]">
+          <div className="space-y-6 lg:sticky lg:top-4">
+            <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
+              <CardHeader>
+                <CardTitle className="text-slate-900">ExplainFlow Assistant</CardTitle>
+                <CardDescription className="text-slate-600">
+                  Workflow orchestration console. Shows only the latest request/response while detailed logs stay in Agent Session Notes.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <ScrollArea className="h-[320px] rounded-md border border-slate-200 bg-slate-50 p-3 md:h-[360px]">
+                  <div className="space-y-3 pr-2">
+                    {chatMessages.map((message) => {
+                      const meta = chatRoleMeta(message.role);
+                      return (
+                        <div key={message.id} className={`flex w-full items-start gap-2 ${meta.rowClassName}`}>
+                          <div className={`max-w-[85%] rounded-2xl border px-3 py-2 text-sm leading-6 shadow-sm ${meta.bubbleClassName}`}>
+                            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide opacity-70">{meta.label}</p>
+                            <p className="whitespace-pre-wrap">{message.text}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {agentIsWorking && (
+                      <div className="flex w-full items-start gap-2 justify-start">
+                        <div className="max-w-[85%] rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
+                          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600">ExplainFlow</p>
+                          <Skeleton className="h-3 w-28 bg-slate-200" />
+                          <Skeleton className="mt-2 h-3 w-44 bg-slate-200" />
+                          <Skeleton className="mt-2 h-3 w-36 bg-slate-200" />
+                        </div>
+                      </div>
+                    )}
+                    <div ref={chatScrollAnchorRef} />
+                  </div>
+                </ScrollArea>
+                <form onSubmit={(e) => void handleChatSubmit(e)} className="space-y-2">
+                  <Textarea
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    placeholder='Ask naturally, e.g. "What should I do next?" or "Open render profile."'
+                    className="min-h-[84px] resize-none bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
+                  />
+                  <Button type="submit" className="w-full">
+                    Send Request
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+
+            <AgentActivityPanel
+              title="Agent Session Notes"
+              subtitle="Checkpoint, QA, and traceability notes from the active workflow."
+              notes={agentNotes}
+              currentStatus={generationStatus}
+            />
+          </div>
+
+          <div className="space-y-6">
         <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
           <CardContent className="pt-6 space-y-4">
             <div className="overflow-x-auto">
@@ -1178,130 +1531,174 @@ export default function AdvancedStudio() {
                   <CardHeader>
                     <CardTitle className="text-slate-900">2. Render Profile</CardTitle>
                     <CardDescription className="text-slate-600">
-                      Configure output while signal extraction runs in parallel.
+                      Configure output while signal extraction runs in parallel. Questions are split so each choice is deliberate.
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="high-contrast-form-labels space-y-5">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label htmlFor="visualMode">Visual Mode</Label>
-                        <Select value={visualMode} onValueChange={setVisualMode}>
-                          <SelectTrigger id="visualMode" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
-                            <SelectValue placeholder="Select..." />
-                          </SelectTrigger>
-                          <SelectContent className="bg-white text-slate-900 border-slate-300">
-                            <SelectItem value="diagram">Diagram</SelectItem>
-                            <SelectItem value="illustration">Illustration</SelectItem>
-                            <SelectItem value="hybrid">Hybrid</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="artifactType">Artifact Type</Label>
-                        <Select value={artifactType} onValueChange={setArtifactType}>
-                          <SelectTrigger id="artifactType" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
-                            <SelectValue placeholder="Select artifact type" />
-                          </SelectTrigger>
-                          <SelectContent className="bg-white text-slate-900 border-slate-300">
-                            <SelectItem value="storyboard_grid">Storyboard Grid</SelectItem>
-                            <SelectItem value="technical_infographic">Technical Infographic</SelectItem>
-                            <SelectItem value="process_diagram">Process Diagram</SelectItem>
-                            <SelectItem value="comparison_one_pager">Comparison One-Pager</SelectItem>
-                            <SelectItem value="slide_thumbnail">Slide Thumbnail</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="density">Information Density</Label>
-                        <Select value={density} onValueChange={setDensity}>
-                          <SelectTrigger id="density" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
-                            <SelectValue placeholder="Select..." />
-                          </SelectTrigger>
-                          <SelectContent className="bg-white text-slate-900 border-slate-300">
-                            <SelectItem value="simple">Simple</SelectItem>
-                            <SelectItem value="standard">Standard</SelectItem>
-                            <SelectItem value="detailed">Detailed</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="audienceLevel">Audience Level</Label>
-                        <Select value={audienceLevel} onValueChange={setAudienceLevel}>
-                          <SelectTrigger id="audienceLevel" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
-                            <SelectValue placeholder="Select audience level" />
-                          </SelectTrigger>
-                          <SelectContent className="bg-white text-slate-900 border-slate-300">
-                            <SelectItem value="beginner">Beginner</SelectItem>
-                            <SelectItem value="intermediate">Intermediate</SelectItem>
-                            <SelectItem value="expert">Expert</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
+                    <Tabs value={profileStep} onValueChange={(value) => setProfileStep(value as RenderProfileStep)} className="space-y-4">
+                      <TabsList className="grid w-full grid-cols-2 md:grid-cols-4">
+                        {RENDER_PROFILE_STEPS.map((step) => (
+                          <TabsTrigger key={step} value={step}>
+                            {RENDER_PROFILE_STEP_LABELS[step]}
+                          </TabsTrigger>
+                        ))}
+                      </TabsList>
+
+                      <TabsContent value="output" className="space-y-4">
+                        <p className="text-sm text-slate-600">Question 1: What output format and visual mode should the agent optimize for?</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="visualMode">Visual Mode</Label>
+                            <Select value={visualMode} onValueChange={setVisualMode}>
+                              <SelectTrigger id="visualMode" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
+                                <SelectValue placeholder="Select..." />
+                              </SelectTrigger>
+                              <SelectContent className="bg-white text-slate-900 border-slate-300">
+                                <SelectItem value="diagram">Diagram</SelectItem>
+                                <SelectItem value="illustration">Illustration</SelectItem>
+                                <SelectItem value="hybrid">Hybrid</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="artifactType">Artifact Type</Label>
+                            <Select value={artifactType} onValueChange={setArtifactType}>
+                              <SelectTrigger id="artifactType" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
+                                <SelectValue placeholder="Select artifact type" />
+                              </SelectTrigger>
+                              <SelectContent className="bg-white text-slate-900 border-slate-300">
+                                <SelectItem value="storyboard_grid">Storyboard Grid</SelectItem>
+                                <SelectItem value="technical_infographic">Technical Infographic</SelectItem>
+                                <SelectItem value="process_diagram">Process Diagram</SelectItem>
+                                <SelectItem value="comparison_one_pager">Comparison One-Pager</SelectItem>
+                                <SelectItem value="slide_thumbnail">Slide Thumbnail</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                      </TabsContent>
+
+                      <TabsContent value="audience" className="space-y-4">
+                        <p className="text-sm text-slate-600">Question 2: Who is this explainer for?</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="audienceLevel">Audience Level</Label>
+                            <Select value={audienceLevel} onValueChange={setAudienceLevel}>
+                              <SelectTrigger id="audienceLevel" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
+                                <SelectValue placeholder="Select audience level" />
+                              </SelectTrigger>
+                              <SelectContent className="bg-white text-slate-900 border-slate-300">
+                                <SelectItem value="beginner">Beginner</SelectItem>
+                                <SelectItem value="intermediate">Intermediate</SelectItem>
+                                <SelectItem value="expert">Expert</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="audiencePersona">Audience Persona</Label>
+                            <Input
+                              id="audiencePersona"
+                              value={audiencePersona}
+                              onChange={e => setAudiencePersona(e.target.value)}
+                              placeholder="e.g. Product manager, data journalist, startup founder"
+                              className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
+                            />
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="domainContext">Domain Context (Optional)</Label>
+                          <Input
+                            id="domainContext"
+                            value={domainContext}
+                            onChange={e => setDomainContext(e.target.value)}
+                            placeholder="e.g. B2B SaaS roadmap decisions"
+                            className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
+                          />
+                        </div>
+                      </TabsContent>
+
+                      <TabsContent value="style" className="space-y-4">
+                        <p className="text-sm text-slate-600">Question 3: What quality and density should visuals and narration target?</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label htmlFor="density">Information Density</Label>
+                            <Select value={density} onValueChange={setDensity}>
+                              <SelectTrigger id="density" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
+                                <SelectValue placeholder="Select..." />
+                              </SelectTrigger>
+                              <SelectContent className="bg-white text-slate-900 border-slate-300">
+                                <SelectItem value="simple">Simple</SelectItem>
+                                <SelectItem value="standard">Standard</SelectItem>
+                                <SelectItem value="detailed">Detailed</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="tasteBar">Taste Bar</Label>
+                            <Select value={tasteBar} onValueChange={setTasteBar}>
+                              <SelectTrigger id="tasteBar" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
+                                <SelectValue placeholder="Select taste bar" />
+                              </SelectTrigger>
+                              <SelectContent className="bg-white text-slate-900 border-slate-300">
+                                <SelectItem value="standard">Standard</SelectItem>
+                                <SelectItem value="high">High</SelectItem>
+                                <SelectItem value="very_high">Very High</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </div>
+                        <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+                          Low-key preview is always enabled for speed. You can request a high-fidelity rerun at Final Bundle stage.
+                        </div>
+                      </TabsContent>
+
+                      <TabsContent value="constraints" className="space-y-4">
+                        <p className="text-sm text-slate-600">Question 4: What should always be included, and what must be avoided?</p>
+                        <div className="space-y-2">
+                          <Label htmlFor="mustInclude">Must Include (Optional)</Label>
+                          <Input
+                            id="mustInclude"
+                            value={mustIncludeText}
+                            onChange={e => setMustIncludeText(e.target.value)}
+                            placeholder="Comma-separated, e.g. business tradeoffs, clean hierarchy"
+                            className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="mustAvoid">Must Avoid (Optional)</Label>
+                          <Input
+                            id="mustAvoid"
+                            value={mustAvoidText}
+                            onChange={e => setMustAvoidText(e.target.value)}
+                            placeholder="Comma-separated, e.g. typical AI-generated gibberish, very abstract speculation"
+                            className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
+                          />
+                        </div>
+                      </TabsContent>
+                    </Tabs>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full border-slate-300"
+                        onClick={handleProfileStepBack}
+                        disabled={!canMoveProfileBack}
+                      >
+                        Previous Question
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="w-full border-slate-300"
+                        onClick={handleProfileStepNext}
+                        disabled={!canMoveProfileNext}
+                      >
+                        {canMoveProfileNext ? 'Next Question' : 'All Questions Answered'}
+                      </Button>
                     </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="audiencePersona">Audience Persona</Label>
-                      <Input
-                        id="audiencePersona"
-                        value={audiencePersona}
-                        onChange={e => setAudiencePersona(e.target.value)}
-                        placeholder="e.g. Product manager, data journalist, startup founder"
-                        className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="domainContext">Domain Context (Optional)</Label>
-                      <Input
-                        id="domainContext"
-                        value={domainContext}
-                        onChange={e => setDomainContext(e.target.value)}
-                        placeholder="e.g. B2B SaaS roadmap decisions"
-                        className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="tasteBar">Taste Bar</Label>
-                      <Select value={tasteBar} onValueChange={setTasteBar}>
-                        <SelectTrigger id="tasteBar" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
-                          <SelectValue placeholder="Select taste bar" />
-                        </SelectTrigger>
-                        <SelectContent className="bg-white text-slate-900 border-slate-300">
-                          <SelectItem value="standard">Standard</SelectItem>
-                          <SelectItem value="high">High</SelectItem>
-                          <SelectItem value="very_high">Very High</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="mustInclude">Must Include (Optional)</Label>
-                      <Input
-                        id="mustInclude"
-                        value={mustIncludeText}
-                        onChange={e => setMustIncludeText(e.target.value)}
-                        placeholder="Comma-separated, e.g. business tradeoffs, clean hierarchy"
-                        className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="mustAvoid">Must Avoid (Optional)</Label>
-                      <Input
-                        id="mustAvoid"
-                        value={mustAvoidText}
-                        onChange={e => setMustAvoidText(e.target.value)}
-                        placeholder="Comma-separated, e.g. typical AI-generated gibberish, very abstract speculation"
-                        className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                      />
-                    </div>
-
-                    <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-                      Low-key preview is always enabled for speed. You can request a high-fidelity rerun at Final Bundle stage.
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                       <Button
                         type="button"
                         className="w-full"
@@ -1336,9 +1733,9 @@ export default function AdvancedStudio() {
                           <pre>{JSON.stringify(extractedSignal, null, 2)}</pre>
                         </div>
                         <div className="p-4 bg-blue-50 text-blue-900 rounded-md border border-blue-200">
-                          <h4 className="font-semibold mb-1">Signal Locked</h4>
+                          <h4 className="font-semibold mb-1">Signal Extracted</h4>
                           <p className="text-sm">
-                            Ready to collapse this panel and move to generation stream.
+                            Review the extracted structure, then confirm signal to generate script pack.
                           </p>
                         </div>
                       </div>
@@ -1508,6 +1905,8 @@ export default function AdvancedStudio() {
             </div>
           </div>
         </div>
+          </div>
+        </div>
 
         {/* Timeline Stream Area */}
         <div className="space-y-6 mt-12">
@@ -1627,6 +2026,7 @@ export default function AdvancedStudio() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Toaster position="top-right" richColors closeButton />
     </main>
   );
 }

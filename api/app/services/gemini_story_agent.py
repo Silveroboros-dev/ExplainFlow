@@ -1,6 +1,7 @@
 import asyncio
 import json
 import math
+import os
 import re
 import time
 from typing import Any, AsyncIterator
@@ -32,12 +33,15 @@ from app.schemas.requests import (
 from app.services.audio_pipeline import generate_audio_and_get_url
 from app.services.image_pipeline import save_image_and_get_url
 from app.services.interleaved_parser import (
+    append_text_part,
     evaluate_scene_quality,
     extract_anchor_terms,
     extract_parts_from_chunk,
     extract_parts_from_response,
     normalized_scene_id,
 )
+
+SIGNAL_EXTRACTION_PROMPT_VERSION_DEFAULT = "v2"
 
 
 class GeminiStoryAgent:
@@ -47,6 +51,56 @@ class GeminiStoryAgent:
     @staticmethod
     def _load_schema_text(filename: str) -> str:
         return (SCHEMAS_DIR / filename).read_text(encoding="utf-8")
+
+    @staticmethod
+    def _build_signal_extraction_prompt(
+        *,
+        document_text: str,
+        schema_text: str,
+        version: str,
+    ) -> str:
+        if version == "v1":
+            return (
+                "Analyze the following document and extract the core signal into a highly structured JSON format.\n"
+                "You MUST strictly adhere to the provided JSON Schema.\n\n"
+                f"DOCUMENT:\n{document_text}\n\n"
+                f"JSON SCHEMA:\n{schema_text}\n\n"
+                "Return ONLY valid JSON matching this schema, without any markdown formatting like ```json."
+            )
+
+        # v2 prompt: still single-pass, but with stronger grounding and salience rules.
+        return (
+            "SYSTEM:\n"
+            "You are a narrative signal extractor for ExplainFlow.\n"
+            "Do NOT write a story. Do NOT add facts not present in the source.\n\n"
+            "TASK:\n"
+            "Extract a style-agnostic Narrative Signal Inventory from SOURCE in ONE RUN.\n"
+            "Do all reasoning internally, then output only final JSON that matches the schema.\n\n"
+            "GROUNDING RULES:\n"
+            "1) Every key claim must be source-grounded.\n"
+            "2) Include short evidence quotes for claims (<=12 words each).\n"
+            "3) If support is weak or missing, lower confidence and mark uncertainty in supporting_points.\n"
+            "4) If unresolved ambiguity remains, add an item to open_questions.\n\n"
+            "INTERNAL PROCEDURE (do internally, no extra output fields):\n"
+            "1) Segment source into event units.\n"
+            "2) Build canonical entity/concept ledger with aliases merged.\n"
+            "3) Build event frames (actors, goals, outcomes, state changes).\n"
+            "4) Identify discourse links (cause, contrast, concession, escalation).\n"
+            "5) Score salience with centrality, stakes, surprise, causal leverage, transformation.\n"
+            "6) Select non-redundant top signals with coverage across major plotlines/entities.\n\n"
+            "MAPPING TO SCHEMA (critical):\n"
+            "- key_claims: concise, non-duplicate claims with evidence_snippets and calibrated confidence (0..1).\n"
+            "- concepts: canonical concepts only (merge synonyms/aliases).\n"
+            "- narrative_beats: coherent progression (3..8 beats) with valid claim_refs.\n"
+            "- visual_candidates: practical structures tied to claim_refs.\n"
+            "- signal_quality: coverage_score, ambiguity_score, hallucination_risk consistent with extraction quality.\n"
+            "- ID integrity: claim_id c1.., concept_id k1.., candidate_id v1.., beat_id b1.., and all refs valid.\n\n"
+            "STRICT OUTPUT:\n"
+            "Return ONLY valid JSON matching the schema exactly.\n"
+            "No markdown, no prose, no additional keys.\n\n"
+            f"SOURCE:\n{document_text}\n\n"
+            f"JSON SCHEMA:\n{schema_text}"
+        )
 
     @staticmethod
     def _style_guide_for_mode(visual_mode: str) -> str:
@@ -290,8 +344,10 @@ class GeminiStoryAgent:
                     emitted_any_chunk = True
 
                     for text in text_parts:
-                        current_scene_text += text
-                        payload: dict[str, Any] = {"scene_id": scene_id, "delta": text}
+                        current_scene_text, delta = append_text_part(current_scene_text, text)
+                        if not delta:
+                            continue
+                        payload: dict[str, Any] = {"scene_id": scene_id, "delta": delta}
                         if trace_payload:
                             payload["trace"] = trace_payload
                         yield build_sse_event(
@@ -364,12 +420,18 @@ class GeminiStoryAgent:
         )
         try:
             schema_str = self._load_schema_text("content_signal.schema.json")
-            extraction_prompt = (
-                "Analyze the following document and extract the core signal into a highly structured JSON format.\n"
-                "You MUST strictly adhere to the provided JSON Schema.\n\n"
-                f"DOCUMENT:\n{payload.input_text}\n\n"
-                f"JSON SCHEMA:\n{schema_str}\n\n"
-                "Return ONLY valid JSON matching this schema, without any markdown formatting like ```json."
+            configured_version = os.getenv(
+                "EXPLAINFLOW_SIGNAL_PROMPT_VERSION",
+                SIGNAL_EXTRACTION_PROMPT_VERSION_DEFAULT,
+            )
+            prompt_version = configured_version.strip().lower()
+            if prompt_version not in {"v1", "v2"}:
+                prompt_version = SIGNAL_EXTRACTION_PROMPT_VERSION_DEFAULT
+
+            extraction_prompt = self._build_signal_extraction_prompt(
+                document_text=payload.input_text,
+                schema_text=schema_str,
+                version=prompt_version,
             )
             response = await self.client.aio.models.generate_content(
                 model="gemini-3.1-pro-preview",
@@ -387,6 +449,7 @@ class GeminiStoryAgent:
                 details={
                     "schema": "content_signal.schema.json",
                     "source_length": len(payload.input_text),
+                    "prompt_version": prompt_version,
                 },
             )
             return {
@@ -396,11 +459,18 @@ class GeminiStoryAgent:
             }
         except Exception as exc:
             print(f"Extraction error: {exc}")
+            configured_version = os.getenv(
+                "EXPLAINFLOW_SIGNAL_PROMPT_VERSION",
+                SIGNAL_EXTRACTION_PROMPT_VERSION_DEFAULT,
+            )
+            prompt_version = configured_version.strip().lower()
+            if prompt_version not in {"v1", "v2"}:
+                prompt_version = SIGNAL_EXTRACTION_PROMPT_VERSION_DEFAULT
             add_checkpoint(
                 trace,
                 checkpoint="CP1_SIGNAL_READY",
                 status="failed",
-                details={"error": str(exc)},
+                details={"error": str(exc), "prompt_version": prompt_version},
             )
             return {"status": "error", "message": str(exc), "trace": trace.model_dump()}
 

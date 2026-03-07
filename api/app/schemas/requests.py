@@ -22,6 +22,17 @@ ArtifactName = Literal[
     "social_caption",
 ]
 
+WorkflowPanelName = Literal["source", "profile", "signal", "script", "stream"]
+WorkflowAgentAction = Literal[
+    "respond",
+    "open_panel",
+    "extract_signal",
+    "apply_render_profile",
+    "confirm_signal",
+    "generate_script_pack",
+    "generate_stream",
+]
+
 
 class SignalExtractionRequest(BaseModel):
     input_text: str
@@ -126,3 +137,40 @@ class TraceEnvelope(BaseModel):
     artifact_scope: list[ArtifactName] = Field(default_factory=list)
     checkpoints: list[CheckpointRecord] = Field(default_factory=list)
     scenes: list[SceneTraceRecord] = Field(default_factory=list)
+
+
+class WorkflowAgentChatTurn(BaseModel):
+    role: Literal["user", "agent", "system"]
+    text: str
+
+
+class WorkflowAgentChatContext(BaseModel):
+    workflow_id: str | None = None
+    active_panel: WorkflowPanelName | None = None
+    source_text: str = ""
+    render_profile: dict[str, Any] = Field(default_factory=dict)
+    artifact_scope: list[ArtifactName] = Field(default_factory=list)
+    script_presentation_mode: Literal["auto", "review"] = "auto"
+
+
+class WorkflowAgentChatRequest(BaseModel):
+    message: str
+    context: WorkflowAgentChatContext = Field(default_factory=WorkflowAgentChatContext)
+    conversation: list[WorkflowAgentChatTurn] = Field(default_factory=list)
+
+
+class WorkflowAgentUiDirective(BaseModel):
+    active_panel: WorkflowPanelName | None = None
+    start_stream: bool = False
+
+
+class WorkflowAgentChatResponse(BaseModel):
+    status: Literal["success", "error"] = "success"
+    assistant_message: str
+    selected_action: WorkflowAgentAction = "respond"
+    workflow_id: str | None = None
+    workflow: dict[str, Any] | None = None
+    content_signal: dict[str, Any] | None = None
+    script_pack: dict[str, Any] | None = None
+    ui: WorkflowAgentUiDirective = Field(default_factory=WorkflowAgentUiDirective)
+    message: str | None = None

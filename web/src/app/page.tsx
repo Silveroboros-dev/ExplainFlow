@@ -1,8 +1,14 @@
+"use client";
+
 import Link from 'next/link';
 import Image from 'next/image';
+import React from 'react';
+import { useRouter } from 'next/navigation';
 import { Space_Grotesk } from "next/font/google";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Zap, Layout, Sparkles, Play, ArrowRight, ShieldCheck, Cpu } from "lucide-react";
 
 const displayFont = Space_Grotesk({
@@ -31,6 +37,27 @@ const collageTiles: CollageTile[] = [
 ];
 
 export default function Home() {
+  const router = useRouter();
+  const [modeDialogOpen, setModeDialogOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    const storedChoice = window.sessionStorage.getItem("explainflow.entry_choice");
+    if (!storedChoice) {
+      setModeDialogOpen(true);
+    }
+  }, []);
+
+  const handleEntryChoice = (mode: "quick" | "advanced") => {
+    window.sessionStorage.setItem("explainflow.entry_choice", mode);
+    setModeDialogOpen(false);
+    router.push(mode === "quick" ? "/quick" : "/advanced");
+  };
+
+  const handleStayOnLanding = () => {
+    window.sessionStorage.setItem("explainflow.entry_choice", "landing");
+    setModeDialogOpen(false);
+  };
+
   return (
     <div className="relative isolate min-h-screen overflow-x-clip bg-[#05070f] text-slate-100 selection:bg-cyan-300/30">
       <div className="landing-bg pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden>
@@ -187,6 +214,30 @@ export default function Home() {
         <p>© 2026 ExplainFlow • Built for Gemini Live Agent Challenge</p>
         <p className="mt-2 text-xs text-slate-400">Collage includes Wikimedia Commons assets + custom formula art.</p>
       </footer>
+
+      <Dialog open={modeDialogOpen} onOpenChange={setModeDialogOpen}>
+        <DialogContent className="bg-white text-slate-900 border-slate-300">
+          <DialogHeader>
+            <DialogTitle>What Are You Building Today?</DialogTitle>
+            <DialogDescription className="text-slate-600">
+              Choose your session mode and jump directly into the right workflow.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Button type="button" className="w-full" onClick={() => handleEntryChoice("quick")}>
+              Quick Generate
+            </Button>
+            <Button type="button" variant="outline" className="w-full border-slate-300" onClick={() => handleEntryChoice("advanced")}>
+              Advanced Studio
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" className="text-slate-600" onClick={handleStayOnLanding}>
+              Stay On Landing
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
