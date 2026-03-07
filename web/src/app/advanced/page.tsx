@@ -130,6 +130,15 @@ type WorkflowSnapshot = {
   join_gate_ready: boolean;
   ready_for_script_pack: boolean;
   ready_for_stream: boolean;
+  source_text_chars?: number;
+  artifact_scope?: string[];
+  has_signal?: boolean;
+  has_render_profile?: boolean;
+  render_profile_queued?: boolean;
+  has_script_pack?: boolean;
+  latest_run_id?: string | null;
+  latest_bundle_url?: string | null;
+  last_error?: string | null;
   trace?: unknown;
 };
 
@@ -181,6 +190,44 @@ const RENDER_PROFILE_STEP_LABELS: Record<RenderProfileStep, string> = {
   style: '3. Style',
   constraints: '4. Constraints',
 };
+
+const snapshotStatusSummary = (snapshot: WorkflowSnapshot | null): string => {
+  if (!snapshot) return '';
+  const checkpoints = snapshot.checkpoint_state ?? {};
+
+  if (checkpoints.CP6_BUNDLE_FINALIZED === 'passed') {
+    return 'Final bundle ready.';
+  }
+  if (checkpoints.CP5_STREAM_COMPLETE === 'failed' || checkpoints.CP6_BUNDLE_FINALIZED === 'failed') {
+    return snapshot.last_error || 'Latest stream run failed.';
+  }
+  if (checkpoints.CP5_STREAM_COMPLETE === 'passed') {
+    return 'Stream complete.';
+  }
+  if (checkpoints.CP4_SCRIPT_LOCKED === 'passed') {
+    return 'Script pack locked and ready for stream.';
+  }
+  if (checkpoints.CP3_RENDER_LOCKED === 'passed') {
+    return 'Render profile locked. Confirm signal to generate script pack.';
+  }
+  if (snapshot.render_profile_queued) {
+    return 'Artifacts locked. Render profile is queued until signal extraction completes.';
+  }
+  if (checkpoints.CP2_ARTIFACTS_LOCKED === 'passed') {
+    return 'Artifact scope locked. Apply render profile when ready.';
+  }
+  if (checkpoints.CP1_SIGNAL_READY === 'passed') {
+    return 'Signal extracted. Apply render profile next.';
+  }
+  return snapshot.workflow_id ? 'Workflow initialized. Signal extraction is pending.' : '';
+};
+
+const actionInvalidatesGeneratedOutputs = (action?: string): boolean => (
+  action === 'extract_signal'
+  || action === 'apply_render_profile'
+  || action === 'confirm_signal'
+  || action === 'generate_script_pack'
+);
 
 export default function AdvancedStudio() {
   const [sourceDoc, setSourceDoc] = useState('');
@@ -293,6 +340,12 @@ export default function AdvancedStudio() {
     setWorkflowId(candidate.workflow_id);
   };
 
+  const clearGeneratedOutputs = () => {
+    setScriptPack(null);
+    setScenes({});
+    fullTextBuffer.current = {};
+  };
+
   const updateSceneMetadata = (
     sceneId: string,
     patch: Partial<SceneViewModel>
@@ -312,8 +365,18 @@ export default function AdvancedStudio() {
   const fetchWorkflowSnapshot = async (workflowIdValue: string): Promise<void> => {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
     const response = await fetch(`${apiUrl}/api/workflow/${workflowIdValue}`);
-    const snapshot = await response.json();
+    const snapshot = await response.json() as WorkflowSnapshot;
     updateWorkflowSnapshot(snapshot);
+    const streamFailed = snapshot.checkpoint_state?.CP5_STREAM_COMPLETE === 'failed'
+      || snapshot.checkpoint_state?.CP6_BUNDLE_FINALIZED === 'failed';
+    if (streamFailed && typeof snapshot.last_error === 'string' && snapshot.last_error.trim()) {
+      setGenerationError(snapshot.last_error);
+    } else if (
+      snapshot.checkpoint_state?.CP5_STREAM_COMPLETE === 'passed'
+      || snapshot.checkpoint_state?.CP6_BUNDLE_FINALIZED === 'passed'
+    ) {
+      setGenerationError('');
+    }
   };
 
   // Typewriter effect loop
@@ -470,12 +533,10 @@ export default function AdvancedStudio() {
     setGenerationError('');
     setExtractedSignal(null);
     setGenerationStatus('');
-    setScenes({});
-    setScriptPack(null);
+    clearGeneratedOutputs();
     setFidelityPreference('preview');
     setWorkflowId(null);
     setWorkflowSnapshot(null);
-    fullTextBuffer.current = {};
     
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -592,7 +653,7 @@ export default function AdvancedStudio() {
     }
     setActivePanel('script');
     setGenerationStatus('Signal confirmed. Generating script pack...');
-    pushAgentNote('checkpoint', 'Signal', 'Signal confirmed. Script pack generation started.');
+    pushAgentNote('info', 'Signal', 'Signal confirmed. Script pack generation started.');
     await handleGenerateScriptPack(scriptPresentationMode);
   };
 
@@ -634,11 +695,13 @@ export default function AdvancedStudio() {
     }
   });
 
-  const applyProfileToWorkflow = async (mode: 'preview' | 'high' = fidelityPreference): Promise<boolean> => {
+  const applyProfileToWorkflow = async (
+    mode: 'preview' | 'high' = fidelityPreference,
+  ): Promise<WorkflowSnapshot | null> => {
     if (!workflowId) {
       setGenerationStatus('Start with extraction first so a workflow can be created.');
       pushAgentNote('error', 'Render Profile', 'Cannot lock render profile before workflow start.');
-      return false;
+      return null;
     }
 
     setIsApplyingProfile(true);
@@ -663,7 +726,7 @@ export default function AdvancedStudio() {
         setGenerationError(detail);
         pushAgentNote('error', 'Render Profile', detail);
         setGenerationStatus('');
-        return false;
+        return null;
       }
       if (artifactData.workflow) {
         updateWorkflowSnapshot(artifactData.workflow);
@@ -683,11 +746,12 @@ export default function AdvancedStudio() {
         setGenerationError(detail);
         pushAgentNote('error', 'Render Profile', detail);
         setGenerationStatus('');
-        return false;
+        return null;
       }
 
-      if (renderData.workflow) {
-        updateWorkflowSnapshot(renderData.workflow);
+      const updatedWorkflow = renderData.workflow as WorkflowSnapshot | undefined;
+      if (updatedWorkflow) {
+        updateWorkflowSnapshot(updatedWorkflow);
       }
       const cp3Status = typeof renderData?.workflow?.checkpoint_state?.CP3_RENDER_LOCKED === 'string'
         ? renderData.workflow.checkpoint_state.CP3_RENDER_LOCKED
@@ -703,13 +767,13 @@ export default function AdvancedStudio() {
         setGenerationStatus('Artifacts locked. Render profile queued and will auto-lock when signal extraction completes.');
         pushAgentNote('info', 'Render Profile', 'Artifacts locked. Render lock is queued until signal is ready.');
       }
-      return true;
+      return updatedWorkflow ?? null;
     } catch (err) {
       console.error('Apply profile error:', err);
       setGenerationError('Unable to lock render profile in workflow.');
       pushAgentNote('error', 'Render Profile', 'Unable to lock render profile in workflow.');
       setGenerationStatus('');
-      return false;
+      return null;
     } finally {
       setIsApplyingProfile(false);
     }
@@ -795,19 +859,35 @@ export default function AdvancedStudio() {
     setGenerationError('');
     setGenerationStatus('Switching to high-fidelity mode...');
     pushAgentNote('info', 'Final Bundle', 'Switching to high-fidelity mode.');
-    const applied = await applyProfileToWorkflow('high');
-    if (!applied) {
+    const updatedSnapshot = await applyProfileToWorkflow('high');
+    if (!updatedSnapshot) {
       return;
     }
-    setScriptPack(null);
-    setScenes({});
-    fullTextBuffer.current = {};
-    setActivePanel('script');
-    setGenerationStatus('High-fidelity profile locked. Generate script pack, then generate stream for upgraded bundle.');
-    pushAgentNote('checkpoint', 'Final Bundle', 'High-fidelity render profile locked.');
+    if (updatedSnapshot.checkpoint_state?.CP3_RENDER_LOCKED !== 'passed') {
+      setGenerationStatus('High-fidelity settings are queued. Finish signal extraction, then regenerate the bundle.');
+      return;
+    }
+    if (!updatedSnapshot.ready_for_stream || !scriptPack) {
+      setGenerationStatus('High-fidelity mode is active. Generate or restore the locked script pack before rerunning the bundle.');
+      return;
+    }
+    setGenerationStatus('Upgrading the current bundle to high-fidelity assets...');
+    pushAgentNote('info', 'Final Bundle', 'High-fidelity rerender started using the locked script pack.');
+    await handleGenerateStream(scriptPack, {
+      preserveExistingScenes: true,
+      preparationMessage: 'Upgrading the current bundle to high-fidelity assets...',
+      startNote: 'High-fidelity generation stream started.',
+    });
   };
 
-  const handleGenerateStream = async (scriptPackOverride?: ScriptPackPayload | null) => {
+  const handleGenerateStream = async (
+    scriptPackOverride?: ScriptPackPayload | null,
+    options: {
+      preserveExistingScenes?: boolean;
+      preparationMessage?: string;
+      startNote?: string;
+    } = {},
+  ) => {
     if (!workflowId) {
       setGenerationStatus('Run extraction first to initialize workflow.');
       pushAgentNote('error', 'Generation', 'Cannot start generation before extraction workflow starts.');
@@ -818,13 +898,20 @@ export default function AdvancedStudio() {
       pushAgentNote('error', 'Generation', 'Generation blocked by workflow gate (script pack not locked).');
       return;
     }
-    
+    const {
+      preserveExistingScenes = false,
+      preparationMessage = 'Preparing generation pipeline...',
+      startNote = 'Interleaved generation stream started.',
+    } = options;
+
     setIsGenerating(true);
     setGenerationError('');
-    setGenerationStatus('Preparing generation pipeline...');
-    setScenes({});
+    setGenerationStatus(preparationMessage);
+    if (!preserveExistingScenes) {
+      setScenes({});
+    }
     fullTextBuffer.current = {};
-    pushAgentNote('info', 'Generation', 'Interleaved generation stream started.');
+    pushAgentNote('info', 'Generation', startNote);
     
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -1028,12 +1115,19 @@ export default function AdvancedStudio() {
           }
         }
       }
-      setIsGenerating(false);
     } catch (err) {
       console.error("Stream error:", err);
       setGenerationError('Unable to connect to generation stream.');
       pushAgentNote('error', 'Generation', 'Unable to connect to generation stream.');
       setGenerationStatus('');
+    } finally {
+      if (workflowId) {
+        try {
+          await fetchWorkflowSnapshot(workflowId);
+        } catch {
+          // Snapshot refresh is best-effort.
+        }
+      }
       setIsGenerating(false);
     }
   };
@@ -1120,12 +1214,43 @@ export default function AdvancedStudio() {
         }),
       });
       const data = await response.json() as WorkflowAgentChatResponse;
+      const returnedWorkflow = data.workflow && typeof data.workflow === 'object'
+        ? data.workflow as WorkflowSnapshot
+        : null;
+      const returnedWorkflowId = typeof data.workflow_id === 'string'
+        ? data.workflow_id
+        : returnedWorkflow?.workflow_id ?? null;
+      const workflowChanged = Boolean(returnedWorkflowId && returnedWorkflowId !== workflowId);
 
       if (typeof data.workflow_id === 'string') {
         setWorkflowId(data.workflow_id);
       }
-      if (data.workflow && typeof data.workflow === 'object') {
-        updateWorkflowSnapshot(data.workflow);
+      if (workflowChanged) {
+        setExtractedSignal(null);
+        setSignalStage('idle');
+        clearGeneratedOutputs();
+      }
+      if (returnedWorkflow) {
+        updateWorkflowSnapshot(returnedWorkflow);
+        if (returnedWorkflow.has_signal === false && !data.content_signal) {
+          setExtractedSignal(null);
+          setSignalStage(
+            returnedWorkflow.checkpoint_state?.CP1_SIGNAL_READY === 'failed' ? 'error' : 'idle'
+          );
+        }
+        if (returnedWorkflow.has_script_pack === false && !data.script_pack) {
+          setScriptPack(null);
+        }
+        if (
+          workflowChanged
+          || (
+            actionInvalidatesGeneratedOutputs(data.selected_action)
+            && returnedWorkflow.checkpoint_state?.CP5_STREAM_COMPLETE !== 'passed'
+          )
+        ) {
+          setScenes({});
+          fullTextBuffer.current = {};
+        }
       }
       if (data.content_signal && typeof data.content_signal === 'object') {
         setExtractedSignal(data.content_signal);
@@ -1150,8 +1275,14 @@ export default function AdvancedStudio() {
       if (detail) {
         setGenerationError(detail);
         pushAgentNote('error', 'Agent', detail);
-      } else if (typeof data.assistant_message === 'string' && data.assistant_message.trim()) {
-        setGenerationStatus(data.assistant_message.trim());
+      } else if (
+        data.selected_action
+        && !['respond', 'open_panel', 'generate_stream'].includes(data.selected_action)
+      ) {
+        const nextStatus = snapshotStatusSummary(returnedWorkflow ?? workflowSnapshot);
+        if (nextStatus) {
+          setGenerationStatus(nextStatus);
+        }
       }
 
       if (data.ui?.start_stream) {
@@ -1209,12 +1340,16 @@ export default function AdvancedStudio() {
       : isGeneratingScriptPack
         ? 'Planning'
         : 'Idle';
+  const streamCheckpointStatus = workflowSnapshot?.checkpoint_state?.CP5_STREAM_COMPLETE;
+  const bundleCheckpointStatus = workflowSnapshot?.checkpoint_state?.CP6_BUNDLE_FINALIZED;
   const streamStatusLabel = isGenerating
     ? 'Generating'
-    : generationError
+    : generationError || streamCheckpointStatus === 'failed' || bundleCheckpointStatus === 'failed'
       ? 'Error'
-      : workflowSnapshot?.checkpoint_state?.CP5_STREAM_COMPLETE === 'passed' || totalSceneCount > 0
+      : bundleCheckpointStatus === 'passed'
         ? 'Complete'
+        : workflowSnapshot?.ready_for_stream
+          ? 'Ready'
         : 'Idle';
   const extractionPhaseText = signalStage === 'sending'
     ? 'Uploading source and validating extraction schema...'

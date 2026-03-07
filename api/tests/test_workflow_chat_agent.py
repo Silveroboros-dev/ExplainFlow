@@ -84,6 +84,47 @@ def test_apply_render_profile_action_locks_artifacts_and_render() -> None:
     asyncio.run(run())
 
 
+def test_apply_render_profile_action_reports_queued_state_before_signal_ready() -> None:
+    async def run() -> None:
+        coordinator = AgentCoordinator()
+        chat_agent = WorkflowChatAgent(
+            coordinator=coordinator,
+            story_agent=FakeStoryAgent(),
+            client=object(),
+        )
+
+        async def fake_plan(**_kwargs):  # noqa: ANN003
+            return PlannerDecision(
+                action="apply_render_profile",
+                assistant_message="Locking render profile now.",
+            )
+
+        chat_agent._plan_action = fake_plan  # type: ignore[method-assign]
+
+        started = await coordinator.start_workflow("source text")
+        workflow_id = started["workflow_id"]
+
+        payload = WorkflowAgentChatRequest(
+            message="Apply render profile now",
+            context=WorkflowAgentChatContext(
+                workflow_id=workflow_id,
+                render_profile={"visual_mode": "illustration", "density": "standard"},
+                artifact_scope=["story_cards", "voiceover"],
+            ),
+        )
+        result = await chat_agent.handle_chat_turn(payload)
+
+        assert result.status == "success"
+        assert result.selected_action == "apply_render_profile"
+        assert result.workflow is not None
+        assert result.workflow["checkpoint_state"]["CP2_ARTIFACTS_LOCKED"] == "passed"
+        assert result.workflow["checkpoint_state"]["CP3_RENDER_LOCKED"] == "pending"
+        assert "queued" in result.assistant_message.lower()
+        assert "signal" in result.assistant_message.lower()
+
+    asyncio.run(run())
+
+
 def test_confirm_signal_action_generates_script_pack() -> None:
     async def run() -> None:
         coordinator = AgentCoordinator()
@@ -231,5 +272,141 @@ def test_non_explicit_prompt_does_not_execute_locked_action() -> None:
         assert "confirm signal" in result.assistant_message.lower()
         assert result.workflow is not None
         assert result.workflow["checkpoint_state"]["CP4_SCRIPT_LOCKED"] == "pending"
+
+    asyncio.run(run())
+
+
+def test_non_explicit_prompt_reflects_queued_render_state() -> None:
+    async def run() -> None:
+        coordinator = AgentCoordinator()
+        chat_agent = WorkflowChatAgent(
+            coordinator=coordinator,
+            story_agent=FakeStoryAgent(),
+            client=object(),
+        )
+
+        async def fake_plan(**_kwargs):  # noqa: ANN003
+            return PlannerDecision(
+                action="respond",
+                assistant_message="Workflow looks ready.",
+            )
+
+        chat_agent._plan_action = fake_plan  # type: ignore[method-assign]
+
+        started = await coordinator.start_workflow("source text")
+        workflow_id = started["workflow_id"]
+        await coordinator.lock_artifacts(workflow_id, ["story_cards", "voiceover"])
+        await coordinator.lock_render_profile(workflow_id, {"visual_mode": "illustration"})
+
+        payload = WorkflowAgentChatRequest(
+            message="What should I do next?",
+            context=WorkflowAgentChatContext(workflow_id=workflow_id),
+        )
+        result = await chat_agent.handle_chat_turn(payload)
+
+        assert result.status == "success"
+        assert result.selected_action == "respond"
+        assert "queued" in result.assistant_message.lower()
+        assert "signal" in result.assistant_message.lower()
+
+    asyncio.run(run())
+
+
+def test_product_question_returns_concept_answer() -> None:
+    async def run() -> None:
+        coordinator = AgentCoordinator()
+        chat_agent = WorkflowChatAgent(
+            coordinator=coordinator,
+            story_agent=FakeStoryAgent(),
+            client=object(),
+        )
+
+        async def fake_plan(**_kwargs):  # noqa: ANN003
+            return PlannerDecision(
+                action="respond",
+                assistant_message="I can help with extraction, render profile lock, script pack generation, and stream launch.",
+            )
+
+        chat_agent._plan_action = fake_plan  # type: ignore[method-assign]
+
+        result = await chat_agent.handle_chat_turn(
+            WorkflowAgentChatRequest(
+                message="what is the difference between signal and script pack?",
+                context=WorkflowAgentChatContext(),
+            )
+        )
+
+        assert result.status == "success"
+        assert result.selected_action == "respond"
+        assert "source-grounded" in result.assistant_message
+        assert "scene-by-scene plan" in result.assistant_message
+
+    asyncio.run(run())
+
+
+def test_confirm_signal_why_question_does_not_navigate_back() -> None:
+    async def run() -> None:
+        coordinator = AgentCoordinator()
+        chat_agent = WorkflowChatAgent(
+            coordinator=coordinator,
+            story_agent=FakeStoryAgent(),
+            client=object(),
+        )
+
+        async def fake_plan(**_kwargs):  # noqa: ANN003
+            return PlannerDecision(
+                action="open_panel",
+                panel="signal",
+                assistant_message="You confirm the signal before script planning.",
+            )
+
+        chat_agent._plan_action = fake_plan  # type: ignore[method-assign]
+
+        started = await coordinator.start_workflow("source text")
+        workflow_id = started["workflow_id"]
+        await coordinator.record_signal_result(
+            workflow_id,
+            source_text="source text",
+            result={"status": "success", "content_signal": {"thesis": {"one_liner": "x"}}},
+        )
+        await coordinator.lock_artifacts(workflow_id, ["story_cards", "voiceover"])
+        await coordinator.lock_render_profile(workflow_id, {"visual_mode": "illustration"})
+        await coordinator.record_script_pack_result(
+            workflow_id,
+            {
+                "status": "success",
+                "script_pack": {
+                    "plan_id": "plan-2",
+                    "scene_count": 1,
+                    "scenes": [
+                        {
+                            "scene_id": "scene-1",
+                            "title": "Scene 1",
+                            "scene_goal": "Goal",
+                            "narration_focus": "Focus",
+                            "visual_prompt": "Prompt",
+                            "claim_refs": [],
+                            "continuity_refs": [],
+                            "acceptance_checks": [],
+                        }
+                    ],
+                },
+            },
+        )
+
+        payload = WorkflowAgentChatRequest(
+            message="Why should I confirm the signal?",
+            context=WorkflowAgentChatContext(
+                workflow_id=workflow_id,
+                active_panel="script",
+            ),
+        )
+        result = await chat_agent.handle_chat_turn(payload)
+
+        assert result.status == "success"
+        assert result.selected_action == "respond"
+        assert result.ui.active_panel == "script"
+        assert "do not need" in result.assistant_message.lower()
+        assert "script pack" in result.assistant_message.lower()
 
     asyncio.run(run())

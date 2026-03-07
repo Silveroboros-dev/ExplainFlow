@@ -1,137 +1,131 @@
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+"use client";
+
+import { useState } from "react";
+import { Download, Loader2 } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
-import { Download } from "lucide-react";
+
+type FinalBundleScene = {
+  id: string;
+  title?: string;
+  text: string;
+  imageUrl?: string;
+  audioUrl?: string;
+};
 
 interface FinalBundleProps {
-  scenes: Record<string, { id: string, title?: string, text: string, imageUrl?: string, audioUrl?: string }>;
+  scenes: Record<string, FinalBundleScene>;
   topic: string;
 }
 
+const slugify = (value: string, fallback: string): string => {
+  const slug = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || fallback;
+};
+
 export default function FinalBundle({ scenes, topic }: FinalBundleProps) {
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+
   const sceneOrder = (id: string): number => {
     const match = id.match(/scene-(\d+)/i);
     return match ? Number.parseInt(match[1], 10) : Number.MAX_SAFE_INTEGER;
   };
-
-  const formatFallbackTitle = (id: string): string => (
-    id
-      .replace(/[_-]/g, ' ')
-      .replace(/\b\w/g, (char) => char.toUpperCase())
-  );
 
   const sceneList = Object.values(scenes).sort((a, b) => {
     const bySceneNumber = sceneOrder(a.id) - sceneOrder(b.id);
     if (bySceneNumber !== 0) return bySceneNumber;
     return a.id.localeCompare(b.id);
   });
-  
+
   if (sceneList.length === 0) return null;
 
-  const fullTranscript = sceneList
-    .map((scene, index) => {
-      const sceneTitle = (scene.title && scene.title.trim())
-        ? scene.title
-        : formatFallbackTitle(scene.id);
-      return `Scene ${index + 1}: ${sceneTitle}\n\n${scene.text}`;
-    })
-    .join('\n\n---\n\n');
+  const handleDownloadBundle = async () => {
+    setIsExporting(true);
+    setExportError("");
 
-  const handleDownloadTranscript = () => {
-    const blob = new Blob([fullTranscript], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `explainflow-transcript-${topic.replace(/\s+/g, '-').toLowerCase() || 'export'}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const response = await fetch(`${apiUrl}/api/final-bundle/export`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic,
+          scenes: sceneList.map((scene) => ({
+            scene_id: scene.id,
+            title: scene.title,
+            text: scene.text,
+            image_url: scene.imageUrl,
+            audio_url: scene.audioUrl,
+          })),
+        }),
+      });
+
+      if (!response.ok) {
+        let detail = "Failed to export final bundle.";
+        try {
+          const errorPayload = await response.json();
+          if (typeof errorPayload?.detail === "string") {
+            detail = errorPayload.detail;
+          }
+        } catch {
+          // Ignore JSON parse errors and keep fallback text.
+        }
+        throw new Error(detail);
+      }
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = `${slugify(topic, "explainflow")}-final-bundle.zip`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "Failed to export final bundle.");
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   return (
-    <div className="flex justify-center mt-12 mb-8">
-      <Sheet>
-        <SheetTrigger asChild>
-          <Button size="lg" className="bg-green-600 hover:bg-green-700 text-white font-semibold px-8 py-6 rounded-full shadow-lg transition-transform hover:scale-105">
-            <Download className="mr-2 h-5 w-5" />
-            Export Final Bundle
-          </Button>
-        </SheetTrigger>
-        <SheetContent side="right" className="w-full sm:max-w-2xl bg-slate-50">
-          <SheetHeader className="pb-6 border-b border-slate-200">
-            <SheetTitle className="text-3xl font-bold text-slate-900">Final Explainer Bundle</SheetTitle>
-            <SheetDescription className="text-base">
-              Review and export your generated assets for <span className="font-semibold text-slate-700">{topic || 'your project'}</span>.
-            </SheetDescription>
-          </SheetHeader>
-          
-          <Tabs defaultValue="transcript" className="mt-6">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="transcript">Full Transcript</TabsTrigger>
-              <TabsTrigger value="manifest">Asset Manifest</TabsTrigger>
-            </TabsList>
-            
-            <TabsContent value="transcript" className="mt-4">
-              <Card className="border-slate-200 shadow-sm">
-                <CardContent className="p-0">
-                  <div className="bg-slate-900 flex justify-between items-center px-4 py-3 rounded-t-lg">
-                    <span className="text-sm font-medium text-slate-200">transcript.txt</span>
-                    <Button variant="secondary" size="sm" onClick={handleDownloadTranscript}>
-                      <Download className="mr-2 h-4 w-4" /> Download
-                    </Button>
-                  </div>
-                  <ScrollArea className="h-[60vh] w-full rounded-b-lg border-t-0 border bg-white p-6">
-                    <pre className="text-sm font-sans whitespace-pre-wrap leading-relaxed text-slate-800">
-                      {fullTranscript}
-                    </pre>
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-            </TabsContent>
-            
-            <TabsContent value="manifest" className="mt-4">
-              <ScrollArea className="h-[60vh] w-full pr-4">
-                <div className="space-y-6">
-                  {sceneList.map((scene, i) => (
-                    <div key={scene.id} className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
-                      <h4 className="font-semibold text-slate-900 mb-3">
-                        Scene {i + 1}: {(scene.title && scene.title.trim()) ? scene.title : formatFallbackTitle(scene.id)}
-                      </h4>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {scene.imageUrl && (
-                          <div className="flex flex-col gap-2">
-                            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Visual Asset</span>
-                            <img
-                              src={scene.imageUrl}
-                              alt={`Scene ${i + 1}`}
-                              className="rounded-md w-full aspect-video object-contain bg-slate-100 border border-slate-100"
-                            />
-                            <a href={scene.imageUrl} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline flex items-center">
-                              Open Original <Download className="ml-1 h-3 w-3" />
-                            </a>
-                          </div>
-                        )}
-                        {scene.audioUrl && (
-                          <div className="flex flex-col gap-2 justify-center">
-                            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">Voiceover Asset</span>
-                            <audio controls src={scene.audioUrl} className="w-full h-10" />
-                            <a href={scene.audioUrl} download className="text-sm text-blue-600 hover:underline flex items-center">
-                              Download MP3 <Download className="ml-1 h-3 w-3" />
-                            </a>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            </TabsContent>
-          </Tabs>
-        </SheetContent>
-      </Sheet>
-    </div>
+    <Card className="bg-white text-slate-900 border-slate-300 shadow-md">
+      <CardContent className="pt-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-1">
+          <p className="font-semibold">Download Final Bundle</p>
+          <p className="text-sm text-slate-600">
+            Exports one zip with `script.txt`, scene images, and available audio files.
+          </p>
+          {exportError ? (
+            <p className="text-sm font-medium text-rose-600">{exportError}</p>
+          ) : null}
+        </div>
+        <Button
+          type="button"
+          onClick={() => void handleDownloadBundle()}
+          disabled={isExporting}
+          className="min-w-[220px]"
+        >
+          {isExporting ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Building Zip...
+            </>
+          ) : (
+            <>
+              <Download className="mr-2 h-4 w-4" />
+              Download Bundle Zip
+            </>
+          )}
+        </Button>
+      </CardContent>
+    </Card>
   );
 }

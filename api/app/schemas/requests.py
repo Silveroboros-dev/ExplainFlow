@@ -113,6 +113,19 @@ class WorkflowStreamRequest(BaseModel):
     script_pack: dict[str, Any] | None = None
 
 
+class FinalBundleSceneAsset(BaseModel):
+    scene_id: str
+    title: str | None = None
+    text: str = ""
+    image_url: str | None = None
+    audio_url: str | None = None
+
+
+class FinalBundleExportRequest(BaseModel):
+    topic: str = ""
+    scenes: list[FinalBundleSceneAsset] = Field(default_factory=list)
+
+
 class CheckpointRecord(BaseModel):
     checkpoint: CheckpointName
     status: CheckpointStatus

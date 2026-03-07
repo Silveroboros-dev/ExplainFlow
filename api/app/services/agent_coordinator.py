@@ -100,8 +100,21 @@ class AgentCoordinator:
                     checkpoint=checkpoint,
                     status="skipped",
                     details={"reason": reason, "previous_status": previous_status},
-                )
+            )
             state.checkpoint_state[checkpoint] = "pending"
+
+    @staticmethod
+    def _normalized_render_profile(
+        render_profile: dict[str, Any],
+        *,
+        strip_asset_only_fields: bool = False,
+    ) -> dict[str, Any]:
+        normalized = deepcopy(render_profile) if isinstance(render_profile, dict) else {}
+        normalized.pop("profile_id", None)
+        if strip_asset_only_fields:
+            normalized.pop("fidelity", None)
+            normalized.pop("low_key_preview", None)
+        return normalized
 
     @staticmethod
     def _join_gate_ready(state: WorkflowState) -> bool:
@@ -137,6 +150,7 @@ class AgentCoordinator:
 
     @staticmethod
     def _snapshot(state: WorkflowState) -> dict[str, Any]:
+        cp3_status = state.checkpoint_state.get("CP3_RENDER_LOCKED")
         return {
             "workflow_id": state.workflow_id,
             "source_text_chars": len(state.source_text),
@@ -155,6 +169,8 @@ class AgentCoordinator:
                 and state.checkpoint_state.get("CP4_SCRIPT_LOCKED") == "passed"
             ),
             "has_signal": state.content_signal is not None,
+            "has_render_profile": bool(state.render_profile),
+            "render_profile_queued": bool(state.render_profile) and cp3_status == "pending",
             "has_script_pack": state.script_pack is not None,
             "latest_run_id": state.latest_run_id,
             "latest_bundle_url": state.latest_bundle_url,
@@ -292,15 +308,25 @@ class AgentCoordinator:
             if state is None:
                 raise KeyError(f"Unknown workflow_id: {workflow_id}")
 
-            changed = render_profile != state.render_profile
+            semantic_changed = (
+                self._normalized_render_profile(render_profile)
+                != self._normalized_render_profile(state.render_profile)
+            )
+            script_inputs_changed = (
+                self._normalized_render_profile(render_profile, strip_asset_only_fields=True)
+                != self._normalized_render_profile(state.render_profile, strip_asset_only_fields=True)
+            )
             state.render_profile = deepcopy(render_profile)
-            if changed:
+            if semantic_changed:
+                invalidated: list[CheckpointName] = ["CP5_STREAM_COMPLETE", "CP6_BUNDLE_FINALIZED"]
+                if script_inputs_changed:
+                    invalidated.insert(0, "CP4_SCRIPT_LOCKED")
+                    state.script_pack = None
                 self._invalidate_checkpoints(
                     state,
-                    ["CP4_SCRIPT_LOCKED", "CP5_STREAM_COMPLETE", "CP6_BUNDLE_FINALIZED"],
+                    invalidated,
                     reason="render_profile_changed",
                 )
-                state.script_pack = None
                 state.latest_run_id = None
                 state.latest_bundle_url = None
 

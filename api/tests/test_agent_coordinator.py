@@ -55,6 +55,8 @@ def test_render_and_script_gate_enforcement() -> None:
         await coordinator.lock_render_profile(workflow_id, {"visual_mode": "illustration"})
         snap = await coordinator.get_snapshot(workflow_id)
         assert snap["checkpoint_state"]["CP3_RENDER_LOCKED"] == "pending"
+        assert snap["has_render_profile"] is True
+        assert snap["render_profile_queued"] is True
 
         await coordinator.record_signal_result(
             workflow_id,
@@ -64,6 +66,7 @@ def test_render_and_script_gate_enforcement() -> None:
         await coordinator.lock_artifacts(workflow_id, ["story_cards"])
         snap = await coordinator.get_snapshot(workflow_id)
         assert snap["checkpoint_state"]["CP3_RENDER_LOCKED"] == "passed"
+        assert snap["render_profile_queued"] is False
 
         script_request = await coordinator.build_script_pack_request(workflow_id)
         assert script_request.artifact_scope == ["story_cards"]
@@ -105,5 +108,64 @@ def test_invalidation_matrix_artifacts_and_render_changes() -> None:
         snap = await coordinator.get_snapshot(workflow_id)
         assert snap["checkpoint_state"]["CP3_RENDER_LOCKED"] == "passed"
         assert snap["checkpoint_state"]["CP4_SCRIPT_LOCKED"] == "pending"
+
+    asyncio.run(run())
+
+
+def test_fidelity_only_render_update_preserves_script_pack_lock() -> None:
+    async def run() -> None:
+        coordinator = AgentCoordinator()
+        started = await coordinator.start_workflow("Input text")
+        workflow_id = started["workflow_id"]
+
+        await coordinator.record_signal_result(
+            workflow_id,
+            source_text="Input text",
+            result=_signal_success_result(),
+        )
+        await coordinator.lock_artifacts(workflow_id, ["story_cards"])
+        await coordinator.lock_render_profile(
+            workflow_id,
+            {
+                "profile_id": "rp-preview",
+                "visual_mode": "illustration",
+                "density": "standard",
+                "fidelity": "medium",
+                "low_key_preview": True,
+            },
+        )
+        await coordinator.record_script_pack_result(
+            workflow_id,
+            {"status": "success", "script_pack": {"scenes": [{"scene_id": "scene-1"}]}},
+        )
+        await coordinator.record_stream_result(
+            workflow_id,
+            success=True,
+            run_id="run-preview",
+            bundle_url="/api/final-bundle/run-preview",
+        )
+
+        snap = await coordinator.get_snapshot(workflow_id)
+        assert snap["checkpoint_state"]["CP4_SCRIPT_LOCKED"] == "passed"
+        assert snap["checkpoint_state"]["CP6_BUNDLE_FINALIZED"] == "passed"
+
+        await coordinator.lock_render_profile(
+            workflow_id,
+            {
+                "profile_id": "rp-high",
+                "visual_mode": "illustration",
+                "density": "standard",
+                "fidelity": "high",
+                "low_key_preview": True,
+            },
+        )
+
+        snap = await coordinator.get_snapshot(workflow_id)
+        assert snap["checkpoint_state"]["CP3_RENDER_LOCKED"] == "passed"
+        assert snap["checkpoint_state"]["CP4_SCRIPT_LOCKED"] == "passed"
+        assert snap["checkpoint_state"]["CP5_STREAM_COMPLETE"] == "pending"
+        assert snap["checkpoint_state"]["CP6_BUNDLE_FINALIZED"] == "pending"
+        assert snap["ready_for_stream"] is True
+        assert snap["has_script_pack"] is True
 
     asyncio.run(run())

@@ -109,6 +109,83 @@ class WorkflowChatAgent:
             return False
         return checkpoint_state.get(checkpoint) == "passed"
 
+    @staticmethod
+    def _concept_response(
+        message: str,
+        snapshot: dict[str, Any] | None = None,
+    ) -> str | None:
+        normalized = " ".join(message.lower().replace("?", " ").replace("-", " ").split())
+        if (
+            "signal" in normalized
+            and "script pack" in normalized
+            and any(token in normalized for token in ("difference", "different", "vs", "versus"))
+        ):
+            return (
+                "Signal is the extracted, source-grounded inventory of claims, concepts, and beats. "
+                "Script pack is the scene-by-scene plan built from that signal plus the locked render profile, "
+                "and it is what the generator uses to produce the final scenes."
+            )
+        if "what is" in normalized and "signal" in normalized:
+            return (
+                "The content signal is the structured extraction layer. It turns the source into a stable, "
+                "style-agnostic set of claims, concepts, and narrative beats before any rendering choices are applied."
+            )
+        if "what is" in normalized and "script pack" in normalized:
+            return (
+                "The script pack is the approved scene plan for generation. It maps the locked signal and render "
+                "profile into scene titles, narration focus, visual prompts, and claim references."
+            )
+        if "what is" in normalized and "render profile" in normalized:
+            return (
+                "The render profile is the set of audience, style, density, and output controls that shape how "
+                "ExplainFlow turns the signal into scenes."
+            )
+        if "what is" in normalized and "artifact scope" in normalized:
+            return (
+                "Artifact scope defines which outputs the run is expected to produce, such as story cards, "
+                "voiceover, storyboard frames, or social captions."
+            )
+        if (
+            "why" in normalized
+            and "confirm" in normalized
+            and "signal" in normalized
+        ):
+            if WorkflowChatAgent._checkpoint_passed(snapshot, "CP4_SCRIPT_LOCKED"):
+                return (
+                    "Confirming the signal is what allows ExplainFlow to treat the extracted structure as approved "
+                    "input for script planning. In this run the script pack is already locked, so you do not need "
+                    "to confirm the signal again unless you change the source or the render profile."
+                )
+            return (
+                "Confirming the signal tells ExplainFlow the extracted claims and beats are stable enough to use for "
+                "script planning. It is the approval step that prevents scene generation from drifting off an "
+                "unreviewed signal."
+            )
+        return None
+
+    @staticmethod
+    def _is_next_step_question(message: str) -> bool:
+        normalized = " ".join(message.lower().replace("?", " ").split())
+        return any(
+            phrase in normalized
+            for phrase in (
+                "what should i do next",
+                "what do i do next",
+                "what next",
+                "next step",
+                "next steps",
+            )
+        )
+
+    @staticmethod
+    def _resolved_assistant_message(planner_message: str, fallback_message: str) -> str:
+        cleaned = planner_message.strip()
+        if not cleaned:
+            return fallback_message
+        if cleaned == PlannerDecision().assistant_message:
+            return fallback_message
+        return cleaned
+
     @classmethod
     def _next_step_message(cls, snapshot: dict[str, Any] | None) -> str:
         if not isinstance(snapshot, dict):
@@ -120,18 +197,41 @@ class WorkflowChatAgent:
         cp4 = cls._checkpoint_passed(snapshot, "CP4_SCRIPT_LOCKED")
         cp5 = cls._checkpoint_passed(snapshot, "CP5_STREAM_COMPLETE")
         cp6 = cls._checkpoint_passed(snapshot, "CP6_BUNDLE_FINALIZED")
+        has_render_profile = bool(snapshot.get("has_render_profile"))
+        render_profile_queued = bool(snapshot.get("render_profile_queued"))
+        has_artifacts = bool(snapshot.get("artifact_scope"))
 
+        if cp6:
+            return "Final bundle is complete. You can rerun with a revised profile or source."
+        if cp5:
+            return "Stream is complete. Final bundle is ready for review or download."
+        if cp4:
+            return "Script pack is locked. Review it if needed, then generate stream."
         if not cp1:
-            return "Signal is not extracted yet. Start with Extract Signal."
+            if has_artifacts and render_profile_queued:
+                return (
+                    "Signal extraction is still pending. Artifact scope is locked and render settings "
+                    "are queued until the signal is ready."
+                )
+            if has_artifacts:
+                return "Signal extraction is still pending. Artifact scope is locked while the signal finishes."
+            if has_render_profile:
+                return (
+                    "Signal extraction is still pending. Render settings are saved, but artifact scope "
+                    "still needs to be locked."
+                )
+            return "Signal extraction is not complete yet. Wait for the result or keep shaping the render profile."
         if not cp2:
-            return "Signal is extracted. Next, apply profile to lock artifact scope."
+            return "Signal is extracted. Next, apply profile to lock artifact scope and render settings."
         if not cp3:
+            if render_profile_queued:
+                return "Artifact scope is locked. Render settings are queued and will lock when the signal gate clears."
+            if has_render_profile:
+                return "Artifact scope is locked. Render settings are saved but not locked yet."
             return "Artifact scope is locked. Next, apply profile to lock render settings."
         if not cp4:
             return "Signal and render profile are ready. Next, confirm signal to generate script pack."
-        if not cp5 or not cp6:
-            return "Script pack is ready. Next, generate stream."
-        return "Final bundle is complete. You can rerun with a revised profile or source."
+        return "Script pack is locked. Review it if needed, then generate stream."
 
     @staticmethod
     def _is_explicit_action_request(action: WorkflowAgentAction, message: str) -> bool:
@@ -173,6 +273,9 @@ class WorkflowChatAgent:
             "checkpoint_state": snapshot.get("checkpoint_state") if isinstance(snapshot, dict) else {},
             "ready_for_script_pack": snapshot.get("ready_for_script_pack") if isinstance(snapshot, dict) else False,
             "ready_for_stream": snapshot.get("ready_for_stream") if isinstance(snapshot, dict) else False,
+            "has_render_profile": snapshot.get("has_render_profile") if isinstance(snapshot, dict) else False,
+            "render_profile_queued": snapshot.get("render_profile_queued") if isinstance(snapshot, dict) else False,
+            "artifact_scope": snapshot.get("artifact_scope") if isinstance(snapshot, dict) else [],
         }
         context_summary = {
             "active_panel": context.active_panel,
@@ -188,10 +291,16 @@ class WorkflowChatAgent:
             "You are ExplainFlow's workflow support agent. Choose exactly one next action.\n"
             "Allowed actions: respond, open_panel, extract_signal, apply_render_profile, "
             "confirm_signal, generate_script_pack, generate_stream.\n"
+            "ExplainFlow concepts:\n"
+            "- content signal = source-grounded claims, concepts, and narrative beats extracted before rendering.\n"
+            "- render profile = audience, style, density, and output controls for the run.\n"
+            "- script pack = approved scene plan created from the locked signal plus render profile.\n"
+            "- final bundle = generated scene assets after the stream completes.\n"
             "Rules:\n"
             "- Never claim completion without executing the action.\n"
             "- Respect strict workflow gates from checkpoint_state.\n"
             "- If prerequisites are missing, choose respond or open_panel and explain clearly.\n"
+            "- If the user asks a conceptual product question, choose respond and answer it directly.\n"
             "- Keep assistant_message concise (<=2 sentences).\n"
             "- Use open_panel when user asks to inspect a stage.\n"
             "- Use confirm_signal when user intent is to approve signal and continue.\n"
@@ -267,6 +376,19 @@ class WorkflowChatAgent:
             )
 
         action = decision.action
+        concept_response = self._concept_response(message, snapshot)
+        if concept_response is not None:
+            return self._response(
+                assistant_message=concept_response,
+                selected_action="respond",
+                workflow_id=workflow_id,
+                workflow=snapshot,
+                ui=WorkflowAgentUiDirective(
+                    active_panel=context.active_panel,
+                    start_stream=False,
+                ),
+            )
+
         if action in {
             "extract_signal",
             "apply_render_profile",
@@ -288,7 +410,10 @@ class WorkflowChatAgent:
         if action == "open_panel":
             panel = decision.panel or context.active_panel or "source"
             return self._response(
-                assistant_message=self._next_step_message(snapshot),
+                assistant_message=self._resolved_assistant_message(
+                    decision.assistant_message,
+                    self._next_step_message(snapshot),
+                ),
                 selected_action="open_panel",
                 workflow_id=workflow_id,
                 workflow=snapshot,
@@ -494,7 +619,18 @@ class WorkflowChatAgent:
             )
 
         return self._response(
-            assistant_message=self._next_step_message(snapshot),
+            assistant_message=(
+                self._concept_response(message, snapshot)
+                or (
+                    self._next_step_message(snapshot)
+                    if self._is_next_step_question(message)
+                    else None
+                )
+                or self._resolved_assistant_message(
+                    decision.assistant_message,
+                    self._next_step_message(snapshot),
+                )
+            ),
             selected_action="respond",
             workflow_id=workflow_id,
             workflow=snapshot,
