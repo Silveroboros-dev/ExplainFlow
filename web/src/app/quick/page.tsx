@@ -9,9 +9,115 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Progress } from "@/components/ui/progress";
-import { Loader2, Mic, Square } from "lucide-react";
+import {
+  type LucideIcon,
+  Blend,
+  Blocks,
+  GalleryVerticalEnd,
+  GraduationCap,
+  LayoutGrid,
+  Loader2,
+  Mic,
+  Sparkles,
+  Square,
+  UserRound,
+} from "lucide-react";
+
+type QuickTile = {
+  value: string;
+  title: string;
+  description: string;
+  icon: LucideIcon;
+  baseClassName: string;
+  selectedClassName: string;
+  iconClassName: string;
+  selectedIconClassName: string;
+};
+
+const QUICK_AUDIENCE_TILES: QuickTile[] = [
+  {
+    value: 'Beginner',
+    title: 'Beginner',
+    description: 'Simple language and bigger conceptual steps.',
+    icon: GraduationCap,
+    baseClassName: 'border-sky-100 bg-sky-50/85 text-sky-950',
+    selectedClassName: 'border-sky-300 bg-sky-100 shadow-[0_14px_28px_rgba(14,165,233,0.14)]',
+    iconClassName: 'bg-white/80 text-sky-700',
+    selectedIconClassName: 'bg-sky-700 text-white',
+  },
+  {
+    value: 'Intermediate',
+    title: 'Intermediate',
+    description: 'Balanced clarity for informed general audiences.',
+    icon: LayoutGrid,
+    baseClassName: 'border-indigo-100 bg-indigo-50/85 text-indigo-950',
+    selectedClassName: 'border-indigo-300 bg-indigo-100 shadow-[0_14px_28px_rgba(99,102,241,0.14)]',
+    iconClassName: 'bg-white/80 text-indigo-700',
+    selectedIconClassName: 'bg-indigo-700 text-white',
+  },
+  {
+    value: 'Expert',
+    title: 'Expert',
+    description: 'Denser framing with more technical compression.',
+    icon: Blocks,
+    baseClassName: 'border-slate-200 bg-slate-50/95 text-slate-950',
+    selectedClassName: 'border-slate-400 bg-slate-100 shadow-[0_14px_28px_rgba(15,23,42,0.12)]',
+    iconClassName: 'bg-white/80 text-slate-700',
+    selectedIconClassName: 'bg-slate-800 text-white',
+  },
+  {
+    value: 'Other',
+    title: 'Custom',
+    description: 'Specify your own audience profile.',
+    icon: UserRound,
+    baseClassName: 'border-amber-100 bg-amber-50/85 text-amber-950',
+    selectedClassName: 'border-amber-300 bg-amber-100 shadow-[0_14px_28px_rgba(245,158,11,0.14)]',
+    iconClassName: 'bg-white/80 text-amber-700',
+    selectedIconClassName: 'bg-amber-700 text-white',
+  },
+];
+
+const QUICK_VISUAL_TILES: QuickTile[] = [
+  {
+    value: 'illustration',
+    title: 'Illustration',
+    description: 'More cinematic framing and expressive imagery.',
+    icon: Sparkles,
+    baseClassName: 'border-fuchsia-100 bg-fuchsia-50/85 text-fuchsia-950',
+    selectedClassName: 'border-fuchsia-300 bg-fuchsia-100 shadow-[0_14px_28px_rgba(217,70,239,0.14)]',
+    iconClassName: 'bg-white/80 text-fuchsia-700',
+    selectedIconClassName: 'bg-fuchsia-700 text-white',
+  },
+  {
+    value: 'diagram',
+    title: 'Diagram',
+    description: 'Cleaner vectors and schematic explanation.',
+    icon: GalleryVerticalEnd,
+    baseClassName: 'border-emerald-100 bg-emerald-50/85 text-emerald-950',
+    selectedClassName: 'border-emerald-300 bg-emerald-100 shadow-[0_14px_28px_rgba(16,185,129,0.14)]',
+    iconClassName: 'bg-white/80 text-emerald-700',
+    selectedIconClassName: 'bg-emerald-700 text-white',
+  },
+  {
+    value: 'hybrid',
+    title: 'Hybrid',
+    description: 'Blend structured UI cues with illustration polish.',
+    icon: Blend,
+    baseClassName: 'border-violet-100 bg-violet-50/85 text-violet-950',
+    selectedClassName: 'border-violet-300 bg-violet-100 shadow-[0_14px_28px_rgba(139,92,246,0.14)]',
+    iconClassName: 'bg-white/80 text-violet-700',
+    selectedIconClassName: 'bg-violet-700 text-white',
+  },
+];
+
+const QUICK_TONE_PRESETS = [
+  'Practical',
+  'Clear',
+  'Executive',
+  'Cinematic',
+  'Playful',
+];
 
 type QuickScene = {
   id: string;
@@ -459,23 +565,45 @@ export default function QuickGenerate() {
                 )}
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="audience">Target Audience</Label>
-                <Select value={audience} onValueChange={setAudience}>
-                  <SelectTrigger id="audience" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
-                    <SelectValue placeholder="Select audience" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-white text-slate-900 border-slate-300">
-                    <SelectItem value="Beginner">Beginner (Simple language)</SelectItem>
-                    <SelectItem value="Intermediate">Intermediate (General Public)</SelectItem>
-                    <SelectItem value="Expert">Expert (Technical)</SelectItem>
-                    <SelectItem value="Other">Other (Specify...)</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="space-y-3 md:col-span-2">
+                <Label>Target Audience</Label>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  {QUICK_AUDIENCE_TILES.map((tile) => {
+                    const isSelected = audience === tile.value;
+                    const Icon = tile.icon;
+                    return (
+                      <button
+                        key={tile.value}
+                        type="button"
+                        onClick={() => setAudience(tile.value)}
+                        className={`rounded-[24px] border p-4 text-left transition-all duration-200 ${
+                          tile.baseClassName
+                        } ${isSelected ? tile.selectedClassName : 'hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]'}`}
+                      >
+                        <div className="mb-4 flex items-center gap-3">
+                          <span
+                            className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
+                              isSelected ? tile.selectedIconClassName : tile.iconClassName
+                            }`}
+                          >
+                            <Icon className="h-5 w-5" />
+                          </span>
+                          <div>
+                            <p className="font-semibold">{tile.title}</p>
+                            <p className="text-[11px] uppercase tracking-[0.14em] text-slate-600">
+                              {isSelected ? 'Selected' : 'Tap to select'}
+                            </p>
+                          </div>
+                        </div>
+                        <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {audience === 'Other' && (
-                <div className="space-y-2">
+                <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="customAudience">Specify Audience</Label>
                   <Input 
                     id="customAudience" 
@@ -488,18 +616,41 @@ export default function QuickGenerate() {
                 </div>
               )}
 
-              <div className="space-y-2">
-                <Label htmlFor="visualMode">Visual Style</Label>
-                <Select value={visualMode} onValueChange={setVisualMode}>
-                  <SelectTrigger id="visualMode" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
-                    <SelectValue placeholder="Select visual style" />
-                  </SelectTrigger>
-                  <SelectContent className="bg-white text-slate-900 border-slate-300">
-                    <SelectItem value="illustration">Illustration (Cinematic 3D)</SelectItem>
-                    <SelectItem value="diagram">Diagram (Clean Vectors)</SelectItem>
-                    <SelectItem value="hybrid">Hybrid (3D + UI Elements)</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="space-y-3 md:col-span-2">
+                <Label>Visual Style</Label>
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                  {QUICK_VISUAL_TILES.map((tile) => {
+                    const isSelected = visualMode === tile.value;
+                    const Icon = tile.icon;
+                    return (
+                      <button
+                        key={tile.value}
+                        type="button"
+                        onClick={() => setVisualMode(tile.value)}
+                        className={`rounded-[24px] border p-4 text-left transition-all duration-200 ${
+                          tile.baseClassName
+                        } ${isSelected ? tile.selectedClassName : 'hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]'}`}
+                      >
+                        <div className="mb-4 flex items-center gap-3">
+                          <span
+                            className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
+                              isSelected ? tile.selectedIconClassName : tile.iconClassName
+                            }`}
+                          >
+                            <Icon className="h-5 w-5" />
+                          </span>
+                          <div>
+                            <p className="font-semibold">{tile.title}</p>
+                            <p className="text-[11px] uppercase tracking-[0.14em] text-slate-600">
+                              {isSelected ? 'Selected' : 'Tap to select'}
+                            </p>
+                          </div>
+                        </div>
+                        <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="space-y-2 md:col-span-2">
@@ -511,18 +662,47 @@ export default function QuickGenerate() {
                   placeholder="e.g. Engaging, Professional, Humorous" 
                   className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
                 />
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {QUICK_TONE_PRESETS.map((preset) => {
+                    const isSelected = tone.trim().toLowerCase() === preset.toLowerCase();
+                    return (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setTone(preset)}
+                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] transition-colors ${
+                          isSelected
+                            ? 'border-slate-900 bg-slate-900 text-white'
+                            : 'border-slate-300 bg-slate-50 text-slate-700 hover:border-slate-400 hover:bg-slate-100'
+                        }`}
+                      >
+                        {preset}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="md:col-span-2 pt-4">
-                <Button type="submit" className="w-full" disabled={isGenerating} size="lg">
-                  {isGenerating ? (
-                    <>
-                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                      Generating Stream...
-                    </>
-                  ) : (
-                    'Generate Explainer Stream'
-                  )}
+                <Button
+                  type="submit"
+                  className="h-auto w-full rounded-[24px] bg-slate-950 px-5 py-4 text-left text-white shadow-[0_18px_36px_rgba(15,23,42,0.18)] transition-transform hover:-translate-y-0.5 hover:bg-slate-900 disabled:opacity-100 disabled:bg-slate-300 disabled:text-slate-500 disabled:hover:translate-y-0"
+                  disabled={isGenerating}
+                  size="lg"
+                >
+                  <span className="flex w-full items-center justify-between gap-4">
+                    <span className="space-y-1 text-left">
+                      <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                        Primary Action
+                      </span>
+                      <span className="block text-base font-semibold">
+                        {isGenerating ? 'Generating Stream...' : 'Generate Explainer Stream'}
+                      </span>
+                    </span>
+                    {isGenerating ? (
+                      <Loader2 className="h-5 w-5 animate-spin text-slate-100" />
+                    ) : null}
+                  </span>
                 </Button>
               </div>
 

@@ -33,10 +33,14 @@ def _default_checkpoint_state() -> dict[str, str]:
 class WorkflowState(BaseModel):
     workflow_id: str
     source_text: str
+    source_manifest: dict[str, Any] | None = None
+    normalized_source_text: str = ""
+    source_text_origin: str | None = None
     content_signal: dict[str, Any] | None = None
     artifact_scope: list[ArtifactName] = Field(default_factory=list)
     render_profile: dict[str, Any] = Field(default_factory=dict)
     script_pack: dict[str, Any] | None = None
+    planner_qa_summary: dict[str, Any] | None = None
     checkpoint_state: dict[str, str] = Field(default_factory=_default_checkpoint_state)
     trace: TraceEnvelope
     created_at_utc: str = Field(default_factory=utc_now_iso)
@@ -154,6 +158,9 @@ class AgentCoordinator:
         return {
             "workflow_id": state.workflow_id,
             "source_text_chars": len(state.source_text),
+            "source_manifest": deepcopy(state.source_manifest),
+            "normalized_source_text_chars": len(state.normalized_source_text),
+            "source_text_origin": state.source_text_origin,
             "artifact_scope": list(state.artifact_scope),
             "checkpoint_state": dict(state.checkpoint_state),
             "join_gate_ready": AgentCoordinator._join_gate_ready(state),
@@ -172,6 +179,7 @@ class AgentCoordinator:
             "has_render_profile": bool(state.render_profile),
             "render_profile_queued": bool(state.render_profile) and cp3_status == "pending",
             "has_script_pack": state.script_pack is not None,
+            "planner_qa_summary": deepcopy(state.planner_qa_summary),
             "latest_run_id": state.latest_run_id,
             "latest_bundle_url": state.latest_bundle_url,
             "last_error": state.last_error,
@@ -180,7 +188,13 @@ class AgentCoordinator:
             "updated_at_utc": state.updated_at_utc,
         }
 
-    async def start_workflow(self, source_text: str) -> dict[str, Any]:
+    async def start_workflow(
+        self,
+        source_text: str,
+        source_manifest: dict[str, Any] | None = None,
+        normalized_source_text: str = "",
+        source_text_origin: str | None = None,
+    ) -> dict[str, Any]:
         async with self._lock:
             workflow_id = self._new_workflow_id()
             trace = init_trace_envelope(
@@ -192,6 +206,9 @@ class AgentCoordinator:
             state = WorkflowState(
                 workflow_id=workflow_id,
                 source_text=source_text,
+                source_manifest=deepcopy(source_manifest) if isinstance(source_manifest, dict) else None,
+                normalized_source_text=normalized_source_text,
+                source_text_origin=source_text_origin,
                 trace=trace,
             )
             self._states[workflow_id] = state
@@ -218,6 +235,9 @@ class AgentCoordinator:
         workflow_id: str,
         *,
         source_text: str,
+        source_manifest: dict[str, Any] | None = None,
+        normalized_source_text: str = "",
+        source_text_origin: str | None = None,
         result: dict[str, Any],
     ) -> dict[str, Any]:
         async with self._lock:
@@ -225,13 +245,19 @@ class AgentCoordinator:
             if state is None:
                 raise KeyError(f"Unknown workflow_id: {workflow_id}")
 
-            source_changed = source_text != state.source_text
+            normalized_manifest = deepcopy(source_manifest) if isinstance(source_manifest, dict) else None
+            source_changed = (
+                source_text != state.source_text
+                or normalized_manifest != state.source_manifest
+            )
             if source_changed:
                 state.source_text = source_text
+                state.source_manifest = normalized_manifest
                 state.content_signal = None
                 state.artifact_scope = []
                 state.render_profile = {}
                 state.script_pack = None
+                state.planner_qa_summary = None
                 state.latest_run_id = None
                 state.latest_bundle_url = None
                 state.last_error = None
@@ -241,13 +267,20 @@ class AgentCoordinator:
                     reason="source_changed",
                 )
 
+            state.normalized_source_text = normalized_source_text
+            state.source_text_origin = source_text_origin
+
             if result.get("status") == "success" and isinstance(result.get("content_signal"), dict):
                 state.content_signal = deepcopy(result["content_signal"])
                 self._set_checkpoint(
                     state,
                     "CP1_SIGNAL_READY",
                     status="passed",
-                    details={"source_chars": len(source_text)},
+                    details={
+                        "source_chars": len(source_text),
+                        "normalized_source_chars": len(normalized_source_text),
+                        "source_text_origin": source_text_origin or "",
+                    },
                 )
                 state.last_error = None
                 self._try_promote_render_lock(state, source="signal_ready")
@@ -285,6 +318,7 @@ class AgentCoordinator:
                     reason="artifact_scope_changed",
                 )
                 state.script_pack = None
+                state.planner_qa_summary = None
                 state.latest_run_id = None
                 state.latest_bundle_url = None
 
@@ -318,17 +352,19 @@ class AgentCoordinator:
             )
             state.render_profile = deepcopy(render_profile)
             if semantic_changed:
-                invalidated: list[CheckpointName] = ["CP5_STREAM_COMPLETE", "CP6_BUNDLE_FINALIZED"]
+                invalidated: list[CheckpointName] = []
                 if script_inputs_changed:
-                    invalidated.insert(0, "CP4_SCRIPT_LOCKED")
+                    invalidated = ["CP4_SCRIPT_LOCKED", "CP5_STREAM_COMPLETE", "CP6_BUNDLE_FINALIZED"]
                     state.script_pack = None
-                self._invalidate_checkpoints(
-                    state,
-                    invalidated,
-                    reason="render_profile_changed",
-                )
-                state.latest_run_id = None
-                state.latest_bundle_url = None
+                    state.planner_qa_summary = None
+                    state.latest_run_id = None
+                    state.latest_bundle_url = None
+                if invalidated:
+                    self._invalidate_checkpoints(
+                        state,
+                        invalidated,
+                        reason="render_profile_changed",
+                    )
 
             if self._join_gate_ready(state):
                 self._set_checkpoint(
@@ -370,6 +406,10 @@ class AgentCoordinator:
                 raise ValueError("Missing content signal.")
 
             return ScriptPackRequest(
+                source_text=state.source_text,
+                source_manifest=deepcopy(state.source_manifest),
+                normalized_source_text=state.normalized_source_text,
+                source_text_origin=state.source_text_origin,
                 content_signal=deepcopy(state.content_signal),
                 render_profile=deepcopy(state.render_profile),
                 artifact_scope=deepcopy(state.artifact_scope),
@@ -387,6 +427,11 @@ class AgentCoordinator:
 
             if result.get("status") == "success" and isinstance(result.get("script_pack"), dict):
                 state.script_pack = deepcopy(result["script_pack"])
+                state.planner_qa_summary = (
+                    deepcopy(result["planner_qa_summary"])
+                    if isinstance(result.get("planner_qa_summary"), dict)
+                    else None
+                )
                 scene_count = len(result["script_pack"].get("scenes", []))
                 self._set_checkpoint(
                     state,
@@ -397,6 +442,7 @@ class AgentCoordinator:
                 state.last_error = None
             else:
                 state.script_pack = None
+                state.planner_qa_summary = None
                 self._set_checkpoint(
                     state,
                     "CP4_SCRIPT_LOCKED",
@@ -434,6 +480,10 @@ class AgentCoordinator:
                 raise ValueError("Missing script pack for stream generation.")
 
             return AdvancedStreamRequest(
+                source_text=state.source_text,
+                source_manifest=deepcopy(state.source_manifest),
+                normalized_source_text=state.normalized_source_text,
+                source_text_origin=state.source_text_origin,
                 content_signal=deepcopy(state.content_signal or {}),
                 render_profile=deepcopy(state.render_profile),
                 script_pack=deepcopy(script_pack),

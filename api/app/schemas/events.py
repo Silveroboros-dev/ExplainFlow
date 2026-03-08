@@ -75,6 +75,9 @@ def add_or_update_scene_trace(
     scene_id: str,
     scene_trace_id: str,
     claim_refs: list[str] | None = None,
+    evidence_refs: list[str] | None = None,
+    render_strategy: str | None = None,
+    media_asset_ids: list[str] | None = None,
     qa_result: dict[str, Any] | None = None,
     retries_used: int | None = None,
     word_count: int | None = None,
@@ -85,11 +88,20 @@ def add_or_update_scene_trace(
             scene_id=scene_id,
             scene_trace_id=scene_trace_id,
             claim_refs=claim_refs or [],
+            evidence_refs=evidence_refs or [],
+            render_strategy=render_strategy,
+            media_asset_ids=media_asset_ids or [],
         )
         trace.scenes.append(scene_record)
 
     if claim_refs is not None:
         scene_record.claim_refs = claim_refs
+    if evidence_refs is not None:
+        scene_record.evidence_refs = evidence_refs
+    if render_strategy is not None:
+        scene_record.render_strategy = render_strategy  # type: ignore[assignment]
+    if media_asset_ids is not None:
+        scene_record.media_asset_ids = media_asset_ids
     if qa_result is not None:
         scene_record.qa_history.append(qa_result)
     if retries_used is not None:

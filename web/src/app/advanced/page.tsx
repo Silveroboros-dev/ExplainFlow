@@ -9,14 +9,27 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Loader2 } from "lucide-react";
+import {
+  type LucideIcon,
+  GitBranch,
+  ImageIcon,
+  LayoutGrid,
+  Loader2,
+  Newspaper,
+  PenTool,
+  Presentation,
+  Rows3,
+  ScanLine,
+  Shapes,
+  Upload,
+  Workflow,
+} from "lucide-react";
 import { Toaster, toast } from "sonner";
 
 const SIGNAL_EXPLAINER_TEXT = [
@@ -71,6 +84,207 @@ const SCRIPT_JSON_PREVIEW = `{
   ]
 }`;
 
+const SIGNAL_TYPEWRITER_DURATION_MS = 45000;
+const SCRIPT_TYPEWRITER_DURATION_MS = 20000;
+const PRIMARY_ACTION_CARD_CLASS = "h-auto w-full rounded-[24px] bg-slate-950 px-5 py-4 text-left text-white shadow-[0_18px_36px_rgba(15,23,42,0.18)] transition-transform hover:-translate-y-0.5 hover:bg-slate-900 disabled:opacity-100 disabled:bg-slate-300 disabled:text-slate-500 disabled:hover:translate-y-0";
+const SECONDARY_ACTION_CARD_CLASS = "h-auto w-full rounded-[24px] border-slate-200 bg-slate-50 px-5 py-4 text-left text-slate-900 shadow-none transition-transform hover:-translate-y-0.5 hover:bg-slate-100 disabled:opacity-100 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:hover:translate-y-0";
+
+type SelectionTile = {
+  value: string;
+  title: string;
+  description: string;
+  icon: LucideIcon;
+  baseClassName: string;
+  selectedClassName: string;
+  iconClassName: string;
+  selectedIconClassName: string;
+};
+
+const ARTIFACT_SELECTION_TILES: SelectionTile[] = [
+  {
+    value: 'storyboard_grid',
+    title: 'Storyboard Grid',
+    description: 'Multi-scene explainer flow with progression and payoff.',
+    icon: LayoutGrid,
+    baseClassName: 'border-blue-100 bg-blue-50/80 text-blue-950',
+    selectedClassName: 'border-blue-300 bg-blue-100/95 shadow-[0_18px_40px_rgba(59,130,246,0.16)]',
+    iconClassName: 'bg-white/80 text-blue-700',
+    selectedIconClassName: 'bg-blue-700 text-white',
+  },
+  {
+    value: 'technical_infographic',
+    title: 'Technical Infographic',
+    description: 'Dense factual board for mechanisms, systems, and evidence.',
+    icon: Shapes,
+    baseClassName: 'border-emerald-100 bg-emerald-50/80 text-emerald-950',
+    selectedClassName: 'border-emerald-300 bg-emerald-100/95 shadow-[0_18px_40px_rgba(16,185,129,0.16)]',
+    iconClassName: 'bg-white/80 text-emerald-700',
+    selectedIconClassName: 'bg-emerald-700 text-white',
+  },
+  {
+    value: 'process_diagram',
+    title: 'Process Diagram',
+    description: 'Step logic, flows, transitions, and causal routing.',
+    icon: Workflow,
+    baseClassName: 'border-teal-100 bg-teal-50/80 text-teal-950',
+    selectedClassName: 'border-teal-300 bg-teal-100/95 shadow-[0_18px_40px_rgba(20,184,166,0.16)]',
+    iconClassName: 'bg-white/80 text-teal-700',
+    selectedIconClassName: 'bg-teal-700 text-white',
+  },
+  {
+    value: 'comparison_one_pager',
+    title: 'One-Pager',
+    description: 'Single dense poster-style board arranged in modules.',
+    icon: Newspaper,
+    baseClassName: 'border-amber-100 bg-amber-50/80 text-amber-950',
+    selectedClassName: 'border-amber-300 bg-amber-100/95 shadow-[0_18px_40px_rgba(245,158,11,0.16)]',
+    iconClassName: 'bg-white/80 text-amber-700',
+    selectedIconClassName: 'bg-amber-700 text-white',
+  },
+  {
+    value: 'slide_thumbnail',
+    title: 'Slide Thumbnail',
+    description: 'Single cover frame with one strong hook and clear hierarchy.',
+    icon: Presentation,
+    baseClassName: 'border-fuchsia-100 bg-fuchsia-50/80 text-fuchsia-950',
+    selectedClassName: 'border-fuchsia-300 bg-fuchsia-100/95 shadow-[0_18px_40px_rgba(217,70,239,0.16)]',
+    iconClassName: 'bg-white/80 text-fuchsia-700',
+    selectedIconClassName: 'bg-fuchsia-700 text-white',
+  },
+];
+
+const VISUAL_MODE_TILES: SelectionTile[] = [
+  {
+    value: 'diagram',
+    title: 'Diagram',
+    description: 'Clean schematic visuals, logic-first composition.',
+    icon: ScanLine,
+    baseClassName: 'border-cyan-100 bg-cyan-50/80 text-cyan-950',
+    selectedClassName: 'border-cyan-300 bg-cyan-100/95 shadow-[0_14px_28px_rgba(8,145,178,0.14)]',
+    iconClassName: 'bg-white/80 text-cyan-700',
+    selectedIconClassName: 'bg-cyan-700 text-white',
+  },
+  {
+    value: 'illustration',
+    title: 'Illustration',
+    description: 'More expressive framing, shape language, and cinematic metaphor.',
+    icon: PenTool,
+    baseClassName: 'border-indigo-100 bg-indigo-50/80 text-indigo-950',
+    selectedClassName: 'border-indigo-300 bg-indigo-100/95 shadow-[0_14px_28px_rgba(99,102,241,0.14)]',
+    iconClassName: 'bg-white/80 text-indigo-700',
+    selectedIconClassName: 'bg-indigo-700 text-white',
+  },
+  {
+    value: 'hybrid',
+    title: 'Hybrid',
+    description: 'Blend diagram clarity with illustration polish.',
+    icon: GitBranch,
+    baseClassName: 'border-violet-100 bg-violet-50/80 text-violet-950',
+    selectedClassName: 'border-violet-300 bg-violet-100/95 shadow-[0_14px_28px_rgba(139,92,246,0.14)]',
+    iconClassName: 'bg-white/80 text-violet-700',
+    selectedIconClassName: 'bg-violet-700 text-white',
+  },
+];
+
+const AUDIENCE_LEVEL_TILES: SelectionTile[] = [
+  {
+    value: 'beginner',
+    title: 'Beginner',
+    description: 'Assume little prior context. Use simpler framing and less compression.',
+    icon: ScanLine,
+    baseClassName: 'border-sky-100 bg-sky-50/80 text-sky-950',
+    selectedClassName: 'border-sky-300 bg-sky-100/95 shadow-[0_14px_28px_rgba(14,165,233,0.14)]',
+    iconClassName: 'bg-white/80 text-sky-700',
+    selectedIconClassName: 'bg-sky-700 text-white',
+  },
+  {
+    value: 'intermediate',
+    title: 'Intermediate',
+    description: 'Balanced depth for informed viewers who still need structure.',
+    icon: LayoutGrid,
+    baseClassName: 'border-indigo-100 bg-indigo-50/80 text-indigo-950',
+    selectedClassName: 'border-indigo-300 bg-indigo-100/95 shadow-[0_14px_28px_rgba(99,102,241,0.14)]',
+    iconClassName: 'bg-white/80 text-indigo-700',
+    selectedIconClassName: 'bg-indigo-700 text-white',
+  },
+  {
+    value: 'expert',
+    title: 'Expert',
+    description: 'Allow denser reasoning, stronger compression, and domain fluency.',
+    icon: Shapes,
+    baseClassName: 'border-slate-200 bg-slate-50/90 text-slate-950',
+    selectedClassName: 'border-slate-400 bg-slate-100/95 shadow-[0_14px_28px_rgba(15,23,42,0.12)]',
+    iconClassName: 'bg-white/80 text-slate-700',
+    selectedIconClassName: 'bg-slate-800 text-white',
+  },
+];
+
+const DENSITY_TILES: SelectionTile[] = [
+  {
+    value: 'simple',
+    title: 'Simple',
+    description: 'Less on-screen complexity, lighter pacing, bigger visual beats.',
+    icon: ImageIcon,
+    baseClassName: 'border-emerald-100 bg-emerald-50/80 text-emerald-950',
+    selectedClassName: 'border-emerald-300 bg-emerald-100/95 shadow-[0_14px_28px_rgba(16,185,129,0.14)]',
+    iconClassName: 'bg-white/80 text-emerald-700',
+    selectedIconClassName: 'bg-emerald-700 text-white',
+  },
+  {
+    value: 'standard',
+    title: 'Standard',
+    description: 'Balanced information load with clear hierarchy and useful detail.',
+    icon: Rows3,
+    baseClassName: 'border-amber-100 bg-amber-50/80 text-amber-950',
+    selectedClassName: 'border-amber-300 bg-amber-100/95 shadow-[0_14px_28px_rgba(245,158,11,0.14)]',
+    iconClassName: 'bg-white/80 text-amber-700',
+    selectedIconClassName: 'bg-amber-700 text-white',
+  },
+  {
+    value: 'detailed',
+    title: 'Detailed',
+    description: 'Higher information pressure, more claims, and richer scene modules.',
+    icon: GitBranch,
+    baseClassName: 'border-rose-100 bg-rose-50/80 text-rose-950',
+    selectedClassName: 'border-rose-300 bg-rose-100/95 shadow-[0_14px_28px_rgba(244,63,94,0.14)]',
+    iconClassName: 'bg-white/80 text-rose-700',
+    selectedIconClassName: 'bg-rose-700 text-white',
+  },
+];
+
+const TASTE_BAR_TILES: SelectionTile[] = [
+  {
+    value: 'standard',
+    title: 'Standard',
+    description: 'Good default polish without pushing art direction aggressively.',
+    icon: Presentation,
+    baseClassName: 'border-slate-200 bg-slate-50/90 text-slate-950',
+    selectedClassName: 'border-slate-400 bg-slate-100/95 shadow-[0_14px_28px_rgba(15,23,42,0.12)]',
+    iconClassName: 'bg-white/80 text-slate-700',
+    selectedIconClassName: 'bg-slate-800 text-white',
+  },
+  {
+    value: 'high',
+    title: 'High',
+    description: 'Stronger composition, better restraint, and more intentional visual taste.',
+    icon: PenTool,
+    baseClassName: 'border-violet-100 bg-violet-50/80 text-violet-950',
+    selectedClassName: 'border-violet-300 bg-violet-100/95 shadow-[0_14px_28px_rgba(139,92,246,0.14)]',
+    iconClassName: 'bg-white/80 text-violet-700',
+    selectedIconClassName: 'bg-violet-700 text-white',
+  },
+  {
+    value: 'very_high',
+    title: 'Very High',
+    description: 'Pushes for the strongest editorial taste and least-generic output.',
+    icon: Newspaper,
+    baseClassName: 'border-fuchsia-100 bg-fuchsia-50/80 text-fuchsia-950',
+    selectedClassName: 'border-fuchsia-300 bg-fuchsia-100/95 shadow-[0_14px_28px_rgba(217,70,239,0.14)]',
+    iconClassName: 'bg-white/80 text-fuchsia-700',
+    selectedIconClassName: 'bg-fuchsia-700 text-white',
+  },
+];
+
 type ExtractedSignal = {
   thesis?: { one_liner?: string };
   [key: string]: unknown;
@@ -83,6 +297,9 @@ type SceneViewModel = {
   imageUrl?: string;
   audioUrl?: string;
   claim_refs?: string[];
+  evidence_refs?: string[];
+  render_strategy?: 'generated' | 'source_media' | 'hybrid';
+  source_media?: SourceMediaViewModel[];
   status: string;
   qa_status?: 'PASS' | 'WARN' | 'FAIL';
   qa_reasons?: string[];
@@ -91,10 +308,46 @@ type SceneViewModel = {
   auto_retry_count?: number;
 };
 
+type SourceMediaViewModel = {
+  asset_id: string;
+  modality: 'audio' | 'video' | 'image' | 'pdf_page';
+  usage: 'background' | 'hero' | 'proof_clip' | 'region_crop' | 'callout';
+  url: string;
+  original_url?: string;
+  start_ms?: number;
+  end_ms?: number;
+  page_index?: number;
+  bbox_norm?: number[];
+  claim_refs: string[];
+  evidence_refs: string[];
+  label?: string;
+  quote_text?: string;
+  visual_context?: string;
+  matched_excerpt?: string;
+  line_start?: number;
+  line_end?: number;
+  speaker?: string;
+  loop?: boolean;
+  muted?: boolean;
+};
+
+type UploadedSourceAsset = {
+  asset_id: string;
+  modality: 'audio' | 'image' | 'pdf_page';
+  uri: string;
+  mime_type?: string;
+  title?: string;
+  page_index?: number;
+  metadata?: Record<string, unknown>;
+};
+
 type SceneQueueItem = {
   scene_id: string;
   title?: string;
   claim_refs?: string[];
+  evidence_refs?: string[];
+  render_strategy?: 'generated' | 'source_media' | 'hybrid';
+  source_media_count?: number;
   narration_focus?: string;
 };
 
@@ -107,11 +360,23 @@ type SceneQaPayload = {
   word_count: number;
 };
 
+type PlannerQaSummary = {
+  mode: 'direct' | 'repaired' | 'replanned';
+  summary: string;
+  initial_hard_issue_count: number;
+  initial_warning_count: number;
+  final_warning_count: number;
+  repair_applied: boolean;
+  replan_attempted: boolean;
+  details: string[];
+};
+
 type ScriptPackPayload = {
   plan_id: string;
   plan_summary: string;
   audience_descriptor: string;
   scene_count: number;
+  artifact_type?: string;
   scenes: Array<{
     scene_id: string;
     title: string;
@@ -119,9 +384,18 @@ type ScriptPackPayload = {
     narration_focus: string;
     visual_prompt: string;
     claim_refs: string[];
+    evidence_refs?: string[];
+    render_strategy?: 'generated' | 'source_media' | 'hybrid';
     continuity_refs: string[];
     acceptance_checks: string[];
   }>;
+};
+
+type EvidenceViewerState = {
+  sceneId: string;
+  sceneTitle?: string;
+  claimRef?: string;
+  media: SourceMediaViewModel;
 };
 
 type WorkflowSnapshot = {
@@ -136,6 +410,7 @@ type WorkflowSnapshot = {
   has_render_profile?: boolean;
   render_profile_queued?: boolean;
   has_script_pack?: boolean;
+  planner_qa_summary?: PlannerQaSummary | null;
   latest_run_id?: string | null;
   latest_bundle_url?: string | null;
   last_error?: string | null;
@@ -167,6 +442,7 @@ type WorkflowAgentChatResponse = {
   workflow?: WorkflowSnapshot;
   content_signal?: ExtractedSignal | null;
   script_pack?: ScriptPackPayload | null;
+  planner_qa_summary?: PlannerQaSummary | null;
   ui?: {
     active_panel?: AdvancedPanel | null;
     start_stream?: boolean;
@@ -222,6 +498,121 @@ const snapshotStatusSummary = (snapshot: WorkflowSnapshot | null): string => {
   return snapshot.workflow_id ? 'Workflow initialized. Signal extraction is pending.' : '';
 };
 
+const asPlannerQaSummary = (value: unknown): PlannerQaSummary | null => {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Record<string, unknown>;
+  if (
+    candidate.mode !== 'direct'
+    && candidate.mode !== 'repaired'
+    && candidate.mode !== 'replanned'
+  ) {
+    return null;
+  }
+  if (typeof candidate.summary !== 'string' || !candidate.summary.trim()) {
+    return null;
+  }
+  return {
+    mode: candidate.mode as PlannerQaSummary['mode'],
+    summary: candidate.summary,
+    initial_hard_issue_count: typeof candidate.initial_hard_issue_count === 'number' ? candidate.initial_hard_issue_count : 0,
+    initial_warning_count: typeof candidate.initial_warning_count === 'number' ? candidate.initial_warning_count : 0,
+    final_warning_count: typeof candidate.final_warning_count === 'number' ? candidate.final_warning_count : 0,
+    repair_applied: Boolean(candidate.repair_applied),
+    replan_attempted: Boolean(candidate.replan_attempted),
+    details: Array.isArray(candidate.details)
+      ? candidate.details.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : [],
+  };
+};
+
+const asNumberArray = (value: unknown): number[] => (
+  Array.isArray(value) ? value.filter((item): item is number => typeof item === 'number' && Number.isFinite(item)) : []
+);
+
+const asSourceMedia = (value: unknown): SourceMediaViewModel | null => {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Record<string, unknown>;
+  const modality = candidate.modality;
+  const usage = candidate.usage;
+  const url = candidate.url;
+  if (
+    modality !== 'audio'
+    && modality !== 'video'
+    && modality !== 'image'
+    && modality !== 'pdf_page'
+  ) {
+    return null;
+  }
+  if (
+    usage !== 'background'
+    && usage !== 'hero'
+    && usage !== 'proof_clip'
+    && usage !== 'region_crop'
+    && usage !== 'callout'
+  ) {
+    return null;
+  }
+  if (typeof url !== 'string' || !url.trim()) {
+    return null;
+  }
+  return {
+    asset_id: typeof candidate.asset_id === 'string' ? candidate.asset_id : '',
+    modality,
+    usage,
+    url,
+    original_url: typeof candidate.original_url === 'string' ? candidate.original_url : undefined,
+    start_ms: typeof candidate.start_ms === 'number' ? candidate.start_ms : undefined,
+    end_ms: typeof candidate.end_ms === 'number' ? candidate.end_ms : undefined,
+    page_index: typeof candidate.page_index === 'number' ? candidate.page_index : undefined,
+    bbox_norm: asNumberArray(candidate.bbox_norm),
+    claim_refs: Array.isArray(candidate.claim_refs)
+      ? candidate.claim_refs.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : [],
+    evidence_refs: Array.isArray(candidate.evidence_refs)
+      ? candidate.evidence_refs.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+      : [],
+    label: typeof candidate.label === 'string' ? candidate.label : undefined,
+    quote_text: typeof candidate.quote_text === 'string' ? candidate.quote_text : undefined,
+    visual_context: typeof candidate.visual_context === 'string' ? candidate.visual_context : undefined,
+    matched_excerpt: typeof candidate.matched_excerpt === 'string' ? candidate.matched_excerpt : undefined,
+    line_start: typeof candidate.line_start === 'number' ? candidate.line_start : undefined,
+    line_end: typeof candidate.line_end === 'number' ? candidate.line_end : undefined,
+    speaker: typeof candidate.speaker === 'string' ? candidate.speaker : undefined,
+    loop: typeof candidate.loop === 'boolean' ? candidate.loop : undefined,
+    muted: typeof candidate.muted === 'boolean' ? candidate.muted : undefined,
+  };
+};
+
+const asSourceMediaList = (value: unknown): SourceMediaViewModel[] => (
+  Array.isArray(value)
+    ? value.map(asSourceMedia).filter((item): item is SourceMediaViewModel => item !== null)
+    : []
+);
+
+const asUploadedSourceAsset = (value: unknown): UploadedSourceAsset | null => {
+  if (!value || typeof value !== 'object') return null;
+  const candidate = value as Record<string, unknown>;
+  const modality = candidate.modality;
+  const uri = candidate.uri;
+  if (modality !== 'audio' && modality !== 'image' && modality !== 'pdf_page') {
+    return null;
+  }
+  if (typeof uri !== 'string' || !uri.trim()) {
+    return null;
+  }
+  return {
+    asset_id: typeof candidate.asset_id === 'string' ? candidate.asset_id : '',
+    modality,
+    uri,
+    mime_type: typeof candidate.mime_type === 'string' ? candidate.mime_type : undefined,
+    title: typeof candidate.title === 'string' ? candidate.title : undefined,
+    page_index: typeof candidate.page_index === 'number' ? candidate.page_index : undefined,
+    metadata: candidate.metadata && typeof candidate.metadata === 'object'
+      ? candidate.metadata as Record<string, unknown>
+      : undefined,
+  };
+};
+
 const actionInvalidatesGeneratedOutputs = (action?: string): boolean => (
   action === 'extract_signal'
   || action === 'apply_render_profile'
@@ -229,8 +620,30 @@ const actionInvalidatesGeneratedOutputs = (action?: string): boolean => (
   || action === 'generate_script_pack'
 );
 
+const formatMilliseconds = (value?: number): string => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '';
+  const totalSeconds = Math.floor(value / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+};
+
+const withMediaFragment = (url: string, startMs?: number, endMs?: number): string => {
+  if (!url || typeof startMs !== 'number') return url;
+  const startSeconds = Math.max(0, Math.floor(startMs / 1000));
+  const endSeconds = typeof endMs === 'number' ? Math.max(startSeconds + 1, Math.floor(endMs / 1000)) : undefined;
+  return endSeconds ? `${url}#t=${startSeconds},${endSeconds}` : `${url}#t=${startSeconds}`;
+};
+
+const withPdfPageFragment = (url: string, pageIndex?: number): string => {
+  if (!url || typeof pageIndex !== 'number' || !Number.isFinite(pageIndex)) return url;
+  const pageNumber = Math.max(1, Math.trunc(pageIndex));
+  return `${url}#page=${pageNumber}`;
+};
+
 export default function AdvancedStudio() {
   const [sourceDoc, setSourceDoc] = useState('');
+  const [uploadedSourceAssets, setUploadedSourceAssets] = useState<UploadedSourceAsset[]>([]);
   const [visualMode, setVisualMode] = useState('illustration');
   const [artifactType, setArtifactType] = useState('storyboard_grid');
   const [fidelityPreference, setFidelityPreference] = useState<'preview' | 'high'>('preview');
@@ -247,6 +660,7 @@ export default function AdvancedStudio() {
   const [showAmendHelp, setShowAmendHelp] = useState(false);
   
   const [isExtracting, setIsExtracting] = useState(false);
+  const [isUploadingAssets, setIsUploadingAssets] = useState(false);
   const [extractedSignal, setExtractedSignal] = useState<ExtractedSignal | null>(null);
   const [extractProgress, setExtractProgress] = useState(0);
   const [signalStage, setSignalStage] = useState<'idle' | 'sending' | 'structuring' | 'ready' | 'error'>('idle');
@@ -266,6 +680,7 @@ export default function AdvancedStudio() {
   const [scriptPack, setScriptPack] = useState<ScriptPackPayload | null>(null);
   const [workflowId, setWorkflowId] = useState<string | null>(null);
   const [workflowSnapshot, setWorkflowSnapshot] = useState<WorkflowSnapshot | null>(null);
+  const [evidenceViewer, setEvidenceViewer] = useState<EvidenceViewerState | null>(null);
   const [agentNotes, setAgentNotes] = useState<AgentNote[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -280,6 +695,7 @@ export default function AdvancedStudio() {
   
   // Ref for the typewriter effect to track full text without causing infinite re-renders
   const fullTextBuffer = React.useRef<Record<string, string>>({});
+  const sourceAssetsInputRef = React.useRef<HTMLInputElement | null>(null);
 
   const asStringArray = (value: unknown): string[] => (
     Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
@@ -315,6 +731,19 @@ export default function AdvancedStudio() {
     }
   };
 
+  const pushPlannerQaNote = (summary: PlannerQaSummary | null | undefined) => {
+    if (!summary?.summary) return;
+    const extras: string[] = [];
+    if (summary.initial_hard_issue_count > 0) {
+      extras.push(`${summary.initial_hard_issue_count} mandatory issue${summary.initial_hard_issue_count === 1 ? '' : 's'} found initially`);
+    }
+    if (summary.final_warning_count > 0) {
+      extras.push(`${summary.final_warning_count} warning${summary.final_warning_count === 1 ? '' : 's'} remain`);
+    }
+    const detail = extras.length > 0 ? `${summary.summary} ${extras.join('. ')}.` : summary.summary;
+    pushAgentNote('qa', 'Planner QA', detail);
+  };
+
   React.useEffect(() => {
     chatScrollAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [chatMessages.length, isExtracting, isApplyingProfile, isGeneratingScriptPack, isGenerating]);
@@ -340,10 +769,85 @@ export default function AdvancedStudio() {
     setWorkflowId(candidate.workflow_id);
   };
 
+  const buildSourceManifestPayload = () => (
+    uploadedSourceAssets.length > 0
+      ? {
+        assets: uploadedSourceAssets.map((asset) => ({
+          asset_id: asset.asset_id,
+          modality: asset.modality,
+          uri: asset.uri,
+          mime_type: asset.mime_type,
+          title: asset.title,
+          page_index: asset.page_index,
+          metadata: asset.metadata,
+        })),
+      }
+      : undefined
+  );
+
+  const hasSourceInput = sourceDoc.trim().length > 0 || uploadedSourceAssets.length > 0;
   const clearGeneratedOutputs = () => {
     setScriptPack(null);
     setScenes({});
+    setEvidenceViewer(null);
     fullTextBuffer.current = {};
+  };
+
+  const removeUploadedSourceAsset = (assetId: string) => {
+    setUploadedSourceAssets((prev) => prev.filter((asset) => asset.asset_id !== assetId));
+  };
+
+  const handleSourceAssetUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files ? Array.from(event.target.files) : [];
+    event.target.value = '';
+    if (files.length === 0) {
+      return;
+    }
+
+    setIsUploadingAssets(true);
+    setError('');
+
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const formData = new FormData();
+      files.forEach((file) => formData.append('files', file));
+
+      const response = await fetch(`${apiUrl}/api/source-assets/upload`, {
+        method: 'POST',
+        body: formData,
+      });
+      const data = await response.json();
+      if (!response.ok || data?.status !== 'success' || !Array.isArray(data?.assets)) {
+        const detail = typeof data?.detail === 'string'
+          ? data.detail
+          : (typeof data?.message === 'string' ? data.message : 'Source upload failed.');
+        setError(detail);
+        toast.error(detail);
+        return;
+      }
+
+      const newAssets = data.assets
+        .map(asUploadedSourceAsset)
+        .filter((asset: UploadedSourceAsset | null): asset is UploadedSourceAsset => asset !== null);
+
+      setUploadedSourceAssets((prev) => {
+        const next = [...prev];
+        newAssets.forEach((asset: UploadedSourceAsset) => {
+          if (!next.some((existing) => existing.asset_id === asset.asset_id)) {
+            next.push(asset);
+          }
+        });
+        return next;
+      });
+      toast.success(`Uploaded ${newAssets.length} source asset${newAssets.length === 1 ? '' : 's'}.`);
+    } catch (err) {
+      console.error('Source asset upload error:', err);
+      const detail = 'Unable to upload source assets.';
+      setError(detail);
+      toast.error(detail);
+    } finally {
+      setIsUploadingAssets(false);
+    }
   };
 
   const updateSceneMetadata = (
@@ -359,6 +863,79 @@ export default function AdvancedStudio() {
           ...patch,
         }
       };
+    });
+  };
+
+  const appendSourceMedia = (sceneId: string, media: SourceMediaViewModel) => {
+    setScenes(prev => {
+      const existing = prev[sceneId] ?? { id: sceneId, text: '', status: 'queued' };
+      const currentMedia = Array.isArray(existing.source_media) ? existing.source_media : [];
+      const existingIndex = currentMedia.findIndex(item => (
+        item.asset_id === media.asset_id
+        && item.url === media.url
+        && item.start_ms === media.start_ms
+        && item.end_ms === media.end_ms
+        && item.page_index === media.page_index
+      ));
+      const nextMedia = [...currentMedia];
+      if (existingIndex >= 0) {
+        const prior = nextMedia[existingIndex];
+        nextMedia[existingIndex] = {
+          ...prior,
+          ...media,
+          claim_refs: Array.from(new Set([...(prior.claim_refs ?? []), ...(media.claim_refs ?? [])])),
+          evidence_refs: Array.from(new Set([...(prior.evidence_refs ?? []), ...(media.evidence_refs ?? [])])),
+        };
+      } else {
+        nextMedia.push(media);
+      }
+      return {
+        ...prev,
+        [sceneId]: {
+          ...existing,
+          source_media: nextMedia,
+          evidence_refs: Array.from(new Set([...(existing.evidence_refs ?? []), ...media.evidence_refs])),
+        },
+      };
+    });
+  };
+
+  const selectEvidenceMedia = (scene: SceneViewModel | undefined, claimRef?: string): SourceMediaViewModel | null => {
+    if (!scene?.source_media?.length) return null;
+    const scoreMedia = (media: SourceMediaViewModel): number => {
+      let score = 0;
+      if (media.modality === 'pdf_page') score += 40;
+      if (media.modality === 'image') score += 30;
+      if (media.usage === 'region_crop') score += 20;
+      if (typeof media.page_index === 'number') score += 15;
+      if (typeof media.start_ms === 'number') score += 5;
+      if (media.modality === 'audio') score -= 5;
+      return score;
+    };
+
+    const candidates = claimRef
+      ? scene.source_media.filter((item) => item.claim_refs.includes(claimRef))
+      : scene.source_media;
+
+    if (candidates.length === 0) {
+      return scene.source_media[0] ?? null;
+    }
+
+    return [...candidates].sort((left, right) => scoreMedia(right) - scoreMedia(left))[0] ?? null;
+  };
+
+  const openEvidenceViewer = (sceneId: string, claimRef?: string) => {
+    const scene = scenes[sceneId];
+    const media = selectEvidenceMedia(scene, claimRef);
+    if (!media) {
+      toast.error('No linked source proof is available for this claim yet.');
+      return;
+    }
+    setEvidenceViewer({
+      sceneId,
+      sceneTitle: scene?.title,
+      claimRef,
+      media,
     });
   };
 
@@ -451,7 +1028,7 @@ export default function AdvancedStudio() {
     setTypedExplainer('');
     setTypedPreview('');
 
-    const targetDurationMs = 33000;
+    const targetDurationMs = SIGNAL_TYPEWRITER_DURATION_MS;
     const tickMs = 60;
     const totalChars = SIGNAL_EXPLAINER_TEXT.length + SIGNAL_JSON_PREVIEW.length;
     const totalTicks = Math.max(1, Math.ceil(targetDurationMs / tickMs));
@@ -486,7 +1063,7 @@ export default function AdvancedStudio() {
     setTypedScriptExplainer('');
     setTypedScriptPreview('');
 
-    const targetDurationMs = 12000;
+    const targetDurationMs = SCRIPT_TYPEWRITER_DURATION_MS;
     const tickMs = 60;
     const totalChars = SCRIPT_EXPLAINER_TEXT.length + SCRIPT_JSON_PREVIEW.length;
     const totalTicks = Math.max(1, Math.ceil(targetDurationMs / tickMs));
@@ -520,7 +1097,7 @@ export default function AdvancedStudio() {
   };
 
   const runExtraction = async () => {
-    if (!sourceDoc.trim()) {
+    if (!hasSourceInput) {
       return false;
     }
 
@@ -540,10 +1117,14 @@ export default function AdvancedStudio() {
     
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const sourceManifest = buildSourceManifestPayload();
       const startResponse = await fetch(`${apiUrl}/api/workflow/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source_text: sourceDoc })
+        body: JSON.stringify({
+          source_text: sourceDoc,
+          ...(sourceManifest ? { source_manifest: sourceManifest } : {}),
+        })
       });
       const startData: {
         workflow_id?: string;
@@ -565,7 +1146,10 @@ export default function AdvancedStudio() {
       const extractResponse = await fetch(`${apiUrl}/api/workflow/${startData.workflow_id}/extract-signal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source_text: sourceDoc })
+        body: JSON.stringify({
+          source_text: sourceDoc,
+          ...(sourceManifest ? { source_manifest: sourceManifest } : {}),
+        })
       });
 
       const data: {
@@ -582,7 +1166,11 @@ export default function AdvancedStudio() {
         setExtractedSignal(data.content_signal ?? null);
         setSignalStage('ready');
         setExtractProgress(100);
-        setGenerationStatus('Signal extracted. Next: lock artifact scope and render profile.');
+        setGenerationStatus(
+          data.workflow
+            ? snapshotStatusSummary(data.workflow)
+            : 'Signal extracted. Next: lock artifact scope and render profile.'
+        );
         pushAgentNote('checkpoint', 'Extraction', 'Signal extracted and schema validation passed.');
         return true;
       } else {
@@ -606,7 +1194,7 @@ export default function AdvancedStudio() {
 
   const handleExtract = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!sourceDoc.trim()) {
+    if (!hasSourceInput) {
       return;
     }
     setActivePanel('profile');
@@ -759,7 +1347,7 @@ export default function AdvancedStudio() {
       if (cp3Status === 'passed') {
         setGenerationStatus(
           mode === 'high'
-            ? 'High-fidelity profile locked. Regenerate script and stream for upgraded bundle.'
+            ? 'High-fidelity profile locked. Current bundle images can now be upscaled without changing the script.'
             : 'Render profile locked. Continue to signal confirmation and script planning.'
         );
         pushAgentNote('checkpoint', 'Render Profile', 'Render profile locked and ready.');
@@ -822,15 +1410,24 @@ export default function AdvancedStudio() {
         updateWorkflowSnapshot(data.workflow);
       }
       if (data?.status === 'success' && data?.script_pack) {
-        setScriptPack(data.script_pack as ScriptPackPayload);
+        const approvedScriptPack = data.script_pack as ScriptPackPayload;
+        setScriptPack(approvedScriptPack);
+        pushPlannerQaNote(asPlannerQaSummary(data.planner_qa_summary));
         if (mode === 'review') {
           setGenerationStatus('Script pack is ready. Review and amend before starting stream generation.');
           setActivePanel('script');
           pushAgentNote('checkpoint', 'Script Pack', 'Script pack ready for review.');
         } else {
-          setGenerationStatus('Script pack is ready and locked for stream generation.');
+          setGenerationStatus('Script pack approved. Starting generation stream automatically...');
           setActivePanel('stream');
-          pushAgentNote('checkpoint', 'Script Pack', 'Script pack ready and auto-approved for stream.');
+          pushAgentNote('checkpoint', 'Script Pack', 'Script pack approved. Starting stream automatically.');
+          setIsGeneratingScriptPack(false);
+          await handleGenerateStream(approvedScriptPack, {
+            gateReadyOverride: true,
+            preparationMessage: 'Script pack approved. Preparing generation pipeline...',
+            startNote: 'Script pack approved. Generation stream started automatically.',
+          });
+          return;
         }
       } else {
         const detail = typeof data?.detail === 'string'
@@ -855,6 +1452,14 @@ export default function AdvancedStudio() {
       return;
     }
 
+    const currentScenes = Object.values(scenes);
+    const sceneImages = currentScenes.filter((scene) => typeof scene.imageUrl === 'string' && scene.imageUrl.trim().length > 0);
+    if (!scriptPack || currentScenes.length === 0 || sceneImages.length === 0) {
+      setGenerationStatus('Generate a preview bundle first so the current scene images can be upscaled.');
+      pushAgentNote('error', 'Final Bundle', 'High-fidelity upgrade needs an existing preview bundle with scene images.');
+      return;
+    }
+
     setFidelityPreference('high');
     setGenerationError('');
     setGenerationStatus('Switching to high-fidelity mode...');
@@ -871,13 +1476,73 @@ export default function AdvancedStudio() {
       setGenerationStatus('High-fidelity mode is active. Generate or restore the locked script pack before rerunning the bundle.');
       return;
     }
-    setGenerationStatus('Upgrading the current bundle to high-fidelity assets...');
-    pushAgentNote('info', 'Final Bundle', 'High-fidelity rerender started using the locked script pack.');
-    await handleGenerateStream(scriptPack, {
-      preserveExistingScenes: true,
-      preparationMessage: 'Upgrading the current bundle to high-fidelity assets...',
-      startNote: 'High-fidelity generation stream started.',
-    });
+
+    setIsGenerating(true);
+    setGenerationStatus('Upscaling the current bundle images to 2x high-fidelity assets...');
+    pushAgentNote('info', 'Final Bundle', 'High-fidelity upscale started using the current scene images.');
+
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const response = await fetch(`${apiUrl}/api/final-bundle/upscale`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scale_factor: 2,
+          scenes: currentScenes.map((scene) => ({
+            scene_id: scene.id,
+            image_url: scene.imageUrl,
+          })),
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data?.status !== 'success') {
+        const detail = typeof data?.detail === 'string'
+          ? data.detail
+          : (typeof data?.message === 'string' ? data.message : 'High-fidelity upscale failed.');
+        setGenerationError(detail);
+        setGenerationStatus('');
+        pushAgentNote('error', 'Final Bundle', detail);
+        return;
+      }
+
+      const replacements = new Map<string, string>();
+      if (Array.isArray(data?.scenes)) {
+        data.scenes.forEach((scene: unknown) => {
+          if (!scene || typeof scene !== 'object') return;
+          const candidate = scene as Record<string, unknown>;
+          if (typeof candidate.scene_id === 'string' && typeof candidate.image_url === 'string' && candidate.image_url.trim()) {
+            replacements.set(candidate.scene_id, candidate.image_url);
+          }
+        });
+      }
+
+      if (replacements.size > 0) {
+        setScenes((prev) => {
+          const next = { ...prev };
+          replacements.forEach((imageUrl, sceneId) => {
+            const existing = next[sceneId];
+            if (!existing) return;
+            next[sceneId] = {
+              ...existing,
+              imageUrl,
+              status: existing.status || 'done',
+            };
+          });
+          return next;
+        });
+      }
+
+      setGenerationStatus('High-fidelity bundle ready. Existing text and audio were preserved while scene images were upscaled 2x.');
+      pushAgentNote('checkpoint', 'Final Bundle', 'High-fidelity bundle ready with 2x upscaled scene images.');
+    } catch (err) {
+      console.error('High-fidelity upscale error:', err);
+      setGenerationError('Unable to upscale the current bundle.');
+      setGenerationStatus('');
+      pushAgentNote('error', 'Final Bundle', 'Unable to upscale the current bundle.');
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const handleGenerateStream = async (
@@ -886,6 +1551,7 @@ export default function AdvancedStudio() {
       preserveExistingScenes?: boolean;
       preparationMessage?: string;
       startNote?: string;
+      gateReadyOverride?: boolean;
     } = {},
   ) => {
     if (!workflowId) {
@@ -893,16 +1559,17 @@ export default function AdvancedStudio() {
       pushAgentNote('error', 'Generation', 'Cannot start generation before extraction workflow starts.');
       return;
     }
-    if (!workflowSnapshot?.ready_for_stream) {
-      setGenerationStatus('Workflow gate not ready for stream. Confirm script pack first.');
-      pushAgentNote('error', 'Generation', 'Generation blocked by workflow gate (script pack not locked).');
-      return;
-    }
     const {
       preserveExistingScenes = false,
       preparationMessage = 'Preparing generation pipeline...',
       startNote = 'Interleaved generation stream started.',
+      gateReadyOverride = false,
     } = options;
+    if (!gateReadyOverride && !workflowSnapshot?.ready_for_stream) {
+      setGenerationStatus('Workflow gate not ready for stream. Confirm script pack first.');
+      pushAgentNote('error', 'Generation', 'Generation blocked by workflow gate (script pack not locked).');
+      return;
+    }
 
     setIsGenerating(true);
     setGenerationError('');
@@ -961,6 +1628,8 @@ export default function AdvancedStudio() {
                     id: sceneItem.scene_id,
                     title: sceneItem.title,
                     claim_refs: sceneItem.claim_refs,
+                    evidence_refs: sceneItem.evidence_refs,
+                    render_strategy: sceneItem.render_strategy,
                     text: '',
                     status: 'queued'
                   };
@@ -978,6 +1647,7 @@ export default function AdvancedStudio() {
                   setScriptPack(rawPack as ScriptPackPayload);
                   pushAgentNote('checkpoint', 'Script Pack', 'Script pack received in stream context.');
                 }
+                pushPlannerQaNote(asPlannerQaSummary(data.planner_qa_summary));
               } else if (currentEvent === 'scene_start') {
                 const sceneId = typeof data.scene_id === 'string' ? data.scene_id : '';
                 if (!sceneId) continue;
@@ -988,6 +1658,11 @@ export default function AdvancedStudio() {
                 }
                 const patch: Partial<SceneViewModel> = {
                   claim_refs: asStringArray(data.claim_refs),
+                  evidence_refs: asStringArray(data.evidence_refs),
+                  render_strategy: data.render_strategy === 'generated' || data.render_strategy === 'source_media' || data.render_strategy === 'hybrid'
+                    ? data.render_strategy
+                    : undefined,
+                  source_media: asSourceMediaList(data.source_media),
                   status: 'generating',
                 };
                 if (typeof data.title === 'string' && data.title.trim()) {
@@ -1007,6 +1682,12 @@ export default function AdvancedStudio() {
                 const sceneId = typeof data.scene_id === 'string' ? data.scene_id : '';
                 if (!sceneId) continue;
                 updateSceneMetadata(sceneId, { audioUrl: typeof data.url === 'string' ? data.url : undefined });
+              } else if (currentEvent === 'source_media_ready') {
+                const sceneId = typeof data.scene_id === 'string' ? data.scene_id : '';
+                if (!sceneId) continue;
+                const sourceMedia = asSourceMedia(data);
+                if (!sourceMedia) continue;
+                appendSourceMedia(sceneId, sourceMedia);
               } else if (currentEvent === 'qa_status') {
                 const qa = data as unknown as SceneQaPayload;
                 if (!qa.scene_id) continue;
@@ -1079,12 +1760,19 @@ export default function AdvancedStudio() {
                 setIsGenerating(false);
                 const traceabilityRaw = data.claim_traceability;
                 if (traceabilityRaw && typeof traceabilityRaw === 'object') {
-                  const traceability = traceabilityRaw as { claims_total?: number; claims_referenced?: number };
+                  const traceability = traceabilityRaw as {
+                    claims_total?: number;
+                    claims_referenced?: number;
+                    evidence_total?: number;
+                    evidence_referenced?: number;
+                  };
                   if (typeof traceability.claims_total === 'number' && typeof traceability.claims_referenced === 'number') {
                     pushAgentNote(
                       'trace',
                       'Traceability',
-                      `Claims covered: ${traceability.claims_referenced}/${traceability.claims_total}.`
+                      typeof traceability.evidence_total === 'number' && typeof traceability.evidence_referenced === 'number'
+                        ? `Claims covered: ${traceability.claims_referenced}/${traceability.claims_total}. Evidence linked: ${traceability.evidence_referenced}/${traceability.evidence_total}.`
+                        : `Claims covered: ${traceability.claims_referenced}/${traceability.claims_total}.`
                     );
                   }
                 }
@@ -1206,6 +1894,7 @@ export default function AdvancedStudio() {
             workflow_id: workflowId,
             active_panel: activePanel,
             source_text: sourceDoc,
+            source_manifest: buildSourceManifestPayload(),
             render_profile: buildRenderProfilePayload(),
             artifact_scope: mapArtifactScope(artifactType),
             script_presentation_mode: scriptPresentationMode,
@@ -1262,6 +1951,7 @@ export default function AdvancedStudio() {
         scriptPackOverride = data.script_pack as ScriptPackPayload;
         setScriptPack(scriptPackOverride);
       }
+      pushPlannerQaNote(asPlannerQaSummary(data.planner_qa_summary));
       if (data.ui?.active_panel) {
         setActivePanel(data.ui.active_panel);
       }
@@ -1403,7 +2093,7 @@ export default function AdvancedStudio() {
     };
   };
   const stageProgress = (() => {
-    if (!sourceDoc.trim()) return 0;
+    if (!hasSourceInput) return 0;
     if (workflowSnapshot?.checkpoint_state?.CP6_BUNDLE_FINALIZED === 'passed') return 100;
     if (scriptPack) return 88;
     if (generationError) return 88;
@@ -1484,7 +2174,7 @@ export default function AdvancedStudio() {
             }
             : null;
   const dialogContinueDisabled = !dialogMeta
-    || (actionDialogStage === 'extract' && (!sourceDoc.trim() || isExtracting))
+    || (actionDialogStage === 'extract' && (!hasSourceInput || isExtracting || isUploadingAssets))
     || (actionDialogStage === 'profile' && (!workflowId || isApplyingProfile))
     || (actionDialogStage === 'script' && (!workflowSnapshot?.ready_for_script_pack || isGeneratingScriptPack || isGenerating))
     || (actionDialogStage === 'stream' && (!workflowSnapshot?.ready_for_stream || !scriptPack || isGenerating));
@@ -1532,7 +2222,14 @@ export default function AdvancedStudio() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <ScrollArea className="h-[320px] rounded-md border border-slate-200 bg-slate-50 p-3 md:h-[360px]">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="mb-3 flex items-center justify-between gap-3 px-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Latest Exchange</p>
+                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+                      Live
+                    </span>
+                  </div>
+                <ScrollArea className="h-[300px] rounded-xl border border-slate-200 bg-white p-3 md:h-[340px]">
                   <div className="space-y-3 pr-2">
                     {chatMessages.map((message) => {
                       const meta = chatRoleMeta(message.role);
@@ -1558,15 +2255,24 @@ export default function AdvancedStudio() {
                     <div ref={chatScrollAnchorRef} />
                   </div>
                 </ScrollArea>
-                <form onSubmit={(e) => void handleChatSubmit(e)} className="space-y-2">
+                </div>
+                <form onSubmit={(e) => void handleChatSubmit(e)} className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
                   <Textarea
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
                     placeholder='Ask naturally, e.g. "What should I do next?" or "Open render profile."'
                     className="min-h-[84px] resize-none bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
                   />
-                  <Button type="submit" className="w-full">
-                    Send Request
+                  <Button
+                    type="submit"
+                    className="h-auto w-full rounded-[24px] bg-slate-950 px-5 py-4 text-left text-white shadow-[0_18px_36px_rgba(15,23,42,0.18)] transition-transform hover:-translate-y-0.5 hover:bg-slate-900 disabled:opacity-100 disabled:bg-slate-300 disabled:text-slate-500 disabled:hover:translate-y-0"
+                  >
+                    <span className="space-y-1 text-left">
+                      <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                        Assistant Action
+                      </span>
+                      <span className="block text-base font-semibold">Send Request</span>
+                    </span>
                   </Button>
                 </form>
               </CardContent>
@@ -1611,7 +2317,7 @@ export default function AdvancedStudio() {
                   <CardHeader>
                     <CardTitle className="text-slate-900">1. Source Material</CardTitle>
                     <CardDescription className="text-slate-600">
-                      Start with source text. Extraction can run while you configure style in the next stage.
+                      Start with source text, uploaded source assets, or both. Images and audio can flow into claim-level proof links; PDFs are accepted for extraction and page-linked proof viewing with matched excerpts when available.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -1624,27 +2330,149 @@ export default function AdvancedStudio() {
                           onChange={e => setSourceDoc(e.target.value)}
                           placeholder="Paste long document here..."
                           className="min-h-[280px] text-base bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                          required
                         />
+                        <p className="text-xs text-slate-500">
+                          Optional when uploaded assets already contain the source material. Use page-image uploads if you want crop-level proof on slides; PDFs now add page-linked excerpts when local text matching succeeds.
+                        </p>
+                      </div>
+                      <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-3">
+                              <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700">
+                                <Upload className="h-5 w-5" />
+                              </span>
+                              <div>
+                                <Label className="text-base text-slate-900">Source Assets</Label>
+                                <p className="text-xs uppercase tracking-[0.14em] text-slate-500">
+                                  PDFs, images, audio
+                                </p>
+                              </div>
+                            </div>
+                            <p className="text-sm leading-6 text-slate-600">
+                              Upload proof-backed source files. PDFs drive extraction and page-linked proof, while per-page images still give the tightest crop-level evidence.
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              {['image', 'audio', 'pdf'].map((kind) => (
+                                <span
+                                  key={kind}
+                                  className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600"
+                                >
+                                  {kind}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="space-y-2 sm:min-w-[220px]">
+                            <Input
+                              id="sourceAssets"
+                              ref={sourceAssetsInputRef}
+                              type="file"
+                              accept="image/*,audio/*,application/pdf"
+                              multiple
+                              onChange={handleSourceAssetUpload}
+                              disabled={isUploadingAssets || isExtracting}
+                              className="sr-only"
+                            />
+                            <Button
+                              type="button"
+                              className="w-full"
+                              variant="outline"
+                              disabled={isUploadingAssets || isExtracting}
+                              onClick={() => sourceAssetsInputRef.current?.click()}
+                            >
+                              {isUploadingAssets ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Uploading...
+                                </>
+                              ) : (
+                                'Choose Source Files'
+                              )}
+                            </Button>
+                            <p className="text-xs text-slate-500">
+                              {uploadedSourceAssets.length > 0
+                                ? `${uploadedSourceAssets.length} asset${uploadedSourceAssets.length === 1 ? '' : 's'} attached`
+                                : 'No assets attached yet'}
+                            </p>
+                          </div>
+                        </div>
+                        {isUploadingAssets ? (
+                          <div className="flex items-center gap-2 text-sm text-slate-600">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Uploading source assets...
+                          </div>
+                        ) : null}
+                        {uploadedSourceAssets.length > 0 ? (
+                          <div className="space-y-2">
+                            {uploadedSourceAssets.map((asset) => (
+                              <div
+                                key={asset.asset_id}
+                                className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                              >
+                                <div className="min-w-0 space-y-1">
+                                  <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+                                    {asset.modality}
+                                  </span>
+                                  <p className="truncate text-sm font-medium text-slate-900">
+                                    {asset.title || asset.asset_id}
+                                  </p>
+                                  <p className="text-xs text-slate-500">
+                                    {asset.mime_type ? `${asset.mime_type}` : 'Source asset'}
+                                    {typeof asset.page_index === 'number' ? ` • page ${asset.page_index}` : ''}
+                                  </p>
+                                </div>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  className="border-slate-300"
+                                  onClick={() => removeUploadedSourceAsset(asset.asset_id)}
+                                >
+                                  Remove
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <Button type="submit" className="w-full" disabled={isExtracting} size="lg">
-                          {isExtracting ? (
-                            <>
-                              <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                              Extracting Signal...
-                            </>
-                          ) : (
-                            'Extract Content Signal'
-                          )}
+                        <Button
+                          type="submit"
+                          className={PRIMARY_ACTION_CARD_CLASS}
+                          disabled={!hasSourceInput || isExtracting || isUploadingAssets}
+                          size="lg"
+                        >
+                          <span className="flex w-full items-center justify-between gap-4">
+                            <span className="space-y-1 text-left">
+                              <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                                Primary Action
+                              </span>
+                              <span className="block text-base font-semibold">
+                                {isExtracting
+                                  ? 'Extracting Signal...'
+                                  : isUploadingAssets
+                                    ? 'Uploading Assets...'
+                                    : 'Extract Content Signal'}
+                              </span>
+                            </span>
+                            {(isExtracting || isUploadingAssets) ? (
+                              <Loader2 className="h-5 w-5 animate-spin text-slate-100" />
+                            ) : null}
+                          </span>
                         </Button>
                         <Button
                           type="button"
                           variant="outline"
-                          className="w-full border-slate-300"
+                          className={SECONDARY_ACTION_CARD_CLASS}
                           onClick={() => setActivePanel(collapseTarget.source)}
                         >
-                          Collapse Window
+                          <span className="space-y-1 text-left">
+                            <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                              Secondary Action
+                            </span>
+                            <span className="block text-base font-semibold">Collapse Window</span>
+                          </span>
                         </Button>
                       </div>
                       {(isExtracting || extractProgress > 0) && (
@@ -1681,55 +2509,130 @@ export default function AdvancedStudio() {
 
                       <TabsContent value="output" className="space-y-4">
                         <p className="text-sm text-slate-600">Question 1: What output format and visual mode should the agent optimize for?</p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label htmlFor="visualMode">Visual Mode</Label>
-                            <Select value={visualMode} onValueChange={setVisualMode}>
-                              <SelectTrigger id="visualMode" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
-                                <SelectValue placeholder="Select..." />
-                              </SelectTrigger>
-                              <SelectContent className="bg-white text-slate-900 border-slate-300">
-                                <SelectItem value="diagram">Diagram</SelectItem>
-                                <SelectItem value="illustration">Illustration</SelectItem>
-                                <SelectItem value="hybrid">Hybrid</SelectItem>
-                              </SelectContent>
-                            </Select>
+                        <div className="space-y-3">
+                          <Label>Artifact Type</Label>
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                            {ARTIFACT_SELECTION_TILES.map((tile) => {
+                              const isSelected = artifactType === tile.value;
+                              const Icon = tile.icon;
+                              return (
+                                <button
+                                  key={tile.value}
+                                  type="button"
+                                  onClick={() => setArtifactType(tile.value)}
+                                  className={`rounded-[28px] border p-4 text-left transition-all duration-200 ${
+                                    tile.baseClassName
+                                  } ${isSelected ? tile.selectedClassName : 'hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]'}`}
+                                >
+                                  <div className="mb-6 flex items-start justify-between gap-3">
+                                    <span
+                                      className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl ${
+                                        isSelected ? tile.selectedIconClassName : tile.iconClassName
+                                      }`}
+                                    >
+                                      <Icon className="h-5 w-5" />
+                                    </span>
+                                    {isSelected ? (
+                                      <span className="rounded-full border border-slate-900/10 bg-white/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-700">
+                                        Selected
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    <p className="text-lg font-semibold">{tile.title}</p>
+                                    <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
+                                  </div>
+                                </button>
+                              );
+                            })}
                           </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="artifactType">Artifact Type</Label>
-                            <Select value={artifactType} onValueChange={setArtifactType}>
-                              <SelectTrigger id="artifactType" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
-                                <SelectValue placeholder="Select artifact type" />
-                              </SelectTrigger>
-                              <SelectContent className="bg-white text-slate-900 border-slate-300">
-                                <SelectItem value="storyboard_grid">Storyboard Grid</SelectItem>
-                                <SelectItem value="technical_infographic">Technical Infographic</SelectItem>
-                                <SelectItem value="process_diagram">Process Diagram</SelectItem>
-                                <SelectItem value="comparison_one_pager">Comparison One-Pager</SelectItem>
-                                <SelectItem value="slide_thumbnail">Slide Thumbnail</SelectItem>
-                              </SelectContent>
-                            </Select>
+                        </div>
+                        <div className="space-y-3">
+                          <Label>Visual Mode</Label>
+                          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                            {VISUAL_MODE_TILES.map((tile) => {
+                              const isSelected = visualMode === tile.value;
+                              const Icon = tile.icon;
+                              return (
+                                <button
+                                  key={tile.value}
+                                  type="button"
+                                  onClick={() => setVisualMode(tile.value)}
+                                  className={`rounded-[26px] border p-4 text-left transition-all duration-200 ${
+                                    tile.baseClassName
+                                  } ${isSelected ? tile.selectedClassName : 'hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]'}`}
+                                >
+                                  <div className="mb-4 flex items-center gap-3">
+                                    <span
+                                      className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
+                                        isSelected ? tile.selectedIconClassName : tile.iconClassName
+                                      }`}
+                                    >
+                                      <Icon className="h-5 w-5" />
+                                    </span>
+                                    <div>
+                                      <p className="font-semibold">{tile.title}</p>
+                                      <p className="text-xs uppercase tracking-[0.14em] text-slate-600">
+                                        {isSelected ? 'Active mode' : 'Tap to select'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
+                                </button>
+                              );
+                            })}
                           </div>
+                        </div>
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Current Selection</p>
+                          <p className="mt-2 text-sm text-slate-700">
+                            {ARTIFACT_SELECTION_TILES.find((item) => item.value === artifactType)?.title ?? artifactType}
+                            {' · '}
+                            {VISUAL_MODE_TILES.find((item) => item.value === visualMode)?.title ?? visualMode}
+                          </p>
                         </div>
                       </TabsContent>
 
                       <TabsContent value="audience" className="space-y-4">
                         <p className="text-sm text-slate-600">Question 2: Who is this explainer for?</p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label htmlFor="audienceLevel">Audience Level</Label>
-                            <Select value={audienceLevel} onValueChange={setAudienceLevel}>
-                              <SelectTrigger id="audienceLevel" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
-                                <SelectValue placeholder="Select audience level" />
-                              </SelectTrigger>
-                              <SelectContent className="bg-white text-slate-900 border-slate-300">
-                                <SelectItem value="beginner">Beginner</SelectItem>
-                                <SelectItem value="intermediate">Intermediate</SelectItem>
-                                <SelectItem value="expert">Expert</SelectItem>
-                              </SelectContent>
-                            </Select>
+                        <div className="space-y-3">
+                          <Label>Audience Level</Label>
+                          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                            {AUDIENCE_LEVEL_TILES.map((tile) => {
+                              const isSelected = audienceLevel === tile.value;
+                              const Icon = tile.icon;
+                              return (
+                                <button
+                                  key={tile.value}
+                                  type="button"
+                                  onClick={() => setAudienceLevel(tile.value)}
+                                  className={`rounded-[26px] border p-4 text-left transition-all duration-200 ${
+                                    tile.baseClassName
+                                  } ${isSelected ? tile.selectedClassName : 'hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]'}`}
+                                >
+                                  <div className="mb-4 flex items-center gap-3">
+                                    <span
+                                      className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
+                                        isSelected ? tile.selectedIconClassName : tile.iconClassName
+                                      }`}
+                                    >
+                                      <Icon className="h-5 w-5" />
+                                    </span>
+                                    <div>
+                                      <p className="font-semibold">{tile.title}</p>
+                                      <p className="text-xs uppercase tracking-[0.14em] text-slate-600">
+                                        {isSelected ? 'Active level' : 'Tap to select'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
+                                </button>
+                              );
+                            })}
                           </div>
-                          <div className="space-y-2">
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="space-y-2 sm:col-span-2">
                             <Label htmlFor="audiencePersona">Audience Persona</Label>
                             <Input
                               id="audiencePersona"
@@ -1754,32 +2657,76 @@ export default function AdvancedStudio() {
 
                       <TabsContent value="style" className="space-y-4">
                         <p className="text-sm text-slate-600">Question 3: What quality and density should visuals and narration target?</p>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label htmlFor="density">Information Density</Label>
-                            <Select value={density} onValueChange={setDensity}>
-                              <SelectTrigger id="density" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
-                                <SelectValue placeholder="Select..." />
-                              </SelectTrigger>
-                              <SelectContent className="bg-white text-slate-900 border-slate-300">
-                                <SelectItem value="simple">Simple</SelectItem>
-                                <SelectItem value="standard">Standard</SelectItem>
-                                <SelectItem value="detailed">Detailed</SelectItem>
-                              </SelectContent>
-                            </Select>
+                        <div className="space-y-3">
+                          <Label>Information Density</Label>
+                          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                            {DENSITY_TILES.map((tile) => {
+                              const isSelected = density === tile.value;
+                              const Icon = tile.icon;
+                              return (
+                                <button
+                                  key={tile.value}
+                                  type="button"
+                                  onClick={() => setDensity(tile.value)}
+                                  className={`rounded-[26px] border p-4 text-left transition-all duration-200 ${
+                                    tile.baseClassName
+                                  } ${isSelected ? tile.selectedClassName : 'hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]'}`}
+                                >
+                                  <div className="mb-4 flex items-center gap-3">
+                                    <span
+                                      className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
+                                        isSelected ? tile.selectedIconClassName : tile.iconClassName
+                                      }`}
+                                    >
+                                      <Icon className="h-5 w-5" />
+                                    </span>
+                                    <div>
+                                      <p className="font-semibold">{tile.title}</p>
+                                      <p className="text-xs uppercase tracking-[0.14em] text-slate-600">
+                                        {isSelected ? 'Active density' : 'Tap to select'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
+                                </button>
+                              );
+                            })}
                           </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="tasteBar">Taste Bar</Label>
-                            <Select value={tasteBar} onValueChange={setTasteBar}>
-                              <SelectTrigger id="tasteBar" className="bg-white text-slate-900 border-slate-300 data-[placeholder]:text-slate-500">
-                                <SelectValue placeholder="Select taste bar" />
-                              </SelectTrigger>
-                              <SelectContent className="bg-white text-slate-900 border-slate-300">
-                                <SelectItem value="standard">Standard</SelectItem>
-                                <SelectItem value="high">High</SelectItem>
-                                <SelectItem value="very_high">Very High</SelectItem>
-                              </SelectContent>
-                            </Select>
+                        </div>
+                        <div className="space-y-3">
+                          <Label>Taste Bar</Label>
+                          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                            {TASTE_BAR_TILES.map((tile) => {
+                              const isSelected = tasteBar === tile.value;
+                              const Icon = tile.icon;
+                              return (
+                                <button
+                                  key={tile.value}
+                                  type="button"
+                                  onClick={() => setTasteBar(tile.value)}
+                                  className={`rounded-[26px] border p-4 text-left transition-all duration-200 ${
+                                    tile.baseClassName
+                                  } ${isSelected ? tile.selectedClassName : 'hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]'}`}
+                                >
+                                  <div className="mb-4 flex items-center gap-3">
+                                    <span
+                                      className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
+                                        isSelected ? tile.selectedIconClassName : tile.iconClassName
+                                      }`}
+                                    >
+                                      <Icon className="h-5 w-5" />
+                                    </span>
+                                    <div>
+                                      <p className="font-semibold">{tile.title}</p>
+                                      <p className="text-xs uppercase tracking-[0.14em] text-slate-600">
+                                        {isSelected ? 'Active taste bar' : 'Tap to select'}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
                         <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
@@ -1836,19 +2783,36 @@ export default function AdvancedStudio() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                       <Button
                         type="button"
-                        className="w-full"
+                        className={PRIMARY_ACTION_CARD_CLASS}
                         onClick={handleApplyRenderProfile}
                         disabled={isApplyingProfile || !workflowId}
                       >
-                        {isApplyingProfile ? 'Locking Profile...' : 'Apply Render Profile'}
+                        <span className="flex w-full items-center justify-between gap-4">
+                          <span className="space-y-1 text-left">
+                            <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                              Primary Action
+                            </span>
+                            <span className="block text-base font-semibold">
+                              {isApplyingProfile ? 'Locking Profile...' : 'Apply Render Profile'}
+                            </span>
+                          </span>
+                          {isApplyingProfile ? (
+                            <Loader2 className="h-5 w-5 animate-spin text-slate-100" />
+                          ) : null}
+                        </span>
                       </Button>
                       <Button
                         type="button"
                         variant="outline"
-                        className="w-full border-slate-300"
+                        className={SECONDARY_ACTION_CARD_CLASS}
                         onClick={() => setActivePanel(collapseTarget.profile)}
                       >
-                        Collapse Window
+                        <span className="space-y-1 text-left">
+                          <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                            Secondary Action
+                          </span>
+                          <span className="block text-base font-semibold">Collapse Window</span>
+                        </span>
                       </Button>
                     </div>
                   </CardContent>
@@ -1901,19 +2865,29 @@ export default function AdvancedStudio() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
                       <Button
                         type="button"
-                        className="w-full"
+                        className={PRIMARY_ACTION_CARD_CLASS}
                         onClick={() => void handleConfirmSignal()}
                         disabled={!extractedSignal}
                       >
-                        Confirm Signal
+                        <span className="space-y-1 text-left">
+                          <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                            Primary Action
+                          </span>
+                          <span className="block text-base font-semibold">Confirm Signal</span>
+                        </span>
                       </Button>
                       <Button
                         type="button"
                         variant="outline"
-                        className="w-full border-slate-300"
+                        className={SECONDARY_ACTION_CARD_CLASS}
                         onClick={() => setActivePanel(collapseTarget.signal)}
                       >
-                        Collapse Window
+                        <span className="space-y-1 text-left">
+                          <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                            Secondary Action
+                          </span>
+                          <span className="block text-base font-semibold">Collapse Window</span>
+                        </span>
                       </Button>
                     </div>
                   </CardContent>
@@ -1930,31 +2904,45 @@ export default function AdvancedStudio() {
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <Button className="w-full" size="lg" onClick={() => void handleGenerateStreamAction()} disabled={isGenerating || !workflowSnapshot?.ready_for_stream || !scriptPack || isGeneratingScriptPack}>
-                        {isGenerating ? (
-                          <>
-                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                            Generating Stream...
-                          </>
-                        ) : isGeneratingScriptPack ? (
-                          'Script Pack in Progress...'
-                        ) : !workflowSnapshot?.ready_for_script_pack ? (
-                          'Lock Signal + Artifacts + Profile First'
-                        ) : !scriptPack ? (
-                          'Generate Script Pack First'
-                        ) : !workflowSnapshot?.ready_for_stream ? (
-                          'Script Pack Must Be Locked'
-                        ) : (
-                          'Generate Explainer Stream'
-                        )}
+                      <Button className={PRIMARY_ACTION_CARD_CLASS} size="lg" onClick={() => void handleGenerateStreamAction()} disabled={isGenerating || !workflowSnapshot?.ready_for_stream || !scriptPack || isGeneratingScriptPack}>
+                        <span className="flex w-full items-center justify-between gap-4">
+                          <span className="space-y-1 text-left">
+                            <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                              Primary Action
+                            </span>
+                            <span className="block text-base font-semibold">
+                              {isGenerating ? (
+                                'Generating Stream...'
+                              ) : isGeneratingScriptPack ? (
+                                'Script Pack in Progress...'
+                              ) : !workflowSnapshot?.ready_for_script_pack ? (
+                                'Lock Signal + Artifacts + Profile First'
+                              ) : !scriptPack ? (
+                                'Generate Script Pack First'
+                              ) : !workflowSnapshot?.ready_for_stream ? (
+                                'Script Pack Must Be Locked'
+                              ) : (
+                                'Generate Explainer Stream'
+                              )}
+                            </span>
+                          </span>
+                          {isGenerating ? (
+                            <Loader2 className="h-5 w-5 animate-spin text-slate-100" />
+                          ) : null}
+                        </span>
                       </Button>
                       <Button
                         type="button"
                         variant="outline"
-                        className="w-full border-slate-300"
+                        className={SECONDARY_ACTION_CARD_CLASS}
                         onClick={() => setActivePanel(collapseTarget.stream)}
                       >
-                        Collapse Window
+                        <span className="space-y-1 text-left">
+                          <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                            Secondary Action
+                          </span>
+                          <span className="block text-base font-semibold">Collapse Window</span>
+                        </span>
                       </Button>
                     </div>
                     {generationStatus && (
@@ -2019,19 +3007,36 @@ export default function AdvancedStudio() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <Button
                         type="button"
-                        className="w-full"
+                        className={PRIMARY_ACTION_CARD_CLASS}
                         onClick={() => void handleScriptPackAction()}
                         disabled={isGeneratingScriptPack || isGenerating || !workflowSnapshot?.ready_for_script_pack}
                       >
-                        {isGeneratingScriptPack ? 'Generating Script Pack...' : scriptPack ? 'Regenerate Script Pack' : 'Generate Script Pack'}
+                        <span className="flex w-full items-center justify-between gap-4">
+                          <span className="space-y-1 text-left">
+                            <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                              Primary Action
+                            </span>
+                            <span className="block text-base font-semibold">
+                              {isGeneratingScriptPack ? 'Generating Script Pack...' : scriptPack ? 'Regenerate Script Pack' : 'Generate Script Pack'}
+                            </span>
+                          </span>
+                          {isGeneratingScriptPack ? (
+                            <Loader2 className="h-5 w-5 animate-spin text-slate-100" />
+                          ) : null}
+                        </span>
                       </Button>
                       <Button
                         type="button"
                         variant="outline"
-                        className="w-full border-slate-300"
+                        className={SECONDARY_ACTION_CARD_CLASS}
                         onClick={() => setActivePanel(collapseTarget.script)}
                       >
-                        Collapse Window
+                        <span className="space-y-1 text-left">
+                          <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                            Secondary Action
+                          </span>
+                          <span className="block text-base font-semibold">Collapse Window</span>
+                        </span>
                       </Button>
                     </div>
                   </CardContent>
@@ -2064,10 +3069,13 @@ export default function AdvancedStudio() {
                 title={scene.title}
                 text={scene.text} 
                 imageUrl={scene.imageUrl} 
+                artifactType={scriptPack?.artifact_type ?? artifactType}
                 audioUrl={scene.audioUrl} 
                 visualMode={visualMode}
                 onRegenerate={handleRegenerate}
+                onOpenEvidence={openEvidenceViewer}
                 claimRefs={scene.claim_refs}
+                sourceMedia={scene.source_media}
                 status={scene.status}
                 qaStatus={scene.qa_status}
                 qaReasons={scene.qa_reasons}
@@ -2087,7 +3095,7 @@ export default function AdvancedStudio() {
                     <div>
                       <p className="font-semibold">Need a higher-quality final bundle?</p>
                       <p className="text-sm text-slate-600">
-                        Current run used low-key preview mode for speed. You can regenerate with high fidelity now.
+                        Current run used low-key preview mode for speed. Upgrade the current scene images to 2x high fidelity without changing text.
                       </p>
                     </div>
                     <Button
@@ -2095,13 +3103,13 @@ export default function AdvancedStudio() {
                       onClick={() => void handleEnableHighFidelity()}
                       disabled={isApplyingProfile || isGenerating || isGeneratingScriptPack}
                     >
-                      Generate High-Fidelity Bundle
+                      Upscale Bundle Images (2x)
                     </Button>
                   </CardContent>
                 </Card>
               ) : (
                 <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-                  High-fidelity mode is active for this bundle.
+                  High-fidelity mode is active for this bundle. Text/audio are preserved and scene images use the upscaled assets.
                 </div>
               )}
               <FinalBundle scenes={scenes} topic={extractedSignal?.thesis?.one_liner || 'Advanced Explainer'} />
@@ -2110,6 +3118,111 @@ export default function AdvancedStudio() {
         </div>
 
       </div>
+      <Dialog open={Boolean(evidenceViewer)} onOpenChange={(open) => { if (!open) setEvidenceViewer(null); }}>
+        <DialogContent className="bg-white text-slate-900 border-slate-300 max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{evidenceViewer?.sceneTitle ? `${evidenceViewer.sceneTitle} Proof` : 'Source Proof'}</DialogTitle>
+            <DialogDescription className="text-slate-700">
+              {evidenceViewer?.claimRef
+                ? `Showing linked source evidence for ${evidenceViewer.claimRef}.`
+                : 'Showing the strongest linked source proof for this scene.'}
+            </DialogDescription>
+          </DialogHeader>
+              {evidenceViewer?.media ? (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                {evidenceViewer.media.modality === 'audio' ? (
+                  <audio
+                    key={`${evidenceViewer.media.url}-${evidenceViewer.media.start_ms ?? 0}-${evidenceViewer.media.end_ms ?? 0}`}
+                    controls
+                    src={withMediaFragment(
+                      evidenceViewer.media.url,
+                      evidenceViewer.media.start_ms,
+                      evidenceViewer.media.end_ms,
+                    )}
+                    className="w-full"
+                  />
+                ) : evidenceViewer.media.modality === 'pdf_page'
+                  && (
+                    evidenceViewer.media.url.toLowerCase().includes('.pdf')
+                    || evidenceViewer.media.original_url?.toLowerCase().includes('.pdf')
+                  ) ? (
+                  <iframe
+                    src={withPdfPageFragment(
+                      evidenceViewer.media.url,
+                      evidenceViewer.media.page_index,
+                    )}
+                    title={evidenceViewer.media.label || 'Source document proof'}
+                    className="h-[520px] w-full rounded-md border border-slate-200 bg-white"
+                  />
+                ) : (
+                  <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
+                    <img
+                      src={evidenceViewer.media.url}
+                      alt={evidenceViewer.media.label || 'Source proof'}
+                      className="w-full h-auto object-contain"
+                    />
+                  </div>
+                )}
+              </div>
+              <div className="grid gap-2 text-sm text-slate-700">
+                {evidenceViewer.media.label ? (
+                  <p><span className="font-semibold text-slate-900">Label:</span> {evidenceViewer.media.label}</p>
+                ) : null}
+                <p><span className="font-semibold text-slate-900">Type:</span> {evidenceViewer.media.modality}</p>
+                {typeof evidenceViewer.media.page_index === 'number' ? (
+                  <p><span className="font-semibold text-slate-900">Page:</span> {evidenceViewer.media.page_index}</p>
+                ) : null}
+                {typeof evidenceViewer.media.line_start === 'number' ? (
+                  <p>
+                    <span className="font-semibold text-slate-900">Lines:</span> {evidenceViewer.media.line_start}
+                    {typeof evidenceViewer.media.line_end === 'number' && evidenceViewer.media.line_end !== evidenceViewer.media.line_start
+                      ? `-${evidenceViewer.media.line_end}`
+                      : ''}
+                  </p>
+                ) : null}
+                {typeof evidenceViewer.media.start_ms === 'number' ? (
+                  <p>
+                    <span className="font-semibold text-slate-900">Time:</span> {formatMilliseconds(evidenceViewer.media.start_ms)}
+                    {typeof evidenceViewer.media.end_ms === 'number' ? ` - ${formatMilliseconds(evidenceViewer.media.end_ms)}` : ''}
+                  </p>
+                ) : null}
+                {evidenceViewer.media.matched_excerpt ? (
+                  <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Matched Excerpt</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-800">{evidenceViewer.media.matched_excerpt}</p>
+                  </div>
+                ) : null}
+                {evidenceViewer.media.quote_text ? (
+                  <p><span className="font-semibold text-slate-900">Quote:</span> {evidenceViewer.media.quote_text}</p>
+                ) : null}
+                {evidenceViewer.media.visual_context ? (
+                  <p><span className="font-semibold text-slate-900">Visual Context:</span> {evidenceViewer.media.visual_context}</p>
+                ) : null}
+                {evidenceViewer.media.evidence_refs.length > 0 ? (
+                  <p><span className="font-semibold text-slate-900">Evidence Refs:</span> {evidenceViewer.media.evidence_refs.join(', ')}</p>
+                ) : null}
+              </div>
+              <DialogFooter className="gap-2">
+                {evidenceViewer.media.original_url ? (
+                  <Button type="button" variant="outline" className="border-slate-300" asChild>
+                    <a
+                      href={evidenceViewer.media.modality === 'pdf_page'
+                        ? withPdfPageFragment(evidenceViewer.media.original_url, evidenceViewer.media.page_index)
+                        : evidenceViewer.media.original_url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open Original Asset
+                    </a>
+                  </Button>
+                ) : null}
+                <Button type="button" onClick={() => setEvidenceViewer(null)}>Close</Button>
+              </DialogFooter>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
       <Dialog open={Boolean(actionDialogStage)} onOpenChange={(open) => { if (!open) closeActionDialog(); }}>
         <DialogContent className="bg-white text-slate-900 border-slate-300">
           <DialogHeader>

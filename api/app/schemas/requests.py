@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -22,6 +24,27 @@ ArtifactName = Literal[
     "social_caption",
 ]
 
+EvidenceModality = Literal["text", "audio", "video", "image", "pdf_page"]
+RenderStrategy = Literal["generated", "source_media", "hybrid"]
+
+PlannerArtifactType = Literal[
+    "storyboard_grid",
+    "technical_infographic",
+    "process_diagram",
+    "comparison_one_pager",
+    "slide_thumbnail",
+]
+PlannerLensMode = Literal["OFF", "LITE", "FULL"]
+PlanningMode = Literal["sequential", "static", "micro"]
+ScriptShape = Literal[
+    "sequential_storyboard",
+    "comparison_board",
+    "one_pager_board",
+    "thumbnail_focus",
+    "technical_infographic",
+    "process_map",
+]
+
 WorkflowPanelName = Literal["source", "profile", "signal", "script", "stream"]
 WorkflowAgentAction = Literal[
     "respond",
@@ -35,7 +58,10 @@ WorkflowAgentAction = Literal[
 
 
 class SignalExtractionRequest(BaseModel):
-    input_text: str
+    input_text: str = ""
+    source_manifest: SourceManifestSchema | None = None
+    normalized_source_text: str = ""
+    source_text_origin: str | None = None
 
 
 class RegenerateSceneRequest(BaseModel):
@@ -43,6 +69,68 @@ class RegenerateSceneRequest(BaseModel):
     current_text: str
     instruction: str
     visual_mode: str = "illustration"
+
+
+class SourceAssetSchema(BaseModel):
+    asset_id: str
+    modality: EvidenceModality
+    uri: str | None = None
+    mime_type: str | None = None
+    title: str | None = None
+    duration_ms: int | None = None
+    page_index: int | None = None
+    width: int | None = None
+    height: int | None = None
+    transcript_text: str | None = None
+    ocr_text: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SourceManifestSchema(BaseModel):
+    assets: list[SourceAssetSchema] = Field(default_factory=list)
+
+
+class EvidenceRefSchema(BaseModel):
+    evidence_id: str
+    asset_id: str
+    modality: EvidenceModality
+    quote_text: str | None = None
+    transcript_text: str | None = None
+    visual_context: str | None = None
+    speaker: str | None = None
+    start_ms: int | None = None
+    end_ms: int | None = None
+    page_index: int | None = None
+    bbox_norm: list[float] | None = None
+    confidence: float | None = None
+
+
+class SourceMediaRefSchema(BaseModel):
+    asset_id: str
+    modality: Literal["audio", "video", "image", "pdf_page"]
+    usage: Literal["background", "hero", "proof_clip", "region_crop", "callout"] = "proof_clip"
+    claim_refs: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    start_ms: int | None = None
+    end_ms: int | None = None
+    page_index: int | None = None
+    bbox_norm: list[float] | None = None
+    loop: bool = False
+    muted: bool = True
+    label: str | None = None
+    quote_text: str | None = None
+    visual_context: str | None = None
+
+
+class SceneModuleSchema(BaseModel):
+    module_id: str
+    label: str
+    purpose: str
+    content_type: str = "support_panel"
+    claim_refs: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    source_media: list[SourceMediaRefSchema] = Field(default_factory=list)
+    placement_hint: str | None = None
 
 
 class ScenePlanSchema(BaseModel):
@@ -59,6 +147,19 @@ class ScenePlanSchema(BaseModel):
         default_factory=list,
         description="List of claim IDs (e.g., 'c1', 'c2') that this scene covers",
     )
+    scene_mode: Literal["sequential", "static"] = "sequential"
+    scene_role: str | None = None
+    composition_goal: str | None = None
+    layout_template: str | None = None
+    focal_subject: str | None = None
+    visual_hierarchy: list[str] = Field(default_factory=list)
+    modules: list[SceneModuleSchema] = Field(default_factory=list)
+    comparison_axes: list[str] = Field(default_factory=list)
+    flow_steps: list[str] = Field(default_factory=list)
+    crop_safe_regions: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    source_media: list[SourceMediaRefSchema] = Field(default_factory=list)
+    render_strategy: RenderStrategy = "generated"
 
 
 class OutlineSchema(BaseModel):
@@ -74,6 +175,19 @@ class ScriptPackScene(BaseModel):
     claim_refs: list[str] = Field(default_factory=list)
     continuity_refs: list[str] = Field(default_factory=list)
     acceptance_checks: list[str] = Field(default_factory=list)
+    scene_mode: Literal["sequential", "static"] = "sequential"
+    scene_role: str | None = None
+    composition_goal: str | None = None
+    layout_template: str | None = None
+    focal_subject: str | None = None
+    visual_hierarchy: list[str] = Field(default_factory=list)
+    modules: list[SceneModuleSchema] = Field(default_factory=list)
+    comparison_axes: list[str] = Field(default_factory=list)
+    flow_steps: list[str] = Field(default_factory=list)
+    crop_safe_regions: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    source_media: list[SourceMediaRefSchema] = Field(default_factory=list)
+    render_strategy: RenderStrategy = "generated"
 
 
 class ScriptPack(BaseModel):
@@ -81,10 +195,20 @@ class ScriptPack(BaseModel):
     plan_summary: str
     audience_descriptor: str
     scene_count: int
+    artifact_type: str = "storyboard_grid"
+    planning_mode: PlanningMode = "sequential"
+    script_shape: str = "sequential_storyboard"
+    scene_budget_reason: str | None = None
+    salience_mode: PlannerLensMode | None = None
+    forward_pull_mode: PlannerLensMode | None = None
     scenes: list[ScriptPackScene]
 
 
 class AdvancedStreamRequest(BaseModel):
+    source_text: str = ""
+    source_manifest: SourceManifestSchema | None = None
+    normalized_source_text: str = ""
+    source_text_origin: str | None = None
     content_signal: dict[str, Any] = Field(default_factory=dict)
     render_profile: dict[str, Any] = Field(default_factory=dict)
     script_pack: dict[str, Any] | None = None
@@ -92,13 +216,20 @@ class AdvancedStreamRequest(BaseModel):
 
 
 class ScriptPackRequest(BaseModel):
+    source_text: str = ""
+    source_manifest: SourceManifestSchema | None = None
+    normalized_source_text: str = ""
+    source_text_origin: str | None = None
     content_signal: dict[str, Any] = Field(default_factory=dict)
     render_profile: dict[str, Any] = Field(default_factory=dict)
     artifact_scope: list[ArtifactName] = Field(default_factory=list)
 
 
 class WorkflowStartRequest(BaseModel):
-    source_text: str
+    source_text: str = ""
+    source_manifest: SourceManifestSchema | None = None
+    normalized_source_text: str = ""
+    source_text_origin: str | None = None
 
 
 class WorkflowArtifactLockRequest(BaseModel):
@@ -126,6 +257,27 @@ class FinalBundleExportRequest(BaseModel):
     scenes: list[FinalBundleSceneAsset] = Field(default_factory=list)
 
 
+class FinalBundleUpscaleSceneRequest(BaseModel):
+    scene_id: str
+    image_url: str | None = None
+
+
+class FinalBundleUpscaleRequest(BaseModel):
+    scenes: list[FinalBundleUpscaleSceneRequest] = Field(default_factory=list)
+    scale_factor: Literal[2, 4] = 2
+
+
+class PlannerQaSummary(BaseModel):
+    mode: Literal["direct", "repaired", "replanned"]
+    summary: str
+    initial_hard_issue_count: int = 0
+    initial_warning_count: int = 0
+    final_warning_count: int = 0
+    repair_applied: bool = False
+    replan_attempted: bool = False
+    details: list[str] = Field(default_factory=list)
+
+
 class CheckpointRecord(BaseModel):
     checkpoint: CheckpointName
     status: CheckpointStatus
@@ -137,6 +289,9 @@ class SceneTraceRecord(BaseModel):
     scene_id: str
     scene_trace_id: str
     claim_refs: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    render_strategy: RenderStrategy | None = None
+    media_asset_ids: list[str] = Field(default_factory=list)
     qa_history: list[dict[str, Any]] = Field(default_factory=list)
     retries_used: int = 0
     word_count: int = 0
@@ -161,6 +316,9 @@ class WorkflowAgentChatContext(BaseModel):
     workflow_id: str | None = None
     active_panel: WorkflowPanelName | None = None
     source_text: str = ""
+    source_manifest: SourceManifestSchema | None = None
+    normalized_source_text: str = ""
+    source_text_origin: str | None = None
     render_profile: dict[str, Any] = Field(default_factory=dict)
     artifact_scope: list[ArtifactName] = Field(default_factory=list)
     script_presentation_mode: Literal["auto", "review"] = "auto"
@@ -185,5 +343,6 @@ class WorkflowAgentChatResponse(BaseModel):
     workflow: dict[str, Any] | None = None
     content_signal: dict[str, Any] | None = None
     script_pack: dict[str, Any] | None = None
+    planner_qa_summary: PlannerQaSummary | None = None
     ui: WorkflowAgentUiDirective = Field(default_factory=WorkflowAgentUiDirective)
     message: str | None = None
