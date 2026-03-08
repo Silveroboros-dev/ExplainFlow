@@ -684,15 +684,25 @@ export default function QuickGenerate() {
               </div>
 
               <div className="md:col-span-2 pt-4">
-                <Button type="submit" className="w-full" disabled={isGenerating} size="lg">
-                  {isGenerating ? (
-                    <>
-                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                      Generating Stream...
-                    </>
-                  ) : (
-                    'Generate Explainer Stream'
-                  )}
+                <Button
+                  type="submit"
+                  className="h-auto w-full rounded-[24px] bg-slate-950 px-5 py-4 text-left text-white shadow-[0_18px_36px_rgba(15,23,42,0.18)] transition-transform hover:-translate-y-0.5 hover:bg-slate-900 disabled:opacity-100 disabled:bg-slate-300 disabled:text-slate-500 disabled:hover:translate-y-0"
+                  disabled={isGenerating}
+                  size="lg"
+                >
+                  <span className="flex w-full items-center justify-between gap-4">
+                    <span className="space-y-1 text-left">
+                      <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                        Primary Action
+                      </span>
+                      <span className="block text-base font-semibold">
+                        {isGenerating ? 'Generating Stream...' : 'Generate Explainer Stream'}
+                      </span>
+                    </span>
+                    {isGenerating ? (
+                      <Loader2 className="h-5 w-5 animate-spin text-slate-100" />
+                    ) : null}
+                  </span>
                 </Button>
               </div>
 
