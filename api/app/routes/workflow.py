@@ -28,7 +28,12 @@ def _handle_error(exc: Exception, status_code: int = 409) -> HTTPException:
 
 @router.post("/workflow/start")
 async def workflow_start(payload: WorkflowStartRequest):
-    snapshot = await coordinator.start_workflow(payload.source_text)
+    snapshot = await coordinator.start_workflow(
+        payload.source_text,
+        payload.source_manifest.model_dump() if payload.source_manifest is not None else None,
+        payload.normalized_source_text,
+        payload.source_text_origin,
+    )
     return {
         "status": "success",
         "workflow_id": str(snapshot["workflow_id"]),
@@ -40,11 +45,19 @@ async def workflow_start(payload: WorkflowStartRequest):
 async def workflow_extract_signal(workflow_id: str, payload: WorkflowStartRequest):
     try:
         extraction_result = await agent.extract_signal(
-            SignalExtractionRequest(input_text=payload.source_text)
+            SignalExtractionRequest(
+                input_text=payload.source_text,
+                source_manifest=payload.source_manifest,
+                normalized_source_text=payload.normalized_source_text,
+                source_text_origin=payload.source_text_origin,
+            )
         )
         updated_snapshot = await coordinator.record_signal_result(
             workflow_id,
             source_text=payload.source_text,
+            source_manifest=payload.source_manifest.model_dump() if payload.source_manifest is not None else None,
+            normalized_source_text=str(extraction_result.get("normalized_source_text", payload.normalized_source_text or "")),
+            source_text_origin=str(extraction_result.get("source_text_origin", payload.source_text_origin or "")) or None,
             result=extraction_result,
         )
         response: dict[str, Any] = {
@@ -112,6 +125,8 @@ async def workflow_generate_script_pack(workflow_id: str):
             response["script_pack"] = result.get("script_pack", {})
             if isinstance(result.get("claim_traceability"), dict):
                 response["claim_traceability"] = result["claim_traceability"]
+            if isinstance(result.get("planner_qa_summary"), dict):
+                response["planner_qa_summary"] = result["planner_qa_summary"]
         else:
             response["message"] = result.get("message", "Script pack generation failed")
         if isinstance(result.get("trace"), dict):

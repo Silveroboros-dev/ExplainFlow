@@ -6,3 +6,4 @@ sse-starlette
 python-dotenv
 Pillow
 gTTS
+pypdf

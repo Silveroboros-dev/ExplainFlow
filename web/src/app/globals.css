@@ -182,7 +182,6 @@
       inset 0 0 0 1px rgba(255, 255, 255, 0.05);
     will-change: transform;
     transform: rotate(var(--rot));
-    animation: collageDrift 22s ease-in-out infinite;
   }
 
   .collage-tile-frame {
@@ -205,8 +204,37 @@
     z-index: 1;
   }
 
-  .tile-1 { left: 1.8%; top: 9%; width: 212px; height: 292px; --rot: -4deg; animation-delay: -1.1s; }
-  .tile-2 { right: 1.8%; top: 9%; width: 212px; height: 292px; --rot: 4deg; animation-delay: -2.6s; }
+  .tile-1 {
+    left: 2.4%;
+    top: 10%;
+    width: 224px;
+    height: 304px;
+    --rot: -8deg;
+    animation: landingVitruvianFlow 17s ease-in-out infinite;
+  }
+
+  .tile-2 {
+    right: 2.4%;
+    top: 8%;
+    width: 224px;
+    height: 304px;
+    --rot: 9deg;
+    animation: landingMandelbrotFlow 19s ease-in-out infinite;
+  }
+
+  .landing-bg-home .tile-1 {
+    left: 1.8%;
+    top: 7%;
+    width: 268px;
+    height: 365px;
+  }
+
+  .landing-bg-home .tile-2 {
+    right: 1.8%;
+    top: 6%;
+    width: 268px;
+    height: 365px;
+  }
 
   .tile-1 img,
   .tile-2 img {
@@ -528,12 +556,25 @@
   }
 }
 
-@keyframes collageDrift {
+@keyframes landingVitruvianFlow {
   0%, 100% {
-    transform: rotate(var(--rot)) translate3d(0, 0, 0);
+    transform: translate3d(0, 0, 0) rotate(-8deg) scale(1);
+    opacity: 0.74;
   }
   50% {
-    transform: rotate(var(--rot)) translate3d(0, -9px, 0);
+    transform: translate3d(54px, -22px, 0) rotate(-2deg) scale(1.05);
+    opacity: 0.97;
+  }
+}
+
+@keyframes landingMandelbrotFlow {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) rotate(9deg) scale(1);
+    opacity: 0.72;
+  }
+  50% {
+    transform: translate3d(-50px, 28px, 0) rotate(3deg) scale(1.04);
+    opacity: 0.95;
   }
 }
 
@@ -551,6 +592,23 @@
   .landing-orb-b,
   .landing-orb-c {
     transform: scale(0.74);
+  }
+
+  .tile-1 { left: 2.1%; top: 9%; width: 124px; height: 172px; }
+  .tile-2 { right: 2.1%; top: 9%; width: 124px; height: 172px; }
+
+  .landing-bg-home .tile-1 {
+    left: 1.5%;
+    top: 8%;
+    width: 149px;
+    height: 206px;
+  }
+
+  .landing-bg-home .tile-2 {
+    right: 1.5%;
+    top: 8%;
+    width: 149px;
+    height: 206px;
   }
 
   .landing-chip-rail-top {

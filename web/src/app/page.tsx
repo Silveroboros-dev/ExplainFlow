@@ -60,7 +60,7 @@ export default function Home() {
 
   return (
     <div className="relative isolate min-h-screen overflow-x-clip bg-[#05070f] text-slate-100 selection:bg-cyan-300/30">
-      <div className="landing-bg pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden>
+      <div className="landing-bg landing-bg-home pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden>
         <div className="landing-aurora" />
         <div className="landing-grid" />
         <div className="landing-noise" />

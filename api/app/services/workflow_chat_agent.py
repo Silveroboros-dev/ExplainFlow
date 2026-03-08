@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from app.config import get_gemini_client
 from app.schemas.requests import (
     ArtifactName,
+    PlannerQaSummary,
     SignalExtractionRequest,
     WorkflowAgentAction,
     WorkflowAgentChatContext,
@@ -84,6 +85,7 @@ class WorkflowChatAgent:
         workflow: dict[str, Any] | None = None,
         content_signal: dict[str, Any] | None = None,
         script_pack: dict[str, Any] | None = None,
+        planner_qa_summary: dict[str, Any] | PlannerQaSummary | None = None,
         ui: WorkflowAgentUiDirective | None = None,
         status: Literal["success", "error"] = "success",
         message: str | None = None,
@@ -96,6 +98,11 @@ class WorkflowChatAgent:
             workflow=workflow,
             content_signal=content_signal,
             script_pack=script_pack,
+            planner_qa_summary=(
+                PlannerQaSummary.model_validate(planner_qa_summary)
+                if isinstance(planner_qa_summary, dict)
+                else planner_qa_summary
+            ),
             ui=ui or WorkflowAgentUiDirective(),
             message=message,
         )
@@ -576,6 +583,7 @@ class WorkflowChatAgent:
                 workflow_id=workflow_id,
                 workflow=snapshot,
                 script_pack=script_pack,
+                planner_qa_summary=script_result.get("planner_qa_summary"),
                 ui=WorkflowAgentUiDirective(active_panel=target_panel, start_stream=False),
             )
 

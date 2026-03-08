@@ -13,6 +13,16 @@ class FakeStoryAgent:
     async def generate_script_pack_advanced(self, _request):  # noqa: ANN001
         return {
             "status": "success",
+            "planner_qa_summary": {
+                "mode": "repaired",
+                "summary": "Planner applied deterministic repairs before locking the script pack.",
+                "initial_hard_issue_count": 1,
+                "initial_warning_count": 0,
+                "final_warning_count": 0,
+                "repair_applied": True,
+                "replan_attempted": False,
+                "details": [],
+            },
             "script_pack": {
                 "plan_id": "plan-1",
                 "plan_summary": "summary",
@@ -164,6 +174,8 @@ def test_confirm_signal_action_generates_script_pack() -> None:
         assert result.status == "success"
         assert result.selected_action == "confirm_signal"
         assert result.script_pack is not None
+        assert result.planner_qa_summary is not None
+        assert result.planner_qa_summary.mode == "repaired"
         assert result.ui.active_panel == "stream"
         assert result.workflow is not None
         assert result.workflow["checkpoint_state"]["CP4_SCRIPT_LOCKED"] == "passed"

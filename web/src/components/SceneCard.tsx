@@ -11,6 +11,13 @@ interface SceneCardProps {
   title?: string;
   text: string;
   imageUrl?: string;
+  artifactType?: string;
+  sourceMedia?: Array<{
+    asset_id: string;
+    modality: 'audio' | 'video' | 'image' | 'pdf_page';
+    claim_refs: string[];
+    evidence_refs: string[];
+  }>;
   audioStatus: string;
   audioUrl?: string;
   visualMode?: string;
@@ -22,6 +29,7 @@ interface SceneCardProps {
   qaWordCount?: number;
   autoRetryCount?: number;
   onRegenerate?: (sceneId: string, newText: string, newImageUrl: string, newAudioUrl: string) => void;
+  onOpenEvidence?: (sceneId: string, claimRef?: string) => void;
 }
 
 export default function SceneCard({
@@ -29,6 +37,8 @@ export default function SceneCard({
   title,
   text,
   imageUrl,
+  artifactType,
+  sourceMedia,
   audioStatus,
   audioUrl,
   visualMode,
@@ -40,12 +50,20 @@ export default function SceneCard({
   qaWordCount,
   autoRetryCount,
   onRegenerate,
+  onOpenEvidence,
 }: SceneCardProps) {
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [instruction, setInstruction] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const [imageFitClass, setImageFitClass] = useState<'w-full h-auto' | 'w-auto h-full'>('w-full h-auto');
   const imageViewportRef = useRef<HTMLDivElement | null>(null);
+  const showAudio = artifactType !== 'slide_thumbnail';
+  const hasSourceProofs = Array.isArray(sourceMedia) && sourceMedia.length > 0;
+  const claimHasSourceProof = (claimRef: string): boolean => (
+    Array.isArray(sourceMedia)
+      ? sourceMedia.some((item) => Array.isArray(item.claim_refs) && item.claim_refs.includes(claimRef))
+      : false
+  );
 
   // Determine badge color based on status
   const badgeColor = status === 'queued' ? 'bg-slate-200 text-slate-600' : 
@@ -128,10 +146,24 @@ export default function SceneCard({
               {claimRefs && claimRefs.length > 0 && (
                 <div className="flex gap-1 flex-wrap justify-end">
                   {claimRefs.map(ref => (
-                    <Badge key={ref} variant="secondary" className="text-[10px] flex items-center gap-1 opacity-70">
-                      <LinkIcon className="h-3 w-3" />
-                      {ref}
-                    </Badge>
+                    claimHasSourceProof(ref) && onOpenEvidence ? (
+                      <button
+                        key={ref}
+                        type="button"
+                        onClick={() => onOpenEvidence(sceneId, ref)}
+                        className="rounded-full"
+                      >
+                        <Badge variant="secondary" className="text-[10px] flex items-center gap-1 opacity-90 hover:opacity-100 cursor-pointer">
+                          <LinkIcon className="h-3 w-3" />
+                          {ref}
+                        </Badge>
+                      </button>
+                    ) : (
+                      <Badge key={ref} variant="secondary" className="text-[10px] flex items-center gap-1 opacity-70">
+                        <LinkIcon className="h-3 w-3" />
+                        {ref}
+                      </Badge>
+                    )
                   ))}
                 </div>
               )}
@@ -160,19 +192,32 @@ export default function SceneCard({
                 )}
               </div>
             )}
+            {hasSourceProofs && onOpenEvidence && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="mt-2 px-0 text-xs text-slate-600 hover:text-slate-900"
+                onClick={() => onOpenEvidence(sceneId)}
+              >
+                View Source Proof ({sourceMedia?.length ?? 0})
+              </Button>
+            )}
           </div>
           
           <div className="mt-auto pt-4">
-            {audioUrl ? (
-              <audio controls src={audioUrl} className="w-full h-10 rounded-md">
-                Your browser does not support the audio element.
-              </audio>
-            ) : (
-              <div className="h-10 flex items-center px-4 bg-slate-100 rounded-md border border-slate-200">
-                <p className="text-sm text-slate-500 font-medium">Audio: {audioStatus}</p>
-              </div>
-            )}
-            
+            {showAudio ? (
+              audioUrl ? (
+                <audio controls src={audioUrl} className="w-full h-10 rounded-md">
+                  Your browser does not support the audio element.
+                </audio>
+              ) : (
+                <div className="h-10 flex items-center px-4 bg-slate-100 rounded-md border border-slate-200">
+                  <p className="text-sm text-slate-500 font-medium">Audio: {audioStatus}</p>
+                </div>
+              )
+            ) : null}
+
             <Dialog open={isOpen} onOpenChange={setIsOpen}>
               <DialogTrigger asChild>
                 <Button variant="outline" size="sm" className="mt-4 gap-2">

@@ -59,6 +59,10 @@ async def generate_stream_advanced(request: Request):
         body = {}
 
     payload = AdvancedStreamRequest(
+        source_text=body.get("source_text", "") if isinstance(body.get("source_text"), str) else "",
+        source_manifest=body.get("source_manifest") if isinstance(body.get("source_manifest"), dict) else None,
+        normalized_source_text=body.get("normalized_source_text", "") if isinstance(body.get("normalized_source_text"), str) else "",
+        source_text_origin=body.get("source_text_origin") if isinstance(body.get("source_text_origin"), str) else None,
         content_signal=body.get("content_signal", {}) if isinstance(body.get("content_signal"), dict) else {},
         render_profile=body.get("render_profile", {}) if isinstance(body.get("render_profile"), dict) else {},
         script_pack=body.get("script_pack") if isinstance(body.get("script_pack"), dict) else None,
@@ -80,6 +84,10 @@ async def generate_script_pack_advanced(request: Request):
         body = {}
 
     payload = ScriptPackRequest(
+        source_text=body.get("source_text", "") if isinstance(body.get("source_text"), str) else "",
+        source_manifest=body.get("source_manifest") if isinstance(body.get("source_manifest"), dict) else None,
+        normalized_source_text=body.get("normalized_source_text", "") if isinstance(body.get("normalized_source_text"), str) else "",
+        source_text_origin=body.get("source_text_origin") if isinstance(body.get("source_text_origin"), str) else None,
         content_signal=body.get("content_signal", {}) if isinstance(body.get("content_signal"), dict) else {},
         render_profile=body.get("render_profile", {}) if isinstance(body.get("render_profile"), dict) else {},
         artifact_scope=_artifact_scope_from_body(body),

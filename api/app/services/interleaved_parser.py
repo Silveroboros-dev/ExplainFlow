@@ -66,6 +66,7 @@ def evaluate_scene_quality(
     must_avoid: list[str],
     continuity_hints: list[str],
     attempt: int,
+    artifact_type: str | None = None,
 ) -> dict[str, Any]:
     text = (generated_text or "").strip()
     text_lower = text.lower()
@@ -82,9 +83,32 @@ def evaluate_scene_quality(
         hard_fail = True
         reasons.append("No inline image returned.")
 
-    if word_count and (word_count < 45 or word_count > 125):
+    min_words = 50
+    max_words = 100
+    layout_template = scene.layout_template
+    if not layout_template:
+        if artifact_type == "slide_thumbnail":
+            layout_template = "hero_thumbnail"
+        elif artifact_type == "comparison_one_pager":
+            layout_template = "modular_poster"
+        elif artifact_type == "technical_infographic":
+            layout_template = "layered_mechanism"
+        elif artifact_type == "process_diagram":
+            layout_template = "process_flow"
+
+    if layout_template in {"hero_thumbnail", "thumbnail_variant"}:
+        min_words = 18
+        max_words = 40
+    elif layout_template == "modular_poster":
+        min_words = 60
+        max_words = 90
+    elif layout_template in {"layered_mechanism", "detail_callout", "process_flow", "zoom_detail"}:
+        min_words = 40
+        max_words = 85
+
+    if word_count and (word_count < min_words or word_count > max_words):
         score -= 0.3
-        reasons.append(f"Narration length is {word_count} words (target 50-100).")
+        reasons.append(f"Narration length is {word_count} words (target {min_words}-{max_words}).")
 
     focus_tokens = extract_anchor_terms(scene.narration_focus, limit=5)
     if focus_tokens and not any(token in text_lower for token in focus_tokens):
