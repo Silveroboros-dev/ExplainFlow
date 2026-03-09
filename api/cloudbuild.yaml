@@ -1,9 +1,0 @@
-steps:
-  # 1. Build the Docker image, referencing Dockerfile in the api folder
-  # The context '.' is the root of the project
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/explainflow-api', '-f', 'api/Dockerfile', '.']
-
-# 2. Push the image to GCR
-images:
-  - 'gcr.io/$PROJECT_ID/explainflow-api'
