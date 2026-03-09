@@ -1,11 +1,13 @@
 import asyncio
 import json
+import os
 import sys
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
+from unittest.mock import AsyncMock
 
 from fastapi import Request
 from PIL import Image, ImageChops
@@ -15,6 +17,11 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 from app.schemas.events import build_sse_event
 from app.schemas.requests import (
     AdvancedStreamRequest,
+    QuickArtifactOverrideRequest,
+    QuickArtifactRequest,
+    QuickArtifactSchema,
+    QuickBlockOverrideRequest,
+    QuickReelRequest,
     ScriptPackRequest,
     ScriptPackScene,
     SignalExtractionRequest,
@@ -33,6 +40,7 @@ from app.services.interleaved_parser import (
     normalized_scene_id,
 )
 from app.services.source_ingest import locate_excerpt_in_page_text
+from app.services.source_ingest import validate_video_manifest_constraints
 
 
 class FakeResponse:
@@ -157,6 +165,1001 @@ def test_extract_anchor_terms_filters_stopwords_and_limits() -> None:
     text = "Explain quantum tunneling with detailed continuity and visuals for science students"
     anchors = extract_anchor_terms(text, limit=3)
     assert anchors == ["quantum", "tunneling", "detailed"]
+
+
+def test_signal_model_tiering_defaults() -> None:
+    with patch.dict(os.environ, {}, clear=True):
+        assert GeminiStoryAgent._signal_structural_model() == "gemini-3.1-pro-preview"
+        assert GeminiStoryAgent._signal_source_text_model() == "gemini-2.5-flash"
+        assert GeminiStoryAgent._planner_precompute_model() == "gemini-2.5-flash"
+        assert GeminiStoryAgent._signal_creative_model() == "gemini-3.1-pro-preview"
+
+
+def test_validate_video_manifest_constraints_requires_transcript_for_longer_video() -> None:
+    message = validate_video_manifest_constraints(
+        source_manifest={
+            "assets": [
+                {
+                    "asset_id": "video-1",
+                    "modality": "video",
+                    "uri": "http://example.com/video.mp4",
+                    "duration_ms": 3 * 60 * 1000,
+                }
+            ]
+        },
+        source_text="",
+        normalized_source_text="",
+    )
+    assert message is not None
+    assert "longer than 2 minutes" in message
+
+
+def test_validate_video_manifest_constraints_allows_longer_video_with_transcript() -> None:
+    message = validate_video_manifest_constraints(
+        source_manifest={
+            "assets": [
+                {
+                    "asset_id": "video-1",
+                    "modality": "video",
+                    "uri": "http://example.com/video.mp4",
+                    "duration_ms": 8 * 60 * 1000,
+                }
+            ]
+        },
+        source_text="Transcript text already provided.",
+        normalized_source_text="",
+    )
+    assert message is None
+
+
+def test_validate_video_manifest_constraints_rejects_too_long_video() -> None:
+    message = validate_video_manifest_constraints(
+        source_manifest={
+            "assets": [
+                {
+                    "asset_id": "video-1",
+                    "modality": "video",
+                    "uri": "http://example.com/video.mp4",
+                    "duration_ms": 11 * 60 * 1000,
+                    "transcript_text": "Transcript available.",
+                }
+            ]
+        },
+        source_text="",
+        normalized_source_text="",
+    )
+    assert message == "Video uploads are currently limited to 10 minutes."
+
+
+def test_validate_video_manifest_constraints_allows_youtube_with_transcript_without_duration() -> None:
+    message = validate_video_manifest_constraints(
+        source_manifest={
+            "assets": [
+                {
+                    "asset_id": "video-yt-1",
+                    "modality": "video",
+                    "uri": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                    "title": "Demo clip",
+                }
+            ]
+        },
+        source_text="Transcript text already provided.",
+        normalized_source_text="",
+    )
+    assert message is None
+
+
+def test_parse_json_object_response_unwraps_stringified_json_object() -> None:
+    payload = GeminiStoryAgent._parse_json_object_response('"{\\"narrative_beats\\": [], \\"visual_candidates\\": []}"')
+    assert payload == {"narrative_beats": [], "visual_candidates": []}
+
+
+def test_generate_quick_artifact_uses_quick_model_and_normalizes_blocks() -> None:
+    client = ExtractionFakeClient(
+        response_text=json.dumps(
+            {
+                "artifact_id": "artifact-1",
+                "title": "AI Moral Competence",
+                "subtitle": "A fast structured brief",
+                "summary": "Focus the audience on the central distinction.",
+                "visual_style": "diagram",
+                "hero_direction": "Clean editorial cover.",
+                "blocks": [
+                    {
+                        "block_id": "hook",
+                        "label": "Hook",
+                        "title": "Why now",
+                        "body": "LLMs are entering sensitive domains before evaluation standards are settled.",
+                        "bullets": ["Sensitive domains", "Standards lagging"],
+                        "visual_direction": "Hero tension frame",
+                        "emphasis": "hook",
+                    },
+                    {
+                        "block_id": "core",
+                        "label": "Core",
+                        "title": "What is missing",
+                        "body": "Moral performance can look strong without durable moral competence.",
+                        "bullets": [],
+                        "visual_direction": "Two-column distinction",
+                        "emphasis": "core",
+                    },
+                ],
+            }
+        )
+    )
+    agent = GeminiStoryAgent()
+    agent.client = client
+
+    result = asyncio.run(
+        agent.generate_quick_artifact(
+            QuickArtifactRequest(
+                topic="Evaluating moral competence in LLMs",
+                audience="Investors",
+                tone="Executive",
+                visual_mode="diagram",
+            ),
+            request=SimpleNamespace(url=SimpleNamespace(scheme="http", netloc="127.0.0.1:8000")),
+        )
+    )
+
+    assert result["status"] == "success"
+    artifact = QuickArtifactSchema.model_validate(result["artifact"])
+    assert len(artifact.blocks) == 4
+    assert client.models.contents
+    assert "lightweight Quick mode" in str(client.models.contents[0])
+
+
+def test_generate_quick_artifact_attaches_video_source_media_from_claims() -> None:
+    client = ExtractionFakeClient(
+        response_text=json.dumps(
+            {
+                "artifact_id": "artifact-2",
+                "title": "Video-backed brief",
+                "subtitle": "Grounded in clip evidence",
+                "summary": "Quick artifact uses transcript-backed proof clips.",
+                "visual_style": "hybrid",
+                "hero_direction": "Lead with the on-screen reveal moment.",
+                "blocks": [
+                    {
+                        "block_id": "hook",
+                        "label": "Hook",
+                        "title": "The reveal",
+                        "body": "The CEO points to the key chart as the main inflection appears.",
+                        "bullets": ["Lead with the reveal."],
+                        "visual_direction": "Use the actual source clip.",
+                        "emphasis": "hook",
+                        "claim_refs": ["c1"],
+                    },
+                    {
+                        "block_id": "core",
+                        "label": "Core",
+                        "title": "Context",
+                        "body": "Explain why that visual matters.",
+                        "bullets": [],
+                        "visual_direction": "Keep the context clean.",
+                        "emphasis": "core",
+                        "claim_refs": ["c1"],
+                    },
+                    {
+                        "block_id": "proof",
+                        "label": "Proof",
+                        "title": "Support",
+                        "body": "Anchor the claim in the source media.",
+                        "bullets": [],
+                        "visual_direction": "Clip and callout.",
+                        "emphasis": "proof",
+                        "claim_refs": ["c1"],
+                    },
+                    {
+                        "block_id": "takeaway",
+                        "label": "Takeaway",
+                        "title": "What matters",
+                        "body": "Carry the implication forward.",
+                        "bullets": [],
+                        "visual_direction": "Tight close.",
+                        "emphasis": "action",
+                        "claim_refs": ["c1"],
+                    },
+                ],
+            }
+        )
+    )
+    agent = GeminiStoryAgent()
+    agent.client = client
+
+    result = asyncio.run(
+        agent.generate_quick_artifact(
+            QuickArtifactRequest(
+                topic="Hardware launch recap",
+                audience="Operators",
+                tone="Practical",
+                visual_mode="hybrid",
+                source_manifest={
+                    "assets": [
+                        {
+                            "asset_id": "video-1",
+                            "modality": "video",
+                            "uri": "http://example.com/launch.mp4",
+                            "duration_ms": 90000,
+                        }
+                    ]
+                },
+                content_signal={
+                    "thesis": {"one_liner": "The live demo reveal anchors the product message."},
+                    "key_claims": [
+                        {
+                            "claim_id": "c1",
+                            "claim_text": "The CEO reveals the new hardware while pointing to the adoption chart.",
+                            "evidence_snippets": [
+                                {
+                                    "evidence_id": "e1",
+                                    "modality": "video",
+                                    "asset_id": "video-1",
+                                    "start_ms": 12000,
+                                    "end_ms": 18000,
+                                    "transcript_text": "As you can see here, this adoption line bends upward right after launch.",
+                                    "visual_context": "CEO on stage pointing to a chart with the adoption spike highlighted.",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            ),
+            request=SimpleNamespace(url=SimpleNamespace(scheme="http", netloc="127.0.0.1:8000")),
+        )
+    )
+
+    assert result["status"] == "success"
+    artifact = QuickArtifactSchema.model_validate(result["artifact"])
+    assert artifact.blocks[0].source_media
+    assert artifact.blocks[0].source_media[0].asset_id == "video-1"
+    assert artifact.blocks[0].source_media[0].modality == "video"
+
+
+def test_generate_quick_artifact_overwrites_model_source_media_and_generates_hero_image() -> None:
+    client = ExtractionFakeClient(
+        response_router=lambda prompt, index: json.dumps(
+            {
+                "artifact_id": "artifact-3",
+                "title": "Video-backed brief",
+                "subtitle": "Grounded in clip evidence",
+                "summary": "Quick artifact uses transcript-backed proof clips.",
+                "visual_style": "hybrid",
+                "hero_direction": "Lead with the on-screen reveal moment.",
+                "blocks": [
+                    {
+                        "block_id": "hook",
+                        "label": "Hook",
+                        "title": "The reveal",
+                        "body": "The CEO points to the key chart as the main inflection appears.",
+                        "bullets": [],
+                        "visual_direction": "Use the actual source clip.",
+                        "emphasis": "hook",
+                        "claim_refs": ["c1"],
+                        "evidence_refs": ["bogus-evidence"],
+                        "source_media": [
+                            {
+                                "asset_id": "hallucinated-video",
+                                "modality": "video",
+                                "usage": "proof_clip",
+                                "claim_refs": ["c1"],
+                                "evidence_refs": ["bogus-evidence"],
+                                "start_ms": 4,
+                                "end_ms": 7,
+                            }
+                        ],
+                    },
+                    {
+                        "block_id": "core",
+                        "label": "Core",
+                        "title": "Context",
+                        "body": "Explain why that visual matters.",
+                        "bullets": [],
+                        "visual_direction": "Keep the context clean.",
+                        "emphasis": "core",
+                        "claim_refs": ["c1"],
+                    },
+                    {
+                        "block_id": "proof",
+                        "label": "Proof",
+                        "title": "Support",
+                        "body": "Anchor the claim in the source media.",
+                        "bullets": [],
+                        "visual_direction": "Clip and callout.",
+                        "emphasis": "proof",
+                        "claim_refs": ["c1"],
+                    },
+                    {
+                        "block_id": "takeaway",
+                        "label": "Takeaway",
+                        "title": "What matters",
+                        "body": "Carry the implication forward.",
+                        "bullets": [],
+                        "visual_direction": "Tight close.",
+                        "emphasis": "action",
+                        "claim_refs": ["c1"],
+                    },
+                ],
+            }
+            if index == 1
+            else "{}"
+        )
+    )
+    agent = GeminiStoryAgent()
+    agent.client = client
+
+    with patch.object(
+        GeminiStoryAgent,
+        "_generate_quick_hero_image",
+        autospec=True,
+        return_value="http://127.0.0.1:8000/static/assets/quick_hero_demo.png",
+    ):
+        result = asyncio.run(
+            agent.generate_quick_artifact(
+                QuickArtifactRequest(
+                    topic="Hardware launch recap",
+                    audience="Operators",
+                    tone="Practical",
+                    visual_mode="hybrid",
+                    source_manifest={
+                        "assets": [
+                            {
+                                "asset_id": "video-1",
+                                "modality": "video",
+                                "uri": "http://example.com/launch.mp4",
+                                "duration_ms": 90000,
+                            }
+                        ]
+                    },
+                    content_signal={
+                        "thesis": {"one_liner": "The live demo reveal anchors the product message."},
+                        "key_claims": [
+                            {
+                                "claim_id": "c1",
+                                "claim_text": "The CEO reveals the new hardware while pointing to the adoption chart.",
+                                "evidence_snippets": [
+                                    {
+                                        "evidence_id": "e1",
+                                        "modality": "video",
+                                        "asset_id": "video-1",
+                                        "start_ms": 12000,
+                                        "end_ms": 18000,
+                                        "transcript_text": "As you can see here, this adoption line bends upward right after launch.",
+                                        "visual_context": "CEO on stage pointing to a chart with the adoption spike highlighted.",
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                ),
+                request=SimpleNamespace(url=SimpleNamespace(scheme="http", netloc="127.0.0.1:8000")),
+            )
+        )
+
+    artifact = QuickArtifactSchema.model_validate(result["artifact"])
+    assert artifact.hero_image_url == "http://127.0.0.1:8000/static/assets/quick_hero_demo.png"
+    assert artifact.blocks[0].source_media
+    assert all(item.asset_id != "hallucinated-video" for item in artifact.blocks[0].source_media)
+    assert "bogus-evidence" not in artifact.blocks[0].evidence_refs
+    assert artifact.blocks[0].source_media[0].asset_id == "video-1"
+
+
+def test_generate_quick_reel_builds_ordered_segments_from_blocks() -> None:
+    agent = GeminiStoryAgent()
+
+    result = asyncio.run(
+        agent.generate_quick_reel(
+            QuickReelRequest(
+                artifact={
+                    "artifact_id": "artifact-reel",
+                    "title": "Battery launch brief",
+                    "subtitle": "A fast operator update",
+                    "summary": "Summarize the reveal, the proof, and the implication.",
+                    "visual_style": "hybrid",
+                    "hero_direction": "Use the reveal frame as the cover.",
+                    "blocks": [
+                        {
+                            "block_id": "block-1",
+                            "label": "Hook",
+                            "title": "The reveal",
+                            "body": "Lead with the reveal. Show the chart bend immediately. Keep the setup short.",
+                            "bullets": [],
+                            "visual_direction": "Use the actual reveal clip.",
+                            "image_url": "http://127.0.0.1:8000/static/assets/hook.png",
+                            "emphasis": "hook",
+                            "claim_refs": ["c1"],
+                            "evidence_refs": ["e1"],
+                            "source_media": [
+                                {
+                                    "asset_id": "video-1",
+                                    "modality": "video",
+                                    "usage": "proof_clip",
+                                    "claim_refs": ["c1"],
+                                    "evidence_refs": ["e1"],
+                                    "start_ms": 12000,
+                                    "end_ms": 18000,
+                                }
+                            ],
+                        },
+                        {
+                            "block_id": "block-2",
+                            "label": "Proof",
+                            "title": "Why it matters",
+                            "body": "Move to the second proof beat. Explain the operator takeaway in one tight frame.",
+                            "bullets": [],
+                            "visual_direction": "Use a second source-backed moment.",
+                            "image_url": "http://127.0.0.1:8000/static/assets/proof.png",
+                            "emphasis": "proof",
+                            "claim_refs": ["c2"],
+                            "evidence_refs": ["e2"],
+                            "source_media": [
+                                {
+                                    "asset_id": "video-1",
+                                    "modality": "video",
+                                    "usage": "proof_clip",
+                                    "claim_refs": ["c1"],
+                                    "evidence_refs": ["e1"],
+                                    "start_ms": 12000,
+                                    "end_ms": 18000,
+                                },
+                                {
+                                    "asset_id": "video-1",
+                                    "modality": "video",
+                                    "usage": "proof_clip",
+                                    "claim_refs": ["c2"],
+                                    "evidence_refs": ["e2"],
+                                    "start_ms": 26000,
+                                    "end_ms": 32000,
+                                },
+                            ],
+                        },
+                        {
+                            "block_id": "block-3",
+                            "label": "Action",
+                            "title": "Next move",
+                            "body": "Close on the operator action. Keep it direct.",
+                            "bullets": [],
+                            "visual_direction": "Generated closing frame.",
+                            "image_url": "http://127.0.0.1:8000/static/assets/action.png",
+                            "emphasis": "action",
+                            "claim_refs": ["c3"],
+                            "evidence_refs": [],
+                            "source_media": [],
+                        },
+                    ],
+                },
+                content_signal={
+                    "key_claims": [
+                        {"claim_id": "c1", "claim_text": "The first reveal shows the demand spike."},
+                        {"claim_id": "c2", "claim_text": "The second moment ties the spike to operator action."},
+                    ]
+                },
+                source_manifest={
+                    "assets": [
+                        {
+                            "asset_id": "video-1",
+                            "modality": "video",
+                            "uri": "http://example.com/reveal.mp4",
+                        }
+                    ]
+                },
+            )
+        )
+    )
+
+    assert result["status"] == "success"
+    artifact = QuickArtifactSchema.model_validate(result["artifact"])
+    assert artifact.reel is not None
+    assert [segment.block_id for segment in artifact.reel.segments] == ["block-1", "block-2", "block-3"]
+    assert artifact.reel.segments[0].render_mode == "hybrid"
+    assert artifact.reel.segments[0].primary_media is not None
+    assert artifact.reel.segments[0].primary_media.start_ms == 12000
+    assert artifact.reel.segments[1].primary_media is not None
+    assert artifact.reel.segments[1].primary_media.start_ms == 26000
+    assert artifact.reel.segments[2].render_mode == "generated_image"
+    assert artifact.reel.segments[2].fallback_image_url == "http://127.0.0.1:8000/static/assets/action.png"
+    assert artifact.reel.segments[0].caption_text == "Lead with the reveal. Show the chart bend immediately."
+
+
+def test_populate_quick_block_visuals_generates_only_for_blocks_without_source_media() -> None:
+    agent = GeminiStoryAgent()
+    artifact = QuickArtifactSchema.model_validate(
+        {
+            "artifact_id": "artifact-visuals",
+            "title": "Visualized artifact",
+            "subtitle": "Testing block visuals",
+            "summary": "Each block should have a visible visual treatment.",
+            "visual_style": "illustration",
+            "hero_direction": "Clean hero.",
+            "blocks": [
+                {
+                    "block_id": "block-1",
+                    "label": "Hook",
+                    "title": "Needs generated image",
+                    "body": "This block has no source media.",
+                    "bullets": [],
+                    "visual_direction": "Strong symbolic opener.",
+                    "emphasis": "hook",
+                },
+                {
+                    "block_id": "block-2",
+                    "label": "Proof",
+                    "title": "Uses source clip",
+                    "body": "This block already has source media.",
+                    "bullets": [],
+                    "visual_direction": "Reuse the clip.",
+                    "emphasis": "proof",
+                    "source_media": [
+                        {
+                            "asset_id": "video-1",
+                            "modality": "video",
+                            "usage": "proof_clip",
+                            "claim_refs": ["c1"],
+                            "evidence_refs": ["e1"],
+                            "start_ms": 12000,
+                            "end_ms": 18000,
+                        }
+                    ],
+                },
+            ],
+        }
+    )
+
+    with patch.object(
+        GeminiStoryAgent,
+        "_generate_quick_block_image",
+        new=AsyncMock(return_value="http://127.0.0.1:8000/static/assets/quick_block_demo.png"),
+    ) as block_image_mock:
+        visualized = asyncio.run(
+            agent._populate_quick_block_visuals(
+                request=SimpleNamespace(url=SimpleNamespace(scheme="http", netloc="127.0.0.1:8000")),
+                topic="Demo topic",
+                audience="Operators",
+                tone="Practical",
+                visual_mode="illustration",
+                artifact=artifact,
+                content_signal={},
+            )
+        )
+
+    assert visualized.blocks[0].image_url == "http://127.0.0.1:8000/static/assets/quick_block_demo.png"
+    assert visualized.blocks[1].image_url is None
+    assert block_image_mock.await_count == 1
+
+
+def test_structured_evidence_refs_normalizes_string_video_timecodes() -> None:
+    by_claim, _, _ = GeminiStoryAgent._structured_evidence_refs(
+        {
+            "key_claims": [
+                {
+                    "claim_id": "c1",
+                    "claim_text": "The CEO points to the adoption spike.",
+                    "evidence_snippets": [
+                        {
+                            "evidence_id": "e1",
+                            "modality": "video",
+                            "asset_id": "video-1",
+                            "start_ms": "00:12",
+                            "end_ms": "00:18",
+                            "transcript_text": "As you can see here, the line bends upward.",
+                        }
+                    ],
+                },
+                {
+                    "claim_id": "c2",
+                    "claim_text": "The second clip uses second-based numerics.",
+                    "evidence_snippets": [
+                        {
+                            "evidence_id": "e2",
+                            "modality": "video",
+                            "asset_id": "video-1",
+                            "start_ms": "24",
+                            "end_ms": "31",
+                            "transcript_text": "This second segment starts later in the clip.",
+                        }
+                    ],
+                },
+            ]
+        },
+        {
+            "assets": [
+                {
+                    "asset_id": "video-1",
+                    "modality": "video",
+                    "uri": "http://example.com/video.mp4",
+                    "duration_ms": 90000,
+                }
+            ]
+        },
+    )
+
+    assert by_claim["c1"][0].start_ms == 12000
+    assert by_claim["c1"][0].end_ms == 18000
+    assert by_claim["c2"][0].start_ms == 24000
+    assert by_claim["c2"][0].end_ms == 31000
+
+
+def test_structured_evidence_refs_infers_short_proof_window_when_video_end_missing() -> None:
+    by_claim, _, _ = GeminiStoryAgent._structured_evidence_refs(
+        {
+            "key_claims": [
+                {
+                    "claim_id": "c1",
+                    "claim_text": "The keynote moment begins here.",
+                    "evidence_snippets": [
+                        {
+                            "evidence_id": "e1",
+                            "modality": "video",
+                            "asset_id": "video-1",
+                            "start_ms": "00:45",
+                            "transcript_text": "Here is the main reveal moment.",
+                        }
+                    ],
+                }
+            ]
+        },
+        {
+            "assets": [
+                {
+                    "asset_id": "video-1",
+                    "modality": "video",
+                    "uri": "https://www.youtube.com/watch?v=demo",
+                }
+            ]
+        },
+    )
+
+    assert by_claim["c1"][0].start_ms == 45000
+    assert by_claim["c1"][0].end_ms == 60000
+    assert by_claim["c1"][0].timing_inferred is True
+
+
+def test_transcript_only_video_prompts_include_no_frame_access_guardrail() -> None:
+    prompt = GeminiStoryAgent._build_structural_signal_prompt(
+        document_text="As you can see here, this chart changes after launch.",
+        source_inventory_text="- youtube-1: video | Demo clip",
+        transcript_only_video=True,
+    )
+    assert "without direct frame access" in prompt
+    assert "do not invent exact visual details" in prompt
+
+
+def test_regenerate_quick_block_preserves_block_id() -> None:
+    client = ExtractionFakeClient(
+        response_text=json.dumps(
+            {
+                "block_id": "wrong-id",
+                "label": "Proof",
+                "title": "Sharper evidence",
+                "body": "Use the strongest study result and cut the rest.",
+                "bullets": ["Lead with the main metric."],
+                "visual_direction": "Single decisive chart.",
+                "emphasis": "proof",
+            }
+        )
+    )
+    agent = GeminiStoryAgent()
+    agent.client = client
+
+    result = asyncio.run(
+        agent.regenerate_quick_block(
+            QuickBlockOverrideRequest(
+                topic="Evaluating moral competence in LLMs",
+                audience="Investors",
+                tone="Executive",
+                visual_mode="diagram",
+                artifact={
+                    "artifact_id": "artifact-1",
+                    "title": "AI Moral Competence",
+                    "subtitle": "A fast structured brief",
+                    "summary": "Focus the audience on the central distinction.",
+                    "visual_style": "diagram",
+                    "hero_direction": "Clean editorial cover.",
+                    "blocks": [
+                        {
+                            "block_id": "proof-block",
+                            "label": "Proof",
+                            "title": "What supports it",
+                            "body": "Current evidence is uneven across tasks.",
+                            "bullets": ["Benchmarks diverge."],
+                            "visual_direction": "Comparison cue.",
+                            "emphasis": "proof",
+                        }
+                    ],
+                },
+                block_id="proof-block",
+                instruction="Make this block more executive and sharper.",
+            ),
+            request=SimpleNamespace(url=SimpleNamespace(scheme="http", netloc="127.0.0.1:8000")),
+        )
+    )
+
+    assert result["status"] == "success"
+    assert result["block"]["block_id"] == "proof-block"
+    assert result["block"]["title"] == "Sharper evidence"
+
+
+def test_regenerate_quick_block_generates_visual_for_source_backed_block() -> None:
+    client = ExtractionFakeClient(
+        response_text=json.dumps(
+            {
+                "block_id": "block-4",
+                "label": "Takeaway",
+                "title": "Close with a diagram",
+                "body": "Summarize the flow in one decisive panel.",
+                "bullets": ["Use a schematic instead of raw footage."],
+                "visual_direction": "A clean diagram that simplifies the sequence.",
+                "emphasis": "action",
+                "claim_refs": ["claim-4"],
+            }
+        )
+    )
+    agent = GeminiStoryAgent()
+    agent.client = client
+    agent._generate_quick_block_image = AsyncMock(return_value="http://127.0.0.1:8000/static/assets/override-diagram.png")
+
+    result = asyncio.run(
+        agent.regenerate_quick_block(
+            QuickBlockOverrideRequest(
+                topic="Protein folding",
+                audience="Investors",
+                tone="Executive",
+                visual_mode="diagram",
+                artifact={
+                    "artifact_id": "artifact-1",
+                    "title": "Protein Folding",
+                    "subtitle": "A fast structured brief",
+                    "summary": "Focus on why the mechanism matters.",
+                    "visual_style": "diagram",
+                    "hero_direction": "Clean editorial cover.",
+                    "blocks": [
+                        {
+                            "block_id": "block-4",
+                            "label": "Takeaway",
+                            "title": "What to do with it",
+                            "body": "End on the practical implication.",
+                            "bullets": ["Keep the close memorable."],
+                            "visual_direction": "Closing module with synthesis and one action cue.",
+                            "emphasis": "action",
+                            "claim_refs": ["claim-4"],
+                            "source_media": [
+                                SourceMediaRefSchema(
+                                    asset_id="video-1",
+                                    modality="video",
+                                    usage="proof_clip",
+                                    claim_refs=["claim-4"],
+                                    evidence_refs=["evidence-4"],
+                                    start_ms=2000,
+                                    end_ms=6000,
+                                ).model_dump()
+                            ],
+                        }
+                    ],
+                },
+                block_id="block-4",
+                instruction="I need a diagram here.",
+            ),
+            request=SimpleNamespace(url=SimpleNamespace(scheme="http", netloc="127.0.0.1:8000")),
+        )
+    )
+
+    assert result["status"] == "success"
+    assert result["block"]["image_url"] == "http://127.0.0.1:8000/static/assets/override-diagram.png"
+    assert result["block"]["source_media"][0]["asset_id"] == "video-1"
+
+
+def test_regenerate_quick_block_surfaces_model_failure() -> None:
+    client = ExtractionFakeClient(response_router=lambda prompt, index: (_ for _ in ()).throw(RuntimeError("model exploded")))
+    agent = GeminiStoryAgent()
+    agent.client = client
+
+    result = asyncio.run(
+        agent.regenerate_quick_block(
+            QuickBlockOverrideRequest(
+                topic="Evaluating moral competence in LLMs",
+                audience="Investors",
+                tone="Executive",
+                visual_mode="diagram",
+                artifact={
+                    "artifact_id": "artifact-1",
+                    "title": "AI Moral Competence",
+                    "subtitle": "A fast structured brief",
+                    "summary": "Focus the audience on the central distinction.",
+                    "visual_style": "diagram",
+                    "hero_direction": "Clean editorial cover.",
+                    "blocks": [
+                        {
+                            "block_id": "proof-block",
+                            "label": "Proof",
+                            "title": "What supports it",
+                            "body": "Current evidence is uneven across tasks.",
+                            "bullets": ["Benchmarks diverge."],
+                            "visual_direction": "Comparison cue.",
+                            "emphasis": "proof",
+                        }
+                    ],
+                },
+                block_id="proof-block",
+                instruction="Make this block more executive and sharper.",
+            ),
+            request=SimpleNamespace(url=SimpleNamespace(scheme="http", netloc="127.0.0.1:8000")),
+        )
+    )
+
+    assert result["status"] == "error"
+    assert "Block override failed" in result["message"]
+
+
+def test_regenerate_quick_artifact_preserves_blocks_before_anchor() -> None:
+    client = ExtractionFakeClient(
+        response_text=json.dumps(
+            {
+                "artifact_id": "artifact-1",
+                "title": "New title",
+                "subtitle": "New subtitle",
+                "summary": "New summary",
+                "visual_style": "diagram",
+                "hero_direction": "Sharper cover.",
+                "blocks": [
+                    {
+                        "block_id": "block-1",
+                        "label": "Hook",
+                        "title": "Rewritten hook",
+                        "body": "Rewritten opener.",
+                        "bullets": [],
+                        "visual_direction": "New opener.",
+                        "emphasis": "hook",
+                    },
+                    {
+                        "block_id": "block-2",
+                        "label": "Core",
+                        "title": "Rewritten core",
+                        "body": "Rewritten core block.",
+                        "bullets": [],
+                        "visual_direction": "New core.",
+                        "emphasis": "core",
+                    },
+                    {
+                        "block_id": "block-3",
+                        "label": "Proof",
+                        "title": "Rewritten proof",
+                        "body": "Rewritten proof block.",
+                        "bullets": [],
+                        "visual_direction": "New proof.",
+                        "emphasis": "proof",
+                    },
+                    {
+                        "block_id": "block-4",
+                        "label": "Action",
+                        "title": "Rewritten action",
+                        "body": "Rewritten action block.",
+                        "bullets": [],
+                        "visual_direction": "New action.",
+                        "emphasis": "action",
+                    },
+                ],
+            }
+        )
+    )
+    agent = GeminiStoryAgent()
+    agent.client = client
+
+    result = asyncio.run(
+        agent.regenerate_quick_artifact(
+            QuickArtifactOverrideRequest(
+                topic="Evaluating moral competence in LLMs",
+                audience="Investors",
+                tone="Executive",
+                visual_mode="diagram",
+                artifact={
+                    "artifact_id": "artifact-1",
+                    "title": "Original title",
+                    "subtitle": "Original subtitle",
+                    "summary": "Original summary",
+                    "visual_style": "diagram",
+                    "hero_direction": "Original cover.",
+                    "blocks": [
+                        {
+                            "block_id": "block-1",
+                            "label": "Hook",
+                            "title": "Keep me",
+                            "body": "Original opener.",
+                            "bullets": [],
+                            "visual_direction": "Original opener cue.",
+                            "emphasis": "hook",
+                        },
+                        {
+                            "block_id": "block-2",
+                            "label": "Core",
+                            "title": "Change me",
+                            "body": "Original core block.",
+                            "bullets": [],
+                            "visual_direction": "Original core cue.",
+                            "emphasis": "core",
+                        },
+                        {
+                            "block_id": "block-3",
+                            "label": "Proof",
+                            "title": "Change me too",
+                            "body": "Original proof block.",
+                            "bullets": [],
+                            "visual_direction": "Original proof cue.",
+                            "emphasis": "proof",
+                        },
+                        {
+                            "block_id": "block-4",
+                            "label": "Action",
+                            "title": "Change me three",
+                            "body": "Original action block.",
+                            "bullets": [],
+                            "visual_direction": "Original action cue.",
+                            "emphasis": "action",
+                        },
+                    ],
+                },
+                instruction="Make the rest more academic.",
+                anchor_block_id="block-2",
+            ),
+            request=SimpleNamespace(url=SimpleNamespace(scheme="http", netloc="127.0.0.1:8000")),
+        )
+    )
+
+    assert result["status"] == "success"
+    updated_artifact = QuickArtifactSchema.model_validate(result["artifact"])
+    assert updated_artifact.blocks[0].title == "Keep me"
+    assert updated_artifact.blocks[1].title == "Rewritten core"
+    assert updated_artifact.title == "Original title"
+
+
+def test_regenerate_quick_artifact_surfaces_model_failure() -> None:
+    client = ExtractionFakeClient(response_router=lambda prompt, index: (_ for _ in ()).throw(RuntimeError("model exploded")))
+    agent = GeminiStoryAgent()
+    agent.client = client
+
+    result = asyncio.run(
+        agent.regenerate_quick_artifact(
+            QuickArtifactOverrideRequest(
+                topic="Evaluating moral competence in LLMs",
+                audience="Investors",
+                tone="Executive",
+                visual_mode="diagram",
+                artifact={
+                    "artifact_id": "artifact-1",
+                    "title": "Original title",
+                    "subtitle": "Original subtitle",
+                    "summary": "Original summary",
+                    "visual_style": "diagram",
+                    "hero_direction": "Original cover.",
+                    "blocks": [
+                        {
+                            "block_id": "block-1",
+                            "label": "Hook",
+                            "title": "Keep me",
+                            "body": "Original opener.",
+                            "bullets": [],
+                            "visual_direction": "Original opener cue.",
+                            "emphasis": "hook",
+                        },
+                        {
+                            "block_id": "block-2",
+                            "label": "Core",
+                            "title": "Change me",
+                            "body": "Original core block.",
+                            "bullets": [],
+                            "visual_direction": "Original core cue.",
+                            "emphasis": "core",
+                        },
+                    ],
+                },
+                instruction="Make the rest more academic.",
+                anchor_block_id="block-2",
+            ),
+            request=SimpleNamespace(url=SimpleNamespace(scheme="http", netloc="127.0.0.1:8000")),
+        )
+    )
+
+    assert result["status"] == "error"
+    assert "Global override failed" in result["message"]
 
 
 def test_normalized_scene_id_defaults_when_missing() -> None:
@@ -1620,6 +2623,133 @@ def test_generate_stream_advanced_events_emits_source_media_ready_payloads() -> 
     asyncio.run(run())
 
 
+def test_generate_stream_advanced_events_overlaps_later_scenes_after_scene_one() -> None:
+    async def run() -> None:
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [],
+            "query_string": b"",
+            "client": ("testclient", 50000),
+            "server": ("testserver", 80),
+            "scheme": "http",
+        }
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        request = Request(scope, receive)
+        agent = object.__new__(GeminiStoryAgent)
+
+        active_late_scenes = 0
+        max_active_late_scenes = 0
+        start_order: list[str] = []
+
+        async def fake_stream_scene_assets(**kwargs):  # noqa: ANN003
+            nonlocal active_late_scenes, max_active_late_scenes
+            scene_id = kwargs["scene_id"]
+            result_collector = kwargs["result_collector"]
+            start_order.append(scene_id)
+            if scene_id != "scene-1":
+                active_late_scenes += 1
+                max_active_late_scenes = max(max_active_late_scenes, active_late_scenes)
+                await asyncio.sleep(0.05)
+                active_late_scenes -= 1
+            text = (
+                f"{scene_id} explains a grounded claim with enough detail to satisfy the "
+                "quality checker while keeping the scene concise and coherent for testing."
+            )
+            result_collector["text"] = text
+            result_collector["image_url"] = "http://localhost/image.png"
+            result_collector["audio_url"] = ""
+            result_collector["word_count"] = len(text.split())
+            if False:
+                yield {}
+
+        agent._stream_scene_assets = fake_stream_scene_assets  # type: ignore[method-assign]
+
+        approved_script_pack = {
+            "plan_id": "plan-concurrency",
+            "plan_summary": "Parallelizable storyboard",
+            "audience_descriptor": "Operators",
+            "scene_count": 3,
+            "artifact_type": "storyboard_grid",
+            "planning_mode": "sequential",
+            "script_shape": "sequential_storyboard",
+            "scenes": [
+                {
+                    "scene_id": "scene-1",
+                    "title": "Opening",
+                    "scene_goal": "Open the story.",
+                    "narration_focus": "Explain the first point.",
+                    "visual_prompt": "Grounded opener.",
+                    "claim_refs": ["c1"],
+                    "continuity_refs": [],
+                    "acceptance_checks": [],
+                },
+                {
+                    "scene_id": "scene-2",
+                    "title": "Middle",
+                    "scene_goal": "Continue the story.",
+                    "narration_focus": "Explain the second point.",
+                    "visual_prompt": "Grounded middle.",
+                    "claim_refs": ["c2"],
+                    "continuity_refs": [],
+                    "acceptance_checks": [],
+                },
+                {
+                    "scene_id": "scene-3",
+                    "title": "Close",
+                    "scene_goal": "Close the story.",
+                    "narration_focus": "Explain the third point.",
+                    "visual_prompt": "Grounded ending.",
+                    "claim_refs": ["c3"],
+                    "continuity_refs": [],
+                    "acceptance_checks": [],
+                },
+            ],
+        }
+
+        events: list[dict[str, str]] = []
+        async for event in agent.generate_stream_advanced_events(
+            request=request,
+            payload=AdvancedStreamRequest.model_validate(
+                {
+                    "source_text": "A grounded source text",
+                    "content_signal": {
+                        "thesis": {"one_liner": "A three-part story"},
+                        "key_claims": [
+                            {"claim_id": "c1", "claim_text": "Opening claim."},
+                            {"claim_id": "c2", "claim_text": "Middle claim."},
+                            {"claim_id": "c3", "claim_text": "Closing claim."},
+                        ],
+                        "narrative_beats": [{"beat_id": "b1", "message": "Beat"}],
+                    },
+                    "render_profile": {
+                        "visual_mode": "illustration",
+                        "goal": "teach",
+                        "audience": {"level": "beginner", "persona": "General audience"},
+                    },
+                    "artifact_scope": ["storyboard", "voiceover"],
+                    "script_pack": approved_script_pack,
+                }
+            ),
+        ):
+            events.append(event)
+
+        scene_start_events = [event for event in events if event["event"] == "scene_start"]
+        assert [json.loads(event["data"])["scene_id"] for event in scene_start_events] == [
+            "scene-1",
+            "scene-2",
+            "scene-3",
+        ]
+        assert start_order[0] == "scene-1"
+        assert max_active_late_scenes >= 2
+
+    asyncio.run(run())
+
+
 def test_resolve_source_media_payloads_includes_pdf_line_locator() -> None:
     scope = {
         "type": "http",
@@ -1674,3 +2804,58 @@ def test_resolve_source_media_payloads_includes_pdf_line_locator() -> None:
     assert payloads[0]["line_start"] == 12
     assert payloads[0]["line_end"] == 13
     assert "moral competence" in payloads[0]["matched_excerpt"].lower()
+
+
+def test_resolve_source_media_payloads_overwrites_zero_pdf_page_with_locator_match() -> None:
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [],
+        "query_string": b"",
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+        "scheme": "http",
+    }
+    request = Request(scope)
+
+    with patch(
+        "app.services.gemini_story_agent.resolve_pdf_proof_locator",
+        return_value={
+            "page_index": 4,
+            "line_start": 12,
+            "line_end": 13,
+            "matched_excerpt": "We propose a roadmap for evaluating moral competence in large language models.",
+        },
+    ):
+        payloads = GeminiStoryAgent._resolve_source_media_payloads(
+            request=request,
+            scene_id="scene-1",
+            source_media=[
+                SourceMediaRefSchema(
+                    asset_id="asset-paper-1",
+                    modality="pdf_page",
+                    usage="callout",
+                    claim_refs=["c1"],
+                    evidence_refs=["e1"],
+                    page_index=0,
+                    quote_text="evaluating moral competence in large language models",
+                    visual_context="Framework paragraph in the paper body.",
+                )
+            ],
+            source_manifest={
+                "assets": [
+                    {
+                        "asset_id": "asset-paper-1",
+                        "modality": "pdf_page",
+                        "uri": "http://example.com/paper.pdf",
+                        "title": "paper.pdf",
+                    }
+                ]
+            },
+        )
+
+    assert len(payloads) == 1
+    assert payloads[0]["page_index"] == 4
+    assert payloads[0]["line_start"] == 12
+    assert payloads[0]["line_end"] == 13

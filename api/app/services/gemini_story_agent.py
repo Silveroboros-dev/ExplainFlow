@@ -7,6 +7,7 @@ import os
 import re
 import time
 from typing import Any, AsyncIterator, Literal
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from fastapi import Request
@@ -28,6 +29,14 @@ from app.schemas.requests import (
     EvidenceRefSchema,
     OutlineSchema,
     PlannerQaSummary,
+    QuickArtifactBlockSchema,
+    QuickArtifactOverrideRequest,
+    QuickArtifactRequest,
+    QuickArtifactSchema,
+    QuickBlockOverrideRequest,
+    QuickReelRequest,
+    QuickReelSchema,
+    QuickReelSegmentSchema,
     RegenerateSceneRequest,
     SourceAssetSchema,
     SourceManifestSchema,
@@ -56,12 +65,19 @@ from app.services.interleaved_parser import (
     extract_parts_from_response,
     normalized_scene_id,
 )
-from app.services.source_ingest import best_effort_manifest_text, resolve_pdf_proof_locator
+from app.services.source_ingest import (
+    best_effort_manifest_text,
+    resolve_pdf_proof_locator,
+    validate_video_manifest_constraints,
+)
 
 SIGNAL_EXTRACTION_PROMPT_VERSION_DEFAULT = "v2"
 SIGNAL_STRUCTURAL_MODEL_DEFAULT = "gemini-3.1-pro-preview"
 SIGNAL_CREATIVE_MODEL_DEFAULT = "gemini-3.1-pro-preview"
-SIGNAL_SOURCE_TEXT_MODEL_DEFAULT = "gemini-3.1-pro-preview"
+SIGNAL_SOURCE_TEXT_MODEL_DEFAULT = "gemini-2.5-flash"
+PLANNER_PRECOMPUTE_MODEL_DEFAULT = "gemini-2.5-flash"
+ADVANCED_SCENE_CONCURRENCY_DEFAULT = 2
+QUICK_ARTIFACT_MODEL_DEFAULT = "gemini-2.5-flash"
 
 
 DEFAULT_PLANNER_ARTIFACT_TYPE = "storyboard_grid"
@@ -174,6 +190,17 @@ class PlannerValidationReport:
         return bool(self.hard_issues)
 
 
+@dataclass(frozen=True)
+class BufferedSceneExecutionResult:
+    scene_id: str
+    scene_trace_id: str
+    events: tuple[dict[str, str], ...]
+    qa_result: dict[str, Any]
+    retries_used: int
+    word_count: int
+    continuity_tokens: tuple[str, ...]
+
+
 ARTIFACT_POLICIES: dict[str, ArtifactPlanningPolicy] = {
     "storyboard_grid": ArtifactPlanningPolicy(
         artifact_type="storyboard_grid",
@@ -243,6 +270,7 @@ class GeminiStoryAgent:
         schema_text: str,
         version: str,
         source_inventory_text: str = "",
+        transcript_only_video: bool = False,
     ) -> str:
         source_body = document_text.strip() or "Use the uploaded source media as the primary source of truth."
         source_inventory_block = (
@@ -254,7 +282,20 @@ class GeminiStoryAgent:
             "5) If evidence comes from uploaded media, prefer structured evidence_snippets with type, asset_id, "
             "and start_ms/end_ms or page_index when available.\n"
             "6) For image or document evidence, use visual_context and page_index instead of inventing exact crops.\n"
+            "7) For audio or video, use transcript/captions as the primary truth layer for claims.\n"
+            "8) If a speaker refers deictically to the screen (for example 'this chart' or 'as you can see'), "
+            "resolve that reference into explicit visual_context at the same timestamp.\n"
+            "9) When speaker identity is knowable from the media, populate speaker for the evidence snippet.\n"
+            "10) For video, only use frames to resolve on-screen references, clip-worthy moments, and proof playback. "
+            "Do not replace transcript-grounded claims with vague visual summaries.\n"
             if source_inventory_text.strip()
+            else ""
+        )
+        transcript_only_guardrail = (
+            "11) This source path is transcript-backed video without direct frame access.\n"
+            "12) If the transcript says 'this chart', 'as you can see', or similar, do not invent exact on-screen visuals. "
+            "Infer only what surrounding text supports, or keep visual_context generic.\n"
+            if transcript_only_video
             else ""
         )
         if version == "v1":
@@ -281,6 +322,7 @@ class GeminiStoryAgent:
             "3) If support is weak or missing, lower confidence and mark uncertainty in supporting_points.\n"
             "4) If unresolved ambiguity remains, add an item to open_questions.\n\n"
             f"{multimodal_rules}"
+            f"{transcript_only_guardrail}"
             "INTERNAL PROCEDURE (do internally, no extra output fields):\n"
             "1) Segment source into event units.\n"
             "2) Build canonical entity/concept ledger with aliases merged.\n"
@@ -341,18 +383,122 @@ class GeminiStoryAgent:
         return "\n".join(lines)
 
     @staticmethod
+    def _is_youtube_video_asset(asset: SourceAssetSchema) -> bool:
+        if asset.modality != "video":
+            return False
+        raw_uri = str(asset.uri or "").strip()
+        if not raw_uri:
+            return False
+        try:
+            host = urlparse(raw_uri).netloc.lower()
+        except Exception:
+            return False
+        return any(domain in host for domain in ("youtube.com", "youtu.be", "youtube-nocookie.com"))
+
+    @staticmethod
+    def _transcript_only_video_mode(source_manifest: SourceManifestSchema | dict[str, Any] | None) -> bool:
+        manifest = GeminiStoryAgent._source_manifest_for_extraction(source_manifest)
+        if manifest is None or not manifest.assets:
+            return False
+        return any(GeminiStoryAgent._is_youtube_video_asset(asset) for asset in manifest.assets)
+
+    @staticmethod
+    def _transcript_needs_normalization(text: str) -> bool:
+        sample = str(text or "").strip()
+        if len(sample) < 120:
+            return False
+        punctuation_count = sum(sample.count(mark) for mark in ".?!")
+        line_break_count = sample.count("\n")
+        long_run = len(max(sample.splitlines() or [sample], key=len, default=""))
+        return punctuation_count <= max(1, len(sample) // 500) or (line_break_count <= 1 and long_run > 220)
+
+    @staticmethod
+    def _build_transcript_normalization_prompt(
+        *,
+        transcript_text: str,
+        source_inventory_text: str = "",
+    ) -> str:
+        inventory_block = (
+            f"\n\nSOURCE ASSET INVENTORY:\n{source_inventory_text.strip()}"
+            if source_inventory_text.strip()
+            else ""
+        )
+        return (
+            "SYSTEM:\n"
+            "You normalize rough transcript or caption text for ExplainFlow.\n"
+            "Return JSON only.\n\n"
+            "TASK:\n"
+            "Rewrite the transcript into clean reading-order text with punctuation, paragraph breaks, and light speaker segmentation when obviously inferable.\n\n"
+            "RULES:\n"
+            "1) Do not summarize.\n"
+            "2) Do not drop specific nouns, figures, measurements, or technical terms.\n"
+            "3) Preserve timestamps only if they are already embedded inline; otherwise omit them.\n"
+            "4) If the transcript references unseen visuals like 'this chart' or 'as you can see', keep the language but do not invent what is on screen.\n"
+            "5) Output readable prose that remains faithful to the source transcript.\n\n"
+            "OUTPUT JSON:\n"
+            "{\n"
+            '  "normalized_source_text": "string",\n'
+            '  "source_text_origin": "youtube_transcript_normalized|video_transcript_normalized"\n'
+            "}\n\n"
+            f"TRANSCRIPT:\n{transcript_text.strip()}{inventory_block}"
+        )
+
+    async def _normalize_transcript_source_text(
+        self,
+        *,
+        source_text: str,
+        source_manifest: SourceManifestSchema | dict[str, Any] | None,
+    ) -> tuple[str, str]:
+        inventory_text = self._source_manifest_summary(source_manifest)
+        prompt = self._build_transcript_normalization_prompt(
+            transcript_text=source_text,
+            source_inventory_text=inventory_text,
+        )
+        response = await self.client.aio.models.generate_content(
+            model=self._signal_source_text_model(),
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.1,
+                response_mime_type="application/json",
+            ),
+        )
+        payload = self._parse_json_object_response(response.text)
+        normalized_text = str(payload.get("normalized_source_text", "")).strip() or source_text
+        origin = str(payload.get("source_text_origin", "")).strip() or (
+            "youtube_transcript_normalized"
+            if self._transcript_only_video_mode(source_manifest)
+            else "video_transcript_normalized"
+        )
+        return normalized_text[:20000], origin
+
+    @staticmethod
     def _signal_structural_model() -> str:
         return os.getenv("EXPLAINFLOW_SIGNAL_STRUCTURAL_MODEL", SIGNAL_STRUCTURAL_MODEL_DEFAULT).strip() or SIGNAL_STRUCTURAL_MODEL_DEFAULT
 
     @staticmethod
     def _signal_creative_model() -> str:
-        fallback = GeminiStoryAgent._signal_structural_model()
-        return os.getenv("EXPLAINFLOW_SIGNAL_CREATIVE_MODEL", fallback).strip() or fallback
+        return os.getenv("EXPLAINFLOW_SIGNAL_CREATIVE_MODEL", SIGNAL_CREATIVE_MODEL_DEFAULT).strip() or SIGNAL_CREATIVE_MODEL_DEFAULT
 
     @staticmethod
     def _signal_source_text_model() -> str:
-        fallback = GeminiStoryAgent._signal_creative_model()
-        return os.getenv("EXPLAINFLOW_SIGNAL_SOURCE_TEXT_MODEL", fallback).strip() or fallback
+        return os.getenv("EXPLAINFLOW_SIGNAL_SOURCE_TEXT_MODEL", SIGNAL_SOURCE_TEXT_MODEL_DEFAULT).strip() or SIGNAL_SOURCE_TEXT_MODEL_DEFAULT
+
+    @staticmethod
+    def _planner_precompute_model() -> str:
+        return os.getenv("EXPLAINFLOW_PLANNER_PRECOMPUTE_MODEL", PLANNER_PRECOMPUTE_MODEL_DEFAULT).strip() or PLANNER_PRECOMPUTE_MODEL_DEFAULT
+
+    @staticmethod
+    def _quick_artifact_model() -> str:
+        return os.getenv("EXPLAINFLOW_QUICK_ARTIFACT_MODEL", QUICK_ARTIFACT_MODEL_DEFAULT).strip() or QUICK_ARTIFACT_MODEL_DEFAULT
+
+    @staticmethod
+    def _advanced_scene_concurrency() -> int:
+        raw_value = os.getenv("EXPLAINFLOW_ADVANCED_SCENE_CONCURRENCY", str(ADVANCED_SCENE_CONCURRENCY_DEFAULT)).strip()
+        try:
+            parsed = int(raw_value)
+        except Exception:
+            parsed = ADVANCED_SCENE_CONCURRENCY_DEFAULT
+        return max(1, min(parsed, 4))
 
     async def _build_asset_augmented_contents(
         self,
@@ -374,6 +520,18 @@ class GeminiStoryAgent:
         if uploaded_assets.count == 0:
             return prompt, list(uploaded_assets.file_names), 0
         return [prompt, *uploaded_assets.parts], list(uploaded_assets.file_names), uploaded_assets.count
+
+    @staticmethod
+    def _parse_json_object_response(response_text: str) -> dict[str, Any]:
+        payload: Any = json.loads(response_text)
+        for _ in range(2):
+            if isinstance(payload, dict):
+                return payload
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+                continue
+            break
+        raise ValueError("Model response was not a JSON object.")
 
     async def _upload_source_asset_parts(
         self,
@@ -447,6 +605,7 @@ class GeminiStoryAgent:
             schema_text=schema_text,
             version=version,
             source_inventory_text=inventory_text,
+            transcript_only_video=self._transcript_only_video_mode(source_manifest),
         )
         return await self._build_asset_augmented_contents(
             prompt=prompt,
@@ -491,6 +650,7 @@ class GeminiStoryAgent:
         *,
         document_text: str,
         source_inventory_text: str = "",
+        transcript_only_video: bool = False,
     ) -> str:
         inventory_block = (
             f"\n\nSOURCE ASSET INVENTORY:\n{source_inventory_text.strip()}"
@@ -498,6 +658,13 @@ class GeminiStoryAgent:
             else ""
         )
         source_body = document_text.strip() or "Use the uploaded source media as the source of truth."
+        transcript_guardrail = (
+            "7) This source path is transcript-backed video without direct frame access. "
+            "If the transcript references on-screen visuals ('this chart', 'here on the screen'), do not invent exact visual details. "
+            "Infer only what surrounding transcript language supports.\n\n"
+            if transcript_only_video
+            else ""
+        )
         return (
             "SYSTEM:\n"
             "You extract the structural truth layer for ExplainFlow.\n"
@@ -521,7 +688,8 @@ class GeminiStoryAgent:
             "3) Include evidence_snippets for claims.\n"
             "4) If uploaded media is available, use structured evidence_snippets with type, asset_id, and page_index/start_ms/end_ms when supported.\n"
             "5) Lower confidence when support is weak.\n"
-            "6) Do not invent facts, beats, or visuals.\n\n"
+            "6) Do not invent facts, beats, or visuals.\n"
+            f"{transcript_guardrail}"
             "SOURCE:\n"
             f"{source_body}"
             f"{inventory_block}\n"
@@ -532,12 +700,19 @@ class GeminiStoryAgent:
         *,
         document_text: str,
         structural_signal: dict[str, Any],
+        transcript_only_video: bool = False,
     ) -> str:
         claim_ids = [
             str(claim.get("claim_id", "")).strip()
             for claim in structural_signal.get("key_claims", [])
             if isinstance(claim, dict) and str(claim.get("claim_id", "")).strip()
         ]
+        transcript_guardrail = (
+            "7) This source path is transcript-backed video without direct frame access. "
+            "Do not claim you saw the screen. If transcript references on-screen visuals, keep the candidate conceptual or transcript-grounded rather than visually specific.\n\n"
+            if transcript_only_video
+            else ""
+        )
         return (
             "SYSTEM:\n"
             "You create the creative structuring layer for ExplainFlow.\n"
@@ -555,7 +730,8 @@ class GeminiStoryAgent:
             "3) Beats must be concrete, source-grounded, and useful for sequencing scenes.\n"
             "4) Visual candidates must be practical structures tied to claim_refs.\n"
             "5) Preserve vivid, concrete source language when it helps visual specificity.\n"
-            "6) Avoid generic corporate or symbolic visuals unless the source explicitly suggests them.\n\n"
+            "6) Avoid generic corporate or symbolic visuals unless the source explicitly suggests them.\n"
+            f"{transcript_guardrail}"
             "SOURCE TEXT:\n"
             f"{document_text.strip()}\n\n"
             "STRUCTURAL SIGNAL:\n"
@@ -775,7 +951,7 @@ class GeminiStoryAgent:
                 response_mime_type="application/json",
             ),
         )
-        payload = json.loads(response.text)
+        payload = self._parse_json_object_response(response.text)
         recovered_text = str(payload.get("normalized_source_text", "")).strip()
         recovered_origin = str(payload.get("source_text_origin", "")).strip() or "gemini_asset_text"
         return recovered_text[:20000], recovered_origin
@@ -791,6 +967,7 @@ class GeminiStoryAgent:
         prompt = self._build_structural_signal_prompt(
             document_text=normalized_source_text,
             source_inventory_text=inventory_text,
+            transcript_only_video=self._transcript_only_video_mode(source_manifest),
         )
         contents, _, _ = await self._build_asset_augmented_contents(
             prompt=prompt,
@@ -805,7 +982,7 @@ class GeminiStoryAgent:
                 response_mime_type="application/json",
             ),
         )
-        payload = json.loads(response.text)
+        payload = self._parse_json_object_response(response.text)
         if "narrative_beats" in payload:
             payload.pop("narrative_beats", None)
         if "visual_candidates" in payload:
@@ -817,11 +994,13 @@ class GeminiStoryAgent:
         *,
         normalized_source_text: str,
         structural_signal: dict[str, Any],
+        source_manifest: SourceManifestSchema | dict[str, Any] | None = None,
         fallback_to_pro: bool = True,
     ) -> dict[str, Any]:
         prompt = self._build_creative_signal_prompt(
             document_text=normalized_source_text,
             structural_signal=structural_signal,
+            transcript_only_video=self._transcript_only_video_mode(source_manifest),
         )
         models_to_try = [self._signal_creative_model()]
         structural_model = self._signal_structural_model()
@@ -839,7 +1018,7 @@ class GeminiStoryAgent:
                         response_mime_type="application/json",
                     ),
                 )
-                return json.loads(response.text)
+                return self._parse_json_object_response(response.text)
             except Exception as exc:
                 last_error = exc
                 continue
@@ -1023,12 +1202,100 @@ class GeminiStoryAgent:
         }
 
     @staticmethod
+    def _asset_duration_ms(asset: SourceAssetSchema | None) -> int | None:
+        if asset is None:
+            return None
+        if isinstance(asset.duration_ms, int) and asset.duration_ms >= 0:
+            return asset.duration_ms
+        if isinstance(asset.metadata, dict):
+            raw_duration = asset.metadata.get("duration_ms")
+            if isinstance(raw_duration, (int, float)) and raw_duration >= 0:
+                return int(raw_duration)
+        return None
+
+    @staticmethod
+    def _coerce_timecode_ms(raw_value: Any, *, asset_duration_ms: int | None = None) -> int | None:
+        if raw_value is None:
+            return None
+
+        if isinstance(raw_value, (int, float)):
+            numeric_value = max(0, int(raw_value))
+        else:
+            text = str(raw_value).strip().lower()
+            if not text:
+                return None
+
+            if re.fullmatch(r"\d+(?:\.\d+)?ms", text):
+                return max(0, int(float(text[:-2])))
+            if re.fullmatch(r"\d+(?:\.\d+)?s", text):
+                return max(0, int(float(text[:-1]) * 1000))
+            if ":" in text:
+                parts = [part.strip() for part in text.split(":") if part.strip()]
+                if not parts:
+                    return None
+                try:
+                    numeric_parts = [float(part) for part in parts]
+                except ValueError:
+                    return None
+                seconds = 0.0
+                for part in numeric_parts:
+                    seconds = seconds * 60 + part
+                return max(0, int(seconds * 1000))
+            if re.fullmatch(r"\d+(?:\.\d+)?", text):
+                numeric_value = max(0, int(float(text)))
+            else:
+                return None
+
+        if asset_duration_ms is not None and numeric_value > 0 and numeric_value <= (asset_duration_ms // 1000) + 2:
+            return numeric_value * 1000
+        return numeric_value
+
+    @staticmethod
+    def _coerce_evidence_time_range_ms(
+        snippet: dict[str, Any],
+        *,
+        modality: str | None = None,
+        asset_duration_ms: int | None = None,
+    ) -> tuple[int | None, int | None, bool]:
+        raw_start = snippet.get("start_ms", snippet.get("start_time"))
+        raw_end = snippet.get("end_ms", snippet.get("end_time"))
+        raw_timestamp = snippet.get("timestamp")
+        timing_inferred = False
+
+        if isinstance(raw_start, str) and raw_end is None:
+            range_match = re.split(r"\s*(?:-|–|—|to)\s*", raw_start, maxsplit=1)
+            if len(range_match) == 2:
+                raw_start, raw_end = range_match[0], range_match[1]
+
+        if raw_start is None and raw_end is None and isinstance(raw_timestamp, str):
+            range_match = re.split(r"\s*(?:-|–|—|to)\s*", raw_timestamp, maxsplit=1)
+            if len(range_match) == 2:
+                raw_start, raw_end = range_match[0], range_match[1]
+            else:
+                raw_start = raw_timestamp
+
+        start_ms = GeminiStoryAgent._coerce_timecode_ms(raw_start, asset_duration_ms=asset_duration_ms)
+        end_ms = GeminiStoryAgent._coerce_timecode_ms(raw_end, asset_duration_ms=asset_duration_ms)
+        if start_ms is not None and end_ms is not None and end_ms < start_ms:
+            start_ms, end_ms = end_ms, start_ms
+        if start_ms is not None and end_ms is None and modality in {"audio", "video"}:
+            inferred_end = start_ms + 15_000
+            if asset_duration_ms is not None:
+                inferred_end = min(inferred_end, asset_duration_ms)
+            if inferred_end > start_ms:
+                end_ms = inferred_end
+                timing_inferred = True
+        return start_ms, end_ms, timing_inferred
+
+    @staticmethod
     def _structured_evidence_refs(
         content_signal: dict[str, Any],
+        source_manifest: SourceManifestSchema | dict[str, Any] | None = None,
     ) -> tuple[dict[str, list[EvidenceRefSchema]], dict[str, EvidenceRefSchema], list[str]]:
         by_claim: dict[str, list[EvidenceRefSchema]] = {}
         by_id: dict[str, EvidenceRefSchema] = {}
         evidence_ids: list[str] = []
+        asset_lookup = GeminiStoryAgent._source_asset_lookup(source_manifest)
 
         key_claims = content_signal.get("key_claims", [])
         if not isinstance(key_claims, list):
@@ -1057,6 +1324,12 @@ class GeminiStoryAgent:
                     continue
 
                 evidence_id = str(snippet.get("evidence_id", "")).strip() or f"{claim_id}-e{index}"
+                asset_duration_ms = GeminiStoryAgent._asset_duration_ms(asset_lookup.get(asset_id))
+                start_ms, end_ms, timing_inferred = GeminiStoryAgent._coerce_evidence_time_range_ms(
+                    snippet,
+                    modality=modality,
+                    asset_duration_ms=asset_duration_ms,
+                )
                 try:
                     evidence = EvidenceRefSchema(
                         evidence_id=evidence_id,
@@ -1066,8 +1339,9 @@ class GeminiStoryAgent:
                         transcript_text=str(snippet.get("transcript_text", "")).strip() or None,
                         visual_context=str(snippet.get("visual_context", "")).strip() or None,
                         speaker=str(snippet.get("speaker", "")).strip() or None,
-                        start_ms=int(snippet["start_ms"]) if snippet.get("start_ms") is not None else None,
-                        end_ms=int(snippet["end_ms"]) if snippet.get("end_ms") is not None else None,
+                        start_ms=start_ms,
+                        end_ms=end_ms,
+                        timing_inferred=timing_inferred,
                         page_index=int(snippet["page_index"]) if snippet.get("page_index") is not None else None,
                         bbox_norm=[
                             float(value)
@@ -1128,10 +1402,13 @@ class GeminiStoryAgent:
         claim_ref: str,
         evidence: EvidenceRefSchema,
     ) -> SourceMediaRefSchema | None:
-        if evidence.modality not in {"audio", "image", "pdf_page"}:
+        if evidence.modality not in {"audio", "video", "image", "pdf_page"}:
             return None
 
-        usage = "proof_clip" if evidence.modality == "audio" else ("region_crop" if evidence.bbox_norm else "callout")
+        if evidence.modality in {"audio", "video"}:
+            usage = "proof_clip"
+        else:
+            usage = "region_crop" if evidence.bbox_norm else "callout"
         label = (
             evidence.quote_text
             or evidence.visual_context
@@ -1146,6 +1423,7 @@ class GeminiStoryAgent:
             evidence_refs=[evidence.evidence_id],
             start_ms=evidence.start_ms,
             end_ms=evidence.end_ms,
+            timing_inferred=evidence.timing_inferred,
             page_index=evidence.page_index,
             bbox_norm=evidence.bbox_norm,
             label=label[:96],
@@ -1302,7 +1580,10 @@ class GeminiStoryAgent:
         source_manifest: SourceManifestSchema | dict[str, Any] | None,
     ) -> tuple[ScriptPack, dict[str, list[str]], list[str]]:
         asset_lookup = GeminiStoryAgent._source_asset_lookup(source_manifest)
-        evidence_by_claim, _, evidence_ids = GeminiStoryAgent._structured_evidence_refs(content_signal)
+        evidence_by_claim, _, evidence_ids = GeminiStoryAgent._structured_evidence_refs(
+            content_signal,
+            source_manifest,
+        )
         if not evidence_by_claim or not asset_lookup:
             return script_pack, {scene.scene_id: list(scene.evidence_refs) for scene in script_pack.scenes}, evidence_ids
 
@@ -2370,7 +2651,7 @@ class GeminiStoryAgent:
 
         try:
             response = await self.client.aio.models.generate_content(
-                model="gemini-3.1-pro-preview",
+                model=self._planner_precompute_model(),
                 contents=self._build_salience_prompt(source_text=source_text, candidates=candidates),
                 config=types.GenerateContentConfig(
                     temperature=0.2,
@@ -2394,7 +2675,7 @@ class GeminiStoryAgent:
 
         try:
             response = await self.client.aio.models.generate_content(
-                model="gemini-3.1-pro-preview",
+                model=self._planner_precompute_model(),
                 contents=self._build_forward_pull_prompt(source_text=source_text),
                 config=types.GenerateContentConfig(
                     temperature=0.2,
@@ -2965,14 +3246,16 @@ class GeminiStoryAgent:
             normalized_source_text=normalized_source_text,
             content_signal=content_signal,
         )
-        salience_assessment = await self._run_salience_pass(
-            source_text=planner_source_text,
-            content_signal=content_signal,
-            artifact_policy=artifact_policy,
-        )
-        forward_pull = await self._run_forward_pull_pass(
-            source_text=planner_source_text,
-            artifact_policy=artifact_policy,
+        salience_assessment, forward_pull = await asyncio.gather(
+            self._run_salience_pass(
+                source_text=planner_source_text,
+                content_signal=content_signal,
+                artifact_policy=artifact_policy,
+            ),
+            self._run_forward_pull_pass(
+                source_text=planner_source_text,
+                artifact_policy=artifact_policy,
+            ),
         )
         scene_count, scene_budget_reason = self._derive_scene_count(
             artifact_policy=artifact_policy,
@@ -3417,6 +3700,175 @@ class GeminiStoryAgent:
             result_collector["audio_url"] = audio_url
             result_collector["word_count"] = len(re.findall(r"\b[\w'-]+\b", current_scene_text))
 
+    async def _execute_buffered_advanced_scene(
+        self,
+        *,
+        request: Request,
+        scene: ScriptPackScene,
+        thesis: str,
+        audience_descriptor: str,
+        goal: str,
+        style_guide: str,
+        script_pack: ScriptPack,
+        source_manifest: SourceManifestSchema | dict[str, Any] | None,
+        must_include: list[str],
+        must_avoid: list[str],
+        claim_text_snippets: list[str],
+        evidence_text_snippets: list[str],
+        active_continuity: list[str],
+        scene_trace_payload: dict[str, Any],
+        retry_reason_constraints: list[str] | None = None,
+    ) -> BufferedSceneExecutionResult:
+        events: list[dict[str, str]] = []
+        scene_id = scene.scene_id
+        scene_trace_id = str(scene_trace_payload.get("scene_trace_id", ""))
+
+        events.append(
+            build_sse_event(
+                "scene_start",
+                {
+                    "scene_id": scene_id,
+                    "title": scene.title,
+                    "claim_refs": [claim_ref for claim_ref in scene.claim_refs if claim_ref],
+                    "evidence_refs": [evidence_ref for evidence_ref in scene.evidence_refs if evidence_ref],
+                    "render_strategy": scene.render_strategy,
+                    "source_media": [item.model_dump() for item in scene.source_media],
+                    "trace": scene_trace_payload,
+                },
+            )
+        )
+
+        for source_media_payload in self._resolve_source_media_payloads(
+            request=request,
+            scene_id=scene_id,
+            source_media=scene.source_media,
+            source_manifest=source_manifest,
+        ):
+            source_media_payload["trace"] = scene_trace_payload
+            events.append(build_sse_event("source_media_ready", source_media_payload))
+
+        retries_used = 0
+        qa_result: dict[str, Any] = {
+            "scene_id": scene_id,
+            "status": "WARN",
+            "score": 0.0,
+            "reasons": ["Quality checks not executed."],
+            "attempt": 1,
+            "word_count": 0,
+        }
+        scene_result: dict[str, Any] = {}
+        retry_constraints = list(retry_reason_constraints or [])
+
+        for attempt_index in range(2):
+            scene_result = {}
+            attempt_constraints = list(scene.acceptance_checks)
+            if retry_constraints:
+                attempt_constraints.append(
+                    f"Fix these QA issues from previous attempt: {'; '.join(retry_constraints[:3])}."
+                )
+
+            if attempt_index > 0:
+                events.append(
+                    build_sse_event(
+                        "scene_retry_reset",
+                        {
+                            "scene_id": scene_id,
+                            "retry_index": attempt_index,
+                            "trace": scene_trace_payload,
+                        },
+                    )
+                )
+
+            async for event in self._stream_scene_assets(
+                request=request,
+                scene_id=scene_id,
+                topic=thesis,
+                audience=audience_descriptor,
+                tone=goal,
+                scene_title=scene.title,
+                narration_focus=scene.narration_focus,
+                scene_goal=scene.scene_goal,
+                style_guide=style_guide,
+                visual_prompt=scene.visual_prompt,
+                image_prefix="advanced_interleaved",
+                audio_prefix="advanced_audio",
+                artifact_type=script_pack.artifact_type,
+                scene_mode=scene.scene_mode,
+                layout_template=scene.layout_template,
+                focal_subject=scene.focal_subject,
+                visual_hierarchy=scene.visual_hierarchy,
+                modules=scene.modules,
+                claim_refs=scene.claim_refs,
+                claim_text_snippets=claim_text_snippets,
+                evidence_text_snippets=evidence_text_snippets,
+                crop_safe_regions=scene.crop_safe_regions,
+                continuity_hints=active_continuity,
+                extra_constraints=attempt_constraints,
+                result_collector=scene_result,
+                trace_payload=scene_trace_payload,
+            ):
+                events.append(event)
+
+            qa_result = evaluate_scene_quality(
+                scene=scene,
+                generated_text=str(scene_result.get("text", "")),
+                image_url=str(scene_result.get("image_url", "")),
+                must_include=must_include,
+                must_avoid=must_avoid,
+                continuity_hints=active_continuity,
+                attempt=attempt_index + 1,
+                artifact_type=script_pack.artifact_type,
+            )
+            events.append(
+                build_sse_event(
+                    "qa_status",
+                    {
+                        **qa_result,
+                        "trace": scene_trace_payload,
+                    },
+                )
+            )
+
+            if qa_result["status"] != "FAIL":
+                break
+
+            if attempt_index == 0:
+                retry_constraints = list(qa_result["reasons"])
+                retries_used = 1
+                events.append(
+                    build_sse_event(
+                        "qa_retry",
+                        {
+                            "scene_id": scene_id,
+                            "retry_index": 1,
+                            "reasons": qa_result["reasons"],
+                            "trace": scene_trace_payload,
+                        },
+                    )
+                )
+
+        events.append(
+            build_sse_event(
+                "scene_done",
+                {
+                    "scene_id": scene_id,
+                    "qa_status": qa_result["status"],
+                    "auto_retries": retries_used,
+                    "trace": scene_trace_payload,
+                },
+            )
+        )
+
+        return BufferedSceneExecutionResult(
+            scene_id=scene_id,
+            scene_trace_id=scene_trace_id,
+            events=tuple(events),
+            qa_result=qa_result,
+            retries_used=retries_used,
+            word_count=int(scene_result.get("word_count", 0)),
+            continuity_tokens=tuple(extract_anchor_terms(str(scene_result.get("text", "")), limit=4)),
+        )
+
     async def _extract_signal_one_pass(
         self,
         *,
@@ -3441,7 +3893,7 @@ class GeminiStoryAgent:
                 response_mime_type="application/json",
             ),
         )
-        return json.loads(response.text)
+        return self._parse_json_object_response(response.text)
 
     async def extract_signal(self, payload: SignalExtractionRequest) -> dict[str, Any]:
         run_id = self._new_run_id("extract-run")
@@ -3460,6 +3912,14 @@ class GeminiStoryAgent:
             phase_timings_ms: dict[str, int] = {}
             if not has_input_text and source_asset_count == 0:
                 raise ValueError("Provide source text or upload at least one source asset before extraction.")
+
+            video_constraint_error = validate_video_manifest_constraints(
+                source_manifest=source_manifest,
+                source_text=payload.input_text,
+                normalized_source_text=payload.normalized_source_text,
+            )
+            if video_constraint_error:
+                raise ValueError(video_constraint_error)
 
             configured_version = os.getenv(
                 "EXPLAINFLOW_SIGNAL_PROMPT_VERSION",
@@ -3481,16 +3941,28 @@ class GeminiStoryAgent:
                 uploaded_asset_count = uploaded_assets.count
 
             if prompt_version == "v1":
+                normalized_input_text = str(payload.input_text or "").strip()
+                source_text_origin = "pasted_text" if normalized_input_text else None
+                if (
+                    normalized_input_text
+                    and self._transcript_only_video_mode(source_manifest)
+                    and self._transcript_needs_normalization(normalized_input_text)
+                ):
+                    normalization_started_at = time.perf_counter()
+                    normalized_input_text, source_text_origin = await self._normalize_transcript_source_text(
+                        source_text=normalized_input_text,
+                        source_manifest=source_manifest,
+                    )
+                    phase_timings_ms["transcript_normalization"] = int((time.perf_counter() - normalization_started_at) * 1000)
                 one_pass_started_at = time.perf_counter()
                 signal_data = await self._extract_signal_one_pass(
-                    input_text=payload.input_text,
+                    input_text=normalized_input_text,
                     source_manifest=source_manifest,
                     prompt_version=prompt_version,
                     uploaded_assets=uploaded_assets,
                 )
                 phase_timings_ms["single_pass"] = int((time.perf_counter() - one_pass_started_at) * 1000)
-                normalized_source_text = str(payload.input_text or "").strip()
-                source_text_origin = "pasted_text" if normalized_source_text else None
+                normalized_source_text = normalized_input_text
             else:
                 recovery_started_at = time.perf_counter()
                 normalized_source_text, source_text_origin = await self._recover_normalized_source_text(
@@ -3501,6 +3973,18 @@ class GeminiStoryAgent:
                     uploaded_assets=uploaded_assets,
                 )
                 phase_timings_ms["source_recovery"] = int((time.perf_counter() - recovery_started_at) * 1000)
+
+                if (
+                    normalized_source_text.strip()
+                    and self._transcript_only_video_mode(source_manifest)
+                    and self._transcript_needs_normalization(normalized_source_text)
+                ):
+                    normalization_started_at = time.perf_counter()
+                    normalized_source_text, source_text_origin = await self._normalize_transcript_source_text(
+                        source_text=normalized_source_text,
+                        source_manifest=source_manifest,
+                    )
+                    phase_timings_ms["transcript_normalization"] = int((time.perf_counter() - normalization_started_at) * 1000)
 
                 try:
                     if not normalized_source_text.strip():
@@ -3518,6 +4002,7 @@ class GeminiStoryAgent:
                     creative_signal = await self._extract_signal_creative(
                         normalized_source_text=normalized_source_text,
                         structural_signal=structural_signal,
+                        source_manifest=source_manifest,
                     )
                     phase_timings_ms["creative_extraction"] = int((time.perf_counter() - creative_started_at) * 1000)
                     signal_data = self._merge_signal_extraction_passes(
@@ -3590,6 +4075,996 @@ class GeminiStoryAgent:
                     await self.client.aio.files.delete(name=file_name)
                 except Exception:
                     continue
+
+    @staticmethod
+    def _quick_grounded_claim_cards(
+        content_signal: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        signal = content_signal or {}
+        claim_cards: list[dict[str, Any]] = []
+        for claim in signal.get("key_claims", [])[:6]:
+            if not isinstance(claim, dict):
+                continue
+            claim_id = str(claim.get("claim_id", "")).strip()
+            claim_text = str(claim.get("claim_text", "")).strip()
+            if not claim_id or not claim_text:
+                continue
+            evidence_summary = "; ".join(
+                GeminiStoryAgent._evidence_summary_bits(claim.get("evidence_snippets", []))
+            )
+            claim_cards.append(
+                {
+                    "claim_id": claim_id,
+                    "claim_text": claim_text,
+                    "evidence_summary": evidence_summary,
+                }
+            )
+        return claim_cards
+
+    @staticmethod
+    def _enrich_quick_artifact_with_source_media(
+        *,
+        artifact: QuickArtifactSchema,
+        content_signal: dict[str, Any] | None,
+        source_manifest: SourceManifestSchema | dict[str, Any] | None,
+    ) -> QuickArtifactSchema:
+        signal = content_signal or {}
+        asset_lookup = GeminiStoryAgent._source_asset_lookup(source_manifest)
+        evidence_by_claim, _, _ = GeminiStoryAgent._structured_evidence_refs(signal, source_manifest)
+        if not asset_lookup or not evidence_by_claim:
+            return artifact
+
+        enriched = artifact.model_copy(deep=True)
+        page_usage_counts: dict[tuple[str, int | None], int] = {}
+        evidence_usage_counts: dict[str, int] = {}
+        abstract_block_claimed = False
+
+        def score(
+            *,
+            evidence: EvidenceRefSchema,
+            allow_frontmatter: bool,
+        ) -> float:
+            asset = asset_lookup.get(evidence.asset_id)
+            score_value = 0.0
+            if evidence.modality == "video":
+                score_value += 62.0
+            elif evidence.modality == "audio":
+                score_value += 42.0
+            elif evidence.modality == "image":
+                score_value += 28.0
+            else:
+                score_value += 24.0
+
+            if evidence.start_ms is not None or evidence.end_ms is not None:
+                score_value += 12.0
+            if evidence.bbox_norm:
+                score_value += 18.0
+            if evidence.quote_text or evidence.transcript_text:
+                score_value += 7.0
+            if evidence.visual_context:
+                score_value += 4.0
+
+            page_index = GeminiStoryAgent._evidence_page_index(evidence, asset)
+            if page_index is not None and page_index > 1:
+                score_value += 8.0
+
+            is_frontmatter = GeminiStoryAgent._is_frontmatter_pdf_evidence(evidence, asset)
+            if is_frontmatter:
+                score_value += 18.0 if allow_frontmatter else -34.0
+
+            page_key = GeminiStoryAgent._evidence_page_key(evidence, asset)
+            score_value -= page_usage_counts.get(page_key, 0) * 16.0
+            score_value -= evidence_usage_counts.get(evidence.evidence_id, 0) * 26.0
+            return score_value
+
+        for block_index, block in enumerate(enriched.blocks):
+            evidence_refs = list(block.evidence_refs)
+            source_media = list(block.source_media)
+            media_keys = {
+                (
+                    item.asset_id,
+                    tuple(item.claim_refs),
+                    tuple(item.evidence_refs),
+                    item.start_ms,
+                    item.end_ms,
+                    item.page_index,
+                    tuple(item.bbox_norm or []),
+                )
+                for item in source_media
+            }
+            allow_frontmatter = block_index == 0 and not abstract_block_claimed
+            block_uses_frontmatter = False
+
+            for claim_ref in block.claim_refs[:3]:
+                ranked = sorted(
+                    evidence_by_claim.get(claim_ref, []),
+                    key=lambda evidence: (
+                        score(evidence=evidence, allow_frontmatter=allow_frontmatter),
+                        -(
+                            GeminiStoryAgent._evidence_page_index(
+                                evidence,
+                                asset_lookup.get(evidence.asset_id),
+                            )
+                            or 0
+                        ),
+                    ),
+                    reverse=True,
+                )
+                for evidence in ranked[:3]:
+                    if evidence.evidence_id not in evidence_refs:
+                        evidence_refs.append(evidence.evidence_id)
+
+                    media_ref = GeminiStoryAgent._media_ref_for_evidence(
+                        claim_ref=claim_ref,
+                        evidence=evidence,
+                    )
+                    if media_ref is None or evidence.asset_id not in asset_lookup:
+                        continue
+
+                    media_key = (
+                        media_ref.asset_id,
+                        tuple(media_ref.claim_refs),
+                        tuple(media_ref.evidence_refs),
+                        media_ref.start_ms,
+                        media_ref.end_ms,
+                        media_ref.page_index,
+                        tuple(media_ref.bbox_norm or []),
+                    )
+                    if media_key in media_keys:
+                        continue
+
+                    source_media.append(media_ref)
+                    media_keys.add(media_key)
+                    if GeminiStoryAgent._is_frontmatter_pdf_evidence(
+                        evidence,
+                        asset_lookup.get(evidence.asset_id),
+                    ):
+                        block_uses_frontmatter = True
+                    break
+
+                if len(source_media) >= 2:
+                    break
+
+            block.evidence_refs = evidence_refs[:6]
+            block.source_media = source_media[:2]
+            for evidence_id in block.evidence_refs:
+                evidence_usage_counts[evidence_id] = evidence_usage_counts.get(evidence_id, 0) + 1
+            for media in block.source_media:
+                page_key = GeminiStoryAgent._media_page_key(media)
+                page_usage_counts[page_key] = page_usage_counts.get(page_key, 0) + 1
+            if block_uses_frontmatter:
+                abstract_block_claimed = True
+
+        return enriched
+
+    @staticmethod
+    def _quick_reel_media_key(
+        media: SourceMediaRefSchema,
+    ) -> tuple[str, int | None, int | None, int | None, tuple[float, ...]]:
+        return (
+            media.asset_id,
+            media.start_ms,
+            media.end_ms,
+            media.page_index,
+            tuple(float(value) for value in (media.bbox_norm or [])),
+        )
+
+    @staticmethod
+    def _quick_reel_caption_text(text: str, *, fallback: str = "") -> str:
+        cleaned = re.sub(r"\s+", " ", text).strip() or fallback.strip()
+        if not cleaned:
+            return ""
+        sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+", cleaned) if part.strip()]
+        if len(sentences) >= 2:
+            caption = " ".join(sentences[:2])
+        elif sentences:
+            caption = sentences[0]
+        else:
+            caption = cleaned
+        if len(caption) <= 220:
+            return caption
+        clipped = caption[:217].rsplit(" ", 1)[0].strip()
+        return f"{clipped}..." if clipped else f"{caption[:217]}..."
+
+    @staticmethod
+    def _select_quick_reel_media_for_block(
+        *,
+        block: QuickArtifactBlockSchema,
+        used_media_keys: set[tuple[str, int | None, int | None, int | None, tuple[float, ...]]],
+    ) -> SourceMediaRefSchema | None:
+        if not block.source_media:
+            return None
+
+        block_claim_refs = {claim_ref for claim_ref in block.claim_refs if claim_ref}
+        block_evidence_refs = {evidence_ref for evidence_ref in block.evidence_refs if evidence_ref}
+
+        def rank(media: SourceMediaRefSchema) -> tuple[int, int, int, int, int]:
+            media_key = GeminiStoryAgent._quick_reel_media_key(media)
+            claim_overlap = len(block_claim_refs & {claim_ref for claim_ref in media.claim_refs if claim_ref})
+            evidence_overlap = len(block_evidence_refs & {evidence_ref for evidence_ref in media.evidence_refs if evidence_ref})
+            duplicate_score = 0 if media_key in used_media_keys else 1
+            modality_score = {
+                "video": 4,
+                "audio": 3,
+                "image": 2,
+                "pdf_page": 1,
+            }.get(media.modality, 0)
+            usage_score = 1 if media.usage == "proof_clip" else 0
+            return claim_overlap, evidence_overlap, duplicate_score, modality_score, usage_score
+
+        return max(block.source_media, key=rank)
+
+    @staticmethod
+    def _build_quick_reel_segment(
+        *,
+        artifact: QuickArtifactSchema,
+        block: QuickArtifactBlockSchema,
+        index: int,
+        used_media_keys: set[tuple[str, int | None, int | None, int | None, tuple[float, ...]]],
+    ) -> QuickReelSegmentSchema:
+        primary_media = GeminiStoryAgent._select_quick_reel_media_for_block(
+            block=block,
+            used_media_keys=used_media_keys,
+        )
+        if primary_media is not None:
+            used_media_keys.add(GeminiStoryAgent._quick_reel_media_key(primary_media))
+
+        fallback_image_url = (block.image_url or "").strip() or None
+        if primary_media is not None and fallback_image_url:
+            render_mode = "hybrid"
+        elif primary_media is not None:
+            render_mode = "source_clip"
+        else:
+            render_mode = "generated_image"
+
+        return QuickReelSegmentSchema(
+            segment_id=f"{artifact.artifact_id}-segment-{index}",
+            block_id=block.block_id,
+            title=block.title,
+            render_mode=render_mode,
+            caption_text=GeminiStoryAgent._quick_reel_caption_text(
+                block.body,
+                fallback=block.title,
+            ),
+            claim_refs=list(block.claim_refs),
+            evidence_refs=list(block.evidence_refs),
+            primary_media=primary_media,
+            fallback_image_url=fallback_image_url,
+            start_ms=primary_media.start_ms if primary_media is not None else None,
+            end_ms=primary_media.end_ms if primary_media is not None else None,
+            timing_inferred=bool(primary_media.timing_inferred) if primary_media is not None else False,
+        )
+
+    @staticmethod
+    def _build_quick_reel_from_artifact(
+        *,
+        artifact: QuickArtifactSchema,
+        content_signal: dict[str, Any] | None,
+        source_manifest: SourceManifestSchema | dict[str, Any] | None,
+    ) -> QuickReelSchema:
+        used_media_keys: set[tuple[str, int | None, int | None, int | None, tuple[float, ...]]] = set()
+        segments = [
+            GeminiStoryAgent._build_quick_reel_segment(
+                artifact=artifact,
+                block=block,
+                index=index,
+                used_media_keys=used_media_keys,
+            )
+            for index, block in enumerate(artifact.blocks, start=1)
+        ]
+        grounded_claim_count = len(
+            [
+                claim
+                for claim in (content_signal or {}).get("key_claims", [])
+                if isinstance(claim, dict) and str(claim.get("claim_id", "")).strip()
+            ]
+        )
+        summary = (
+            f"{len(segments)} ordered reel segment"
+            f"{'' if len(segments) == 1 else 's'} derived from the current Quick artifact"
+            + (
+                f" and grounded against {grounded_claim_count} extracted claim"
+                f"{'' if grounded_claim_count == 1 else 's'}."
+                if grounded_claim_count
+                else "."
+            )
+        )
+        return QuickReelSchema(
+            reel_id=f"{artifact.artifact_id}-reel",
+            title=f"{artifact.title} proof reel",
+            summary=summary,
+            segments=segments,
+        )
+
+    @staticmethod
+    def _fallback_quick_artifact(
+        *,
+        topic: str,
+        audience: str,
+        tone: str,
+        visual_mode: str,
+        content_signal: dict[str, Any] | None = None,
+    ) -> QuickArtifactSchema:
+        tone_label = tone.strip() or "clear"
+        claim_cards = GeminiStoryAgent._quick_grounded_claim_cards(content_signal)
+        fallback_claims = [card["claim_id"] for card in claim_cards]
+        thesis = str((content_signal or {}).get("thesis", {}).get("one_liner", "")).strip()
+        summary = (
+            thesis
+            or f"This quick artifact frames the topic for {audience} in a {tone_label} tone, using one strong hook and three supporting modules."
+        )
+        return QuickArtifactSchema(
+            artifact_id=f"quick-{uuid4().hex[:8]}",
+            title=topic.strip() or "Quick Explainer",
+            subtitle=f"A fast ExplainFlow draft for {audience}.",
+            summary=summary,
+            visual_style=visual_mode,
+            hero_direction=f"Clean {visual_mode} hero treatment that makes {topic.strip() or 'the topic'} instantly legible.",
+            blocks=[
+                QuickArtifactBlockSchema(
+                    block_id="block-1",
+                    label="Hook",
+                    title="Why this matters",
+                    body=(claim_cards[0]["claim_text"] if claim_cards else f"Open with the single most important shift or tension inside {topic.strip() or 'the topic'}."),
+                    bullets=["Name the central question.", "Establish the point of view."],
+                    visual_direction="Bold opener with one dominant focal cue.",
+                    emphasis="hook",
+                    claim_refs=fallback_claims[:1],
+                ),
+                QuickArtifactBlockSchema(
+                    block_id="block-2",
+                    label="Core Idea",
+                    title="What is happening",
+                    body=(claim_cards[1]["claim_text"] if len(claim_cards) > 1 else "Define the core mechanism or concept in plain language before adding nuance."),
+                    bullets=["State the mechanism clearly.", "Avoid jargon unless it earns its place."],
+                    visual_direction="Simple explanatory panel with one central diagram.",
+                    emphasis="core",
+                    claim_refs=fallback_claims[1:3],
+                ),
+                QuickArtifactBlockSchema(
+                    block_id="block-3",
+                    label="Proof",
+                    title="What supports it",
+                    body=(
+                        claim_cards[2]["evidence_summary"]
+                        if len(claim_cards) > 2 and claim_cards[2]["evidence_summary"]
+                        else "Bring in the strongest evidence, comparison, or observed pattern that backs the claim."
+                    ),
+                    bullets=["Use one decisive support point.", "Show why the support matters."],
+                    visual_direction="Evidence block with one chart or comparison cue.",
+                    emphasis="proof",
+                    claim_refs=fallback_claims[2:4] or fallback_claims[:1],
+                ),
+                QuickArtifactBlockSchema(
+                    block_id="block-4",
+                    label="Takeaway",
+                    title="What to do with it",
+                    body=(claim_cards[3]["claim_text"] if len(claim_cards) > 3 else "End on the practical implication, takeaway, or decision the audience should leave with."),
+                    bullets=["Translate insight into action.", "Keep the close memorable."],
+                    visual_direction="Closing module with synthesis and one action cue.",
+                    emphasis="action",
+                    claim_refs=fallback_claims[3:5] or fallback_claims[:1],
+                ),
+            ],
+        )
+
+    @staticmethod
+    def _normalize_quick_artifact(
+        artifact: QuickArtifactSchema,
+        *,
+        topic: str,
+        audience: str,
+        tone: str,
+        visual_mode: str,
+        content_signal: dict[str, Any] | None = None,
+    ) -> QuickArtifactSchema:
+        blocks = artifact.blocks[:4]
+        fallback = GeminiStoryAgent._fallback_quick_artifact(
+            topic=topic,
+            audience=audience,
+            tone=tone,
+            visual_mode=visual_mode,
+            content_signal=content_signal,
+        )
+        valid_claim_ids = {
+            str(claim.get("claim_id", "")).strip()
+            for claim in (content_signal or {}).get("key_claims", [])
+            if isinstance(claim, dict) and str(claim.get("claim_id", "")).strip()
+        }
+        used_ids: set[str] = set()
+        normalized_blocks: list[QuickArtifactBlockSchema] = []
+        for idx, block in enumerate(blocks, start=1):
+            block_id = (block.block_id or "").strip() or f"block-{idx}"
+            if block_id in used_ids:
+                block_id = f"block-{idx}"
+            used_ids.add(block_id)
+            normalized_blocks.append(
+                QuickArtifactBlockSchema(
+                    block_id=block_id,
+                    label=(block.label or "").strip() or fallback.blocks[idx - 1].label,
+                    title=(block.title or "").strip() or fallback.blocks[idx - 1].title,
+                    body=(block.body or "").strip() or fallback.blocks[idx - 1].body,
+                    bullets=[bullet.strip() for bullet in block.bullets[:3] if isinstance(bullet, str) and bullet.strip()] or fallback.blocks[idx - 1].bullets,
+                    visual_direction=(block.visual_direction or "").strip() or fallback.blocks[idx - 1].visual_direction,
+                    image_url=(block.image_url or "").strip() or None,
+                    emphasis=block.emphasis,
+                    claim_refs=[
+                        ref for ref in block.claim_refs
+                        if isinstance(ref, str) and ref.strip() and (not valid_claim_ids or ref.strip() in valid_claim_ids)
+                    ] or fallback.blocks[idx - 1].claim_refs,
+                    # Evidence/source media stay backend-owned so hallucinated asset ids and time ranges
+                    # cannot leak from the LLM response into proof playback.
+                    evidence_refs=[],
+                    source_media=[],
+                )
+            )
+        while len(normalized_blocks) < 4:
+            normalized_blocks.append(fallback.blocks[len(normalized_blocks)])
+        return QuickArtifactSchema(
+            artifact_id=(artifact.artifact_id or "").strip() or fallback.artifact_id,
+            title=(artifact.title or "").strip() or fallback.title,
+            subtitle=(artifact.subtitle or "").strip() or fallback.subtitle,
+            summary=(artifact.summary or "").strip() or fallback.summary,
+            visual_style=(artifact.visual_style or "").strip() or visual_mode,
+            hero_direction=(artifact.hero_direction or "").strip() or fallback.hero_direction,
+            hero_image_url=artifact.hero_image_url,
+            blocks=normalized_blocks,
+        )
+
+    async def _generate_quick_block_image(
+        self,
+        *,
+        request: Request,
+        topic: str,
+        audience: str,
+        tone: str,
+        visual_mode: str,
+        artifact: QuickArtifactSchema,
+        block: QuickArtifactBlockSchema,
+        content_signal: dict[str, Any] | None = None,
+    ) -> str:
+        claim_lookup = {
+            card["claim_id"]: card
+            for card in self._quick_grounded_claim_cards(content_signal)
+        }
+        claim_lines = [
+            f"- {claim_lookup[claim_ref]['claim_text']}"
+            + (
+                f" | evidence: {claim_lookup[claim_ref]['evidence_summary']}"
+                if claim_lookup[claim_ref]["evidence_summary"]
+                else ""
+            )
+            for claim_ref in block.claim_refs
+            if claim_ref in claim_lookup
+        ][:3]
+        if not claim_lines and claim_lookup:
+            claim_lines = [
+                f"- {card['claim_text']}" + (f" | evidence: {card['evidence_summary']}" if card["evidence_summary"] else "")
+                for card in list(claim_lookup.values())[:2]
+            ]
+
+        bullet_lines = [f"- {bullet}" for bullet in block.bullets[:3] if bullet.strip()]
+        source_media_hints = [
+            hint.strip()
+            for hint in [
+                *(media.label or "" for media in block.source_media[:1]),
+                *(media.visual_context or "" for media in block.source_media[:1]),
+                *(media.quote_text or "" for media in block.source_media[:1]),
+            ]
+            if hint and hint.strip()
+        ]
+
+        style_guide = self._style_guide_for_mode(visual_mode)
+        prompt = (
+            f"CONTEXT: Create one visual module for a Quick ExplainFlow artifact about '{topic}'.\n"
+            f"AUDIENCE: {audience}\n"
+            f"TONE: {tone or 'clear and practical'}\n"
+            f"VISUAL MODE: {visual_mode}\n"
+            f"STYLE GUIDE: {style_guide}\n"
+            f"ARTIFACT TITLE: {artifact.title}\n"
+            f"BLOCK LABEL: {block.label}\n"
+            f"BLOCK TITLE: {block.title}\n"
+            f"BLOCK BODY: {block.body}\n"
+            f"BLOCK EMPHASIS: {block.emphasis}\n"
+            f"VISUAL DIRECTION: {block.visual_direction}\n"
+        )
+        if bullet_lines:
+            prompt += "SUPPORTING BULLETS:\n" + "\n".join(bullet_lines) + "\n"
+        if claim_lines:
+            prompt += "SOURCE CLAIMS:\n" + "\n".join(claim_lines) + "\n"
+        if source_media_hints:
+            prompt += "SOURCE MEDIA HINTS:\n" + "\n".join(f"- {hint}" for hint in source_media_hints[:2]) + "\n"
+        prompt += (
+            "\nTASK:\n"
+            "Generate one polished supporting visual for this single artifact block.\n"
+            "The image should feel editorial, legible, and specific to the block rather than a generic stock metaphor.\n"
+            "Ground the image in the source claims and media hints when available.\n"
+            "Avoid tiny text, UI chrome, or multiple unrelated subjects.\n"
+            "Return the image only.\n"
+        )
+
+        response = await self.client.aio.models.generate_content(
+            model="gemini-3-pro-image-preview",
+            contents=prompt,
+            config=types.GenerateContentConfig(temperature=0.6),
+        )
+        _, image_bytes = extract_parts_from_response(response)
+        if not image_bytes:
+            return ""
+        return save_image_and_get_url(
+            request=request,
+            scene_id=f"{artifact.artifact_id}-{block.block_id}",
+            image_bytes=image_bytes,
+            prefix="quick_block",
+        )
+
+    async def _populate_quick_block_visuals(
+        self,
+        *,
+        request: Request,
+        topic: str,
+        audience: str,
+        tone: str,
+        visual_mode: str,
+        artifact: QuickArtifactSchema,
+        content_signal: dict[str, Any] | None = None,
+        only_block_ids: set[str] | None = None,
+        force_block_ids: set[str] | None = None,
+    ) -> QuickArtifactSchema:
+        visualized = artifact.model_copy(deep=True)
+        tasks: list[asyncio.Future[str] | asyncio.Task[str]] = []
+        task_indices: list[int] = []
+        targeted_block_ids = only_block_ids or {block.block_id for block in visualized.blocks}
+        forced_block_ids = force_block_ids or set()
+        for index, block in enumerate(visualized.blocks):
+            if block.block_id not in targeted_block_ids:
+                continue
+            if block.source_media and block.block_id not in forced_block_ids:
+                continue
+            tasks.append(
+                asyncio.create_task(
+                    self._generate_quick_block_image(
+                        request=request,
+                        topic=topic,
+                        audience=audience,
+                        tone=tone,
+                        visual_mode=visual_mode,
+                        artifact=visualized,
+                        block=block,
+                        content_signal=content_signal,
+                    )
+                )
+            )
+            task_indices.append(index)
+        if not tasks:
+            return visualized
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for index, result in zip(task_indices, results):
+            if isinstance(result, Exception) or not result:
+                continue
+            visualized.blocks[index] = visualized.blocks[index].model_copy(update={"image_url": result})
+        return visualized
+
+    @staticmethod
+    def _quick_override_requests_visual_refresh(
+        *,
+        instruction: str,
+        original_block: QuickArtifactBlockSchema,
+        updated_block: QuickArtifactBlockSchema,
+    ) -> bool:
+        normalized_instruction = instruction.lower()
+        visual_keywords = (
+            "diagram",
+            "chart",
+            "graphic",
+            "image",
+            "visual",
+            "illustration",
+            "frame",
+            "render",
+            "redraw",
+            "flowchart",
+            "schematic",
+            "timeline",
+            "map",
+        )
+        if any(keyword in normalized_instruction for keyword in visual_keywords):
+            return True
+        return updated_block.visual_direction.strip() != original_block.visual_direction.strip()
+
+    async def _generate_quick_hero_image(
+        self,
+        *,
+        request: Request,
+        topic: str,
+        audience: str,
+        tone: str,
+        visual_mode: str,
+        artifact: QuickArtifactSchema,
+        content_signal: dict[str, Any] | None = None,
+    ) -> str:
+        claim_cards = self._quick_grounded_claim_cards(content_signal)
+        claim_block = ""
+        if claim_cards:
+            claim_block = "SOURCE CLAIMS:\n" + "\n".join(
+                f"- {card['claim_text']}" for card in claim_cards[:4]
+            ) + "\n\n"
+
+        style_guide = self._style_guide_for_mode(visual_mode)
+        prompt = (
+            f"CONTEXT: Create one hero visual for a Quick ExplainFlow artifact about '{topic}'.\n"
+            f"AUDIENCE: {audience}\n"
+            f"TONE: {tone or 'clear and practical'}\n"
+            f"VISUAL MODE: {visual_mode}\n"
+            f"STYLE GUIDE: {style_guide}\n"
+            f"ARTIFACT TITLE: {artifact.title}\n"
+            f"ARTIFACT SUMMARY: {artifact.summary}\n"
+            f"HERO DIRECTION: {artifact.hero_direction}\n\n"
+            f"{claim_block}"
+            "TASK:\n"
+            "Generate a single polished hero image for the artifact.\n"
+            "The image should feel immediate, legible, and presentation-ready.\n"
+            "Ground the subject in the source claims when they are available.\n"
+            "Avoid generic cosmic/corporate symbolism unless explicitly grounded.\n"
+            "Return the image only.\n"
+        )
+
+        response = await self.client.aio.models.generate_content(
+            model="gemini-3-pro-image-preview",
+            contents=prompt,
+            config=types.GenerateContentConfig(temperature=0.6),
+        )
+        _, image_bytes = extract_parts_from_response(response)
+        if not image_bytes:
+            return ""
+        return save_image_and_get_url(
+            request=request,
+            scene_id=artifact.artifact_id,
+            image_bytes=image_bytes,
+            prefix="quick_hero",
+        )
+
+    async def generate_quick_artifact(self, payload: QuickArtifactRequest, *, request: Request) -> dict[str, Any]:
+        topic = payload.topic.strip()
+        audience = payload.audience.strip() or "general audience"
+        tone = payload.tone.strip()
+        visual_mode = payload.visual_mode.strip() or "illustration"
+        if not topic:
+            return {"status": "error", "message": "Provide a topic before generating a quick artifact."}
+
+        style_guide = self._style_guide_for_mode(visual_mode)
+        content_signal = payload.content_signal if isinstance(payload.content_signal, dict) else {}
+        claim_cards = self._quick_grounded_claim_cards(content_signal)
+        source_excerpt = (payload.normalized_source_text or payload.source_text or "").strip()[:3200]
+        claim_block = ""
+        if claim_cards:
+            claim_block = "GROUNDED CLAIMS:\n" + "\n".join(
+                f"- {card['claim_id']}: {card['claim_text']}" + (f" | evidence: {card['evidence_summary']}" if card["evidence_summary"] else "")
+                for card in claim_cards[:6]
+            ) + "\n\n"
+        source_excerpt_block = (
+            "SOURCE EXCERPT:\n"
+            f"{source_excerpt}\n\n"
+            if source_excerpt
+            else ""
+        )
+        prompt = (
+            "You are creating a fast ExplainFlow quick artifact.\n"
+            "Return only valid JSON matching the schema.\n"
+            "This is the lightweight Quick mode, so optimize for immediacy, clarity, and HTML-first rendering rather than scene-by-scene production.\n\n"
+            f"TOPIC: {topic}\n"
+            f"AUDIENCE: {audience}\n"
+            f"TONE: {tone or 'clear and practical'}\n"
+            f"VISUAL MODE: {visual_mode}\n"
+            f"STYLE GUIDE: {style_guide}\n\n"
+            f"{claim_block}"
+            f"{source_excerpt_block}"
+            "Requirements:\n"
+            "- Create exactly 4 blocks.\n"
+            "- Make the artifact publishable as a compact structured explainer.\n"
+            "- Use one strong hook, two support blocks, and one takeaway block.\n"
+            "- Each block must be short, high-signal, and distinct.\n"
+            "- `body` should be prose, not bullets.\n"
+            "- `bullets` should contain 0 to 3 short supporting lines.\n"
+            "- `visual_direction` should describe what a later visual treatment should emphasize.\n"
+            "- If GROUNDED CLAIMS are provided, each block must use 1 to 3 valid `claim_refs` drawn only from those claim IDs.\n"
+            "- Favor claim groupings that can later attach proof clips or source-backed proof media.\n"
+            "- Do not mention JSON, scenes, or script packs in the copy.\n"
+            "- Keep the artifact compact enough to feel immediate in a demo.\n"
+        )
+
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=self._quick_artifact_model(),
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.5,
+                    response_mime_type="application/json",
+                    response_schema=QuickArtifactSchema,
+                ),
+            )
+            artifact = QuickArtifactSchema.model_validate_json(response.text)
+        except Exception:
+            artifact = self._fallback_quick_artifact(
+                topic=topic,
+                audience=audience,
+                tone=tone,
+                visual_mode=visual_mode,
+                content_signal=content_signal,
+            )
+
+        normalized = self._normalize_quick_artifact(
+            artifact,
+            topic=topic,
+            audience=audience,
+            tone=tone,
+            visual_mode=visual_mode,
+            content_signal=content_signal,
+        )
+        normalized = self._enrich_quick_artifact_with_source_media(
+            artifact=normalized,
+            content_signal=content_signal,
+            source_manifest=payload.source_manifest,
+        )
+        normalized = await self._populate_quick_block_visuals(
+            request=request,
+            topic=topic,
+            audience=audience,
+            tone=tone,
+            visual_mode=visual_mode,
+            artifact=normalized,
+            content_signal=content_signal,
+        )
+        try:
+            hero_image_url = await self._generate_quick_hero_image(
+                request=request,
+                topic=topic,
+                audience=audience,
+                tone=tone,
+                visual_mode=visual_mode,
+                artifact=normalized,
+                content_signal=content_signal,
+            )
+        except Exception:
+            hero_image_url = ""
+        if hero_image_url:
+            normalized = normalized.model_copy(update={"hero_image_url": hero_image_url})
+        return {"status": "success", "artifact": normalized.model_dump()}
+
+    async def generate_quick_reel(self, payload: QuickReelRequest) -> dict[str, Any]:
+        artifact = QuickArtifactSchema.model_validate(payload.artifact)
+        if not artifact.blocks:
+            return {"status": "error", "message": "Provide a quick artifact before generating a proof reel."}
+
+        content_signal = payload.content_signal if isinstance(payload.content_signal, dict) else {}
+        reel = self._build_quick_reel_from_artifact(
+            artifact=artifact,
+            content_signal=content_signal,
+            source_manifest=payload.source_manifest,
+        )
+        return {
+            "status": "success",
+            "artifact": artifact.model_copy(update={"reel": reel}).model_dump(),
+        }
+
+    async def regenerate_quick_block(self, payload: QuickBlockOverrideRequest, *, request: Request) -> dict[str, Any]:
+        topic = payload.topic.strip()
+        audience = payload.audience.strip() or "general audience"
+        tone = payload.tone.strip()
+        visual_mode = payload.visual_mode.strip() or "illustration"
+        instruction = payload.instruction.strip()
+        if not topic or not instruction:
+            return {"status": "error", "message": "Provide a topic and a direction note before regenerating a block."}
+
+        artifact = QuickArtifactSchema.model_validate(payload.artifact)
+        target_block = next((block for block in artifact.blocks if block.block_id == payload.block_id), None)
+        if target_block is None:
+            return {"status": "error", "message": f"Unknown block id: {payload.block_id}"}
+        content_signal = payload.content_signal if isinstance(payload.content_signal, dict) else {}
+        claim_cards = self._quick_grounded_claim_cards(content_signal)
+
+        companion_blocks = [
+            {
+                "block_id": block.block_id,
+                "label": block.label,
+                "title": block.title,
+                "emphasis": block.emphasis,
+            }
+            for block in artifact.blocks
+            if block.block_id != payload.block_id
+        ]
+        prompt = (
+            "You are applying a director override to one block inside an ExplainFlow quick artifact.\n"
+            "Return only valid JSON for the updated block.\n"
+            "Rewrite only the target block. Do not rewrite the rest of the artifact.\n"
+            "Preserve the same block_id.\n"
+            "Keep the block aligned with the artifact tone, audience, and visual mode.\n"
+            "Do not invent unrelated claims or drift away from the topic.\n\n"
+            f"TOPIC: {topic}\n"
+            f"AUDIENCE: {audience}\n"
+            f"TONE: {tone or 'clear and practical'}\n"
+            f"VISUAL MODE: {visual_mode}\n"
+            f"GROUNDED CLAIMS: {json.dumps(claim_cards[:6])}\n"
+            f"ARTIFACT TITLE: {artifact.title}\n"
+            f"ARTIFACT SUMMARY: {artifact.summary}\n"
+            f"OTHER BLOCKS: {json.dumps(companion_blocks)}\n"
+            f"TARGET BLOCK: {target_block.model_dump_json()}\n"
+            f"DIRECTOR NOTE: {instruction}\n"
+        )
+
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=self._quick_artifact_model(),
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.5,
+                    response_mime_type="application/json",
+                    response_schema=QuickArtifactBlockSchema,
+                ),
+            )
+            updated_block = QuickArtifactBlockSchema.model_validate_json(response.text)
+        except Exception as exc:
+            return {"status": "error", "message": f"Block override failed: {exc}"}
+
+        normalized_block = QuickArtifactBlockSchema(
+            block_id=target_block.block_id,
+            label=(updated_block.label or "").strip() or target_block.label,
+            title=(updated_block.title or "").strip() or target_block.title,
+            body=(updated_block.body or "").strip() or target_block.body,
+            bullets=[bullet.strip() for bullet in updated_block.bullets[:3] if isinstance(bullet, str) and bullet.strip()] or target_block.bullets,
+            visual_direction=(updated_block.visual_direction or "").strip() or target_block.visual_direction,
+            image_url=target_block.image_url,
+            emphasis=updated_block.emphasis,
+            claim_refs=[ref for ref in updated_block.claim_refs if isinstance(ref, str) and ref.strip()] or target_block.claim_refs,
+            evidence_refs=list(target_block.evidence_refs),
+            source_media=list(target_block.source_media),
+        )
+        force_visual_refresh = self._quick_override_requests_visual_refresh(
+            instruction=instruction,
+            original_block=target_block,
+            updated_block=normalized_block,
+        )
+        visualized_block = self._enrich_quick_artifact_with_source_media(
+            artifact=QuickArtifactSchema(
+                artifact_id=artifact.artifact_id,
+                title=artifact.title,
+                subtitle=artifact.subtitle,
+                summary=artifact.summary,
+                visual_style=artifact.visual_style,
+                hero_direction=artifact.hero_direction,
+                blocks=[normalized_block],
+            ),
+            content_signal=content_signal,
+            source_manifest=payload.source_manifest,
+        )
+        visualized_block = await self._populate_quick_block_visuals(
+            request=request,
+            topic=topic,
+            audience=audience,
+            tone=tone,
+            visual_mode=visual_mode,
+            artifact=visualized_block,
+            content_signal=content_signal,
+            force_block_ids={target_block.block_id} if force_visual_refresh else None,
+        )
+        return {"status": "success", "block": visualized_block.blocks[0].model_dump()}
+
+    async def regenerate_quick_artifact(self, payload: QuickArtifactOverrideRequest, *, request: Request) -> dict[str, Any]:
+        topic = payload.topic.strip()
+        audience = payload.audience.strip() or "general audience"
+        tone = payload.tone.strip()
+        visual_mode = payload.visual_mode.strip() or "illustration"
+        instruction = payload.instruction.strip()
+        if not topic or not instruction:
+            return {"status": "error", "message": "Provide a topic and a direction note before regenerating the quick artifact."}
+
+        artifact = QuickArtifactSchema.model_validate(payload.artifact)
+        content_signal = payload.content_signal if isinstance(payload.content_signal, dict) else {}
+        claim_cards = self._quick_grounded_claim_cards(content_signal)
+        anchor_block_id = (payload.anchor_block_id or "").strip() or None
+        anchor_index = next((idx for idx, block in enumerate(artifact.blocks) if block.block_id == anchor_block_id), 0 if anchor_block_id is None else -1)
+        if anchor_index < 0:
+            return {"status": "error", "message": f"Unknown anchor block id: {anchor_block_id}"}
+
+        preserved_blocks = [block.model_dump() for block in artifact.blocks[:anchor_index]]
+        editable_blocks = [block.model_dump() for block in artifact.blocks[anchor_index:]]
+        prompt = (
+            "You are applying a global director override to an ExplainFlow quick artifact.\n"
+            "Return only valid JSON matching the artifact schema.\n"
+            "Keep the artifact compact, high-signal, and HTML-first.\n"
+            "Preserve the same number of blocks and preserve all existing block_ids.\n"
+            "If preserved blocks are provided, leave them unchanged and only rewrite the editable blocks.\n"
+            "Do not invent unrelated claims or drift away from the topic.\n\n"
+            f"TOPIC: {topic}\n"
+            f"AUDIENCE: {audience}\n"
+            f"TONE: {tone or 'clear and practical'}\n"
+            f"VISUAL MODE: {visual_mode}\n"
+            f"GROUNDED CLAIMS: {json.dumps(claim_cards[:6])}\n"
+            f"CURRENT ARTIFACT: {artifact.model_dump_json()}\n"
+            f"PRESERVED BLOCKS: {json.dumps(preserved_blocks)}\n"
+            f"EDITABLE BLOCKS: {json.dumps(editable_blocks)}\n"
+            f"ANCHOR BLOCK ID: {anchor_block_id or 'rewrite_entire_artifact'}\n"
+            f"DIRECTOR NOTE: {instruction}\n"
+        )
+
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=self._quick_artifact_model(),
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.5,
+                    response_mime_type="application/json",
+                    response_schema=QuickArtifactSchema,
+                ),
+            )
+            updated_artifact = QuickArtifactSchema.model_validate_json(response.text)
+        except Exception as exc:
+            return {"status": "error", "message": f"Global override failed: {exc}"}
+
+        normalized = self._normalize_quick_artifact(
+            updated_artifact,
+            topic=topic,
+            audience=audience,
+            tone=tone,
+            visual_mode=visual_mode,
+            content_signal=content_signal,
+        )
+
+        if anchor_index > 0:
+            preserved = artifact.blocks[:anchor_index]
+            regenerated = normalized.blocks[anchor_index:]
+            normalized = QuickArtifactSchema(
+                artifact_id=artifact.artifact_id,
+                title=artifact.title,
+                subtitle=artifact.subtitle,
+                summary=artifact.summary,
+                visual_style=normalized.visual_style,
+                hero_direction=artifact.hero_direction,
+                blocks=[*preserved, *regenerated],
+            )
+        else:
+            normalized = QuickArtifactSchema(
+                artifact_id=artifact.artifact_id,
+                title=normalized.title,
+                subtitle=normalized.subtitle,
+                summary=normalized.summary,
+                visual_style=normalized.visual_style,
+                hero_direction=normalized.hero_direction,
+                blocks=normalized.blocks,
+            )
+
+        normalized = self._enrich_quick_artifact_with_source_media(
+            artifact=normalized,
+            content_signal=content_signal,
+            source_manifest=payload.source_manifest,
+        )
+        normalized = await self._populate_quick_block_visuals(
+            request=request,
+            topic=topic,
+            audience=audience,
+            tone=tone,
+            visual_mode=visual_mode,
+            artifact=normalized,
+            content_signal=content_signal,
+            only_block_ids={block.block_id for block in normalized.blocks[anchor_index:]} if anchor_index > 0 else None,
+        )
+        try:
+            hero_image_url = await self._generate_quick_hero_image(
+                request=request,
+                topic=topic,
+                audience=audience,
+                tone=tone,
+                visual_mode=visual_mode,
+                artifact=normalized,
+                content_signal=content_signal,
+            )
+        except Exception:
+            hero_image_url = artifact.hero_image_url or ""
+        if hero_image_url:
+            normalized = normalized.model_copy(update={"hero_image_url": hero_image_url})
+        elif artifact.hero_image_url:
+            normalized = normalized.model_copy(update={"hero_image_url": artifact.hero_image_url})
+        return {"status": "success", "artifact": normalized.model_dump()}
 
     async def generate_stream_events(
         self,
@@ -3995,6 +5470,7 @@ class GeminiStoryAgent:
 
             continuity_memory: list[str] = []
             scene_claim_map: dict[str, list[str]] = {}
+            prepared_scenes: list[dict[str, Any]] = []
 
             for scene in script_pack.scenes:
                 if await request.is_disconnected():
@@ -4030,94 +5506,117 @@ class GeminiStoryAgent:
                     media_asset_ids=media_asset_ids,
                 )
                 scene_trace_payload = trace_meta(trace, scene_trace_id=scene_trace_id)
+                prepared_scenes.append(
+                    {
+                        "scene": scene,
+                        "scene_id": scene_id,
+                        "title": title,
+                        "scene_trace_id": scene_trace_id,
+                        "scene_trace_payload": scene_trace_payload,
+                        "claim_refs": claim_refs,
+                        "evidence_refs": evidence_refs,
+                        "claim_text_snippets": claim_text_snippets,
+                        "evidence_text_snippets": evidence_text_snippets,
+                    }
+                )
+
+            if prepared_scenes:
+                first_spec = prepared_scenes[0]
+                first_scene = first_spec["scene"]
+                first_scene_id = str(first_spec["scene_id"])
+                first_scene_trace_id = str(first_spec["scene_trace_id"])
+                first_scene_trace_payload = dict(first_spec["scene_trace_payload"])
+                first_title = str(first_spec["title"])
+                first_claim_refs = list(first_spec["claim_refs"])
+                first_evidence_refs = list(first_spec["evidence_refs"])
 
                 yield build_sse_event(
                     "scene_start",
                     {
-                        "scene_id": scene_id,
-                        "title": title,
-                        "claim_refs": claim_refs,
-                        "evidence_refs": evidence_refs,
-                        "render_strategy": scene.render_strategy,
-                        "source_media": [item.model_dump() for item in scene.source_media],
-                        "trace": scene_trace_payload,
+                        "scene_id": first_scene_id,
+                        "title": first_title,
+                        "claim_refs": first_claim_refs,
+                        "evidence_refs": first_evidence_refs,
+                        "render_strategy": first_scene.render_strategy,
+                        "source_media": [item.model_dump() for item in first_scene.source_media],
+                        "trace": first_scene_trace_payload,
                     },
                 )
 
                 for source_media_payload in self._resolve_source_media_payloads(
                     request=request,
-                    scene_id=scene_id,
-                    source_media=scene.source_media,
+                    scene_id=first_scene_id,
+                    source_media=first_scene.source_media,
                     source_manifest=payload.source_manifest,
                 ):
-                    source_media_payload["trace"] = scene_trace_payload
+                    source_media_payload["trace"] = first_scene_trace_payload
                     yield build_sse_event("source_media_ready", source_media_payload)
 
-                retries_used = 0
-                qa_result: dict[str, Any] = {
-                    "scene_id": scene_id,
+                first_retries_used = 0
+                first_qa_result: dict[str, Any] = {
+                    "scene_id": first_scene_id,
                     "status": "WARN",
                     "score": 0.0,
                     "reasons": ["Quality checks not executed."],
                     "attempt": 1,
                     "word_count": 0,
                 }
-                scene_result: dict[str, Any] = {}
-                retry_reason_constraints: list[str] = []
+                first_scene_result: dict[str, Any] = {}
+                first_retry_reason_constraints: list[str] = []
 
                 for attempt_index in range(2):
-                    scene_result = {}
-                    active_continuity = (continuity_memory[-3:] + scene.continuity_refs)[-6:]
-                    attempt_constraints = list(scene.acceptance_checks)
-                    if retry_reason_constraints:
+                    first_scene_result = {}
+                    active_continuity = (continuity_memory[-3:] + first_scene.continuity_refs)[-6:]
+                    attempt_constraints = list(first_scene.acceptance_checks)
+                    if first_retry_reason_constraints:
                         attempt_constraints.append(
-                            f"Fix these QA issues from previous attempt: {'; '.join(retry_reason_constraints[:3])}."
+                            f"Fix these QA issues from previous attempt: {'; '.join(first_retry_reason_constraints[:3])}."
                         )
 
                     if attempt_index > 0:
                         yield build_sse_event(
                             "scene_retry_reset",
                             {
-                                "scene_id": scene_id,
+                                "scene_id": first_scene_id,
                                 "retry_index": attempt_index,
-                                "trace": scene_trace_payload,
+                                "trace": first_scene_trace_payload,
                             },
                         )
 
                     async for event in self._stream_scene_assets(
                         request=request,
-                        scene_id=scene_id,
+                        scene_id=first_scene_id,
                         topic=thesis,
                         audience=audience_descriptor,
                         tone=goal,
-                        scene_title=title,
-                        narration_focus=scene.narration_focus,
-                        scene_goal=scene.scene_goal,
+                        scene_title=first_title,
+                        narration_focus=first_scene.narration_focus,
+                        scene_goal=first_scene.scene_goal,
                         style_guide=style_guide,
-                        visual_prompt=scene.visual_prompt,
+                        visual_prompt=first_scene.visual_prompt,
                         image_prefix="advanced_interleaved",
                         audio_prefix="advanced_audio",
                         artifact_type=script_pack.artifact_type,
-                        scene_mode=scene.scene_mode,
-                        layout_template=scene.layout_template,
-                        focal_subject=scene.focal_subject,
-                        visual_hierarchy=scene.visual_hierarchy,
-                        modules=scene.modules,
-                        claim_refs=scene.claim_refs,
-                        claim_text_snippets=claim_text_snippets,
-                        evidence_text_snippets=evidence_text_snippets,
-                        crop_safe_regions=scene.crop_safe_regions,
+                        scene_mode=first_scene.scene_mode,
+                        layout_template=first_scene.layout_template,
+                        focal_subject=first_scene.focal_subject,
+                        visual_hierarchy=first_scene.visual_hierarchy,
+                        modules=first_scene.modules,
+                        claim_refs=first_scene.claim_refs,
+                        claim_text_snippets=list(first_spec["claim_text_snippets"]),
+                        evidence_text_snippets=list(first_spec["evidence_text_snippets"]),
+                        crop_safe_regions=first_scene.crop_safe_regions,
                         continuity_hints=active_continuity,
                         extra_constraints=attempt_constraints,
-                        result_collector=scene_result,
-                        trace_payload=scene_trace_payload,
+                        result_collector=first_scene_result,
+                        trace_payload=first_scene_trace_payload,
                     ):
                         yield event
 
-                    qa_result = evaluate_scene_quality(
-                        scene=scene,
-                        generated_text=str(scene_result.get("text", "")),
-                        image_url=str(scene_result.get("image_url", "")),
+                    first_qa_result = evaluate_scene_quality(
+                        scene=first_scene,
+                        generated_text=str(first_scene_result.get("text", "")),
+                        image_url=str(first_scene_result.get("image_url", "")),
                         must_include=must_include,
                         must_avoid=must_avoid,
                         continuity_hints=active_continuity,
@@ -4126,55 +5625,111 @@ class GeminiStoryAgent:
                     )
                     add_or_update_scene_trace(
                         trace,
-                        scene_id=scene_id,
-                        scene_trace_id=scene_trace_id,
-                        qa_result=qa_result,
+                        scene_id=first_scene_id,
+                        scene_trace_id=first_scene_trace_id,
+                        qa_result=first_qa_result,
                     )
                     yield build_sse_event(
                         "qa_status",
                         {
-                            **qa_result,
-                            "trace": scene_trace_payload,
+                            **first_qa_result,
+                            "trace": first_scene_trace_payload,
                         },
                     )
 
-                    if qa_result["status"] != "FAIL":
+                    if first_qa_result["status"] != "FAIL":
                         break
 
                     if attempt_index == 0:
-                        retry_reason_constraints = list(qa_result["reasons"])
-                        retries_used = 1
+                        first_retry_reason_constraints = list(first_qa_result["reasons"])
+                        first_retries_used = 1
                         yield build_sse_event(
                             "qa_retry",
                             {
-                                "scene_id": scene_id,
+                                "scene_id": first_scene_id,
                                 "retry_index": 1,
-                                "reasons": qa_result["reasons"],
-                                "trace": scene_trace_payload,
+                                "reasons": first_qa_result["reasons"],
+                                "trace": first_scene_trace_payload,
                             },
                         )
 
-                continuity_tokens = extract_anchor_terms(str(scene_result.get("text", "")), limit=4)
-                if continuity_tokens:
-                    continuity_memory.append(f"{title}: {', '.join(continuity_tokens)}")
+                first_continuity_tokens = extract_anchor_terms(str(first_scene_result.get("text", "")), limit=4)
+                if first_continuity_tokens:
+                    continuity_memory.append(f"{first_title}: {', '.join(first_continuity_tokens)}")
                     continuity_memory = continuity_memory[-8:]
                 add_or_update_scene_trace(
                     trace,
-                    scene_id=scene_id,
-                    scene_trace_id=scene_trace_id,
-                    retries_used=retries_used,
-                    word_count=int(scene_result.get("word_count", 0)),
+                    scene_id=first_scene_id,
+                    scene_trace_id=first_scene_trace_id,
+                    retries_used=first_retries_used,
+                    word_count=int(first_scene_result.get("word_count", 0)),
                 )
 
                 yield build_sse_event(
                     "scene_done",
                     {
-                        "scene_id": scene_id,
-                        "qa_status": qa_result["status"],
-                        "auto_retries": retries_used,
-                        "trace": scene_trace_payload,
+                        "scene_id": first_scene_id,
+                        "qa_status": first_qa_result["status"],
+                        "auto_retries": first_retries_used,
+                        "trace": first_scene_trace_payload,
                     },
                 )
+
+            remaining_scenes = prepared_scenes[1:]
+            scene_concurrency = self._advanced_scene_concurrency()
+
+            for batch_start in range(0, len(remaining_scenes), scene_concurrency):
+                if await request.is_disconnected():
+                    return
+
+                batch = remaining_scenes[batch_start : batch_start + scene_concurrency]
+                continuity_snapshot = continuity_memory[-3:]
+                batch_tasks = [
+                    asyncio.create_task(
+                        self._execute_buffered_advanced_scene(
+                            request=request,
+                            scene=spec["scene"],
+                            thesis=thesis,
+                            audience_descriptor=audience_descriptor,
+                            goal=goal,
+                            style_guide=style_guide,
+                            script_pack=script_pack,
+                            source_manifest=payload.source_manifest,
+                            must_include=must_include,
+                            must_avoid=must_avoid,
+                            claim_text_snippets=list(spec["claim_text_snippets"]),
+                            evidence_text_snippets=list(spec["evidence_text_snippets"]),
+                            active_continuity=(continuity_snapshot + spec["scene"].continuity_refs)[-6:],
+                            scene_trace_payload=dict(spec["scene_trace_payload"]),
+                        )
+                    )
+                    for spec in batch
+                ]
+                batch_results = await asyncio.gather(*batch_tasks)
+
+                for spec, buffered_result in zip(batch, batch_results):
+                    add_or_update_scene_trace(
+                        trace,
+                        scene_id=buffered_result.scene_id,
+                        scene_trace_id=buffered_result.scene_trace_id,
+                        qa_result=buffered_result.qa_result,
+                    )
+                    add_or_update_scene_trace(
+                        trace,
+                        scene_id=buffered_result.scene_id,
+                        scene_trace_id=buffered_result.scene_trace_id,
+                        retries_used=buffered_result.retries_used,
+                        word_count=buffered_result.word_count,
+                    )
+
+                    for event in buffered_result.events:
+                        yield event
+
+                    if buffered_result.continuity_tokens:
+                        continuity_memory.append(
+                            f"{spec['title']}: {', '.join(buffered_result.continuity_tokens)}"
+                        )
+                        continuity_memory = continuity_memory[-8:]
 
             cp5 = add_checkpoint(
                 trace,
