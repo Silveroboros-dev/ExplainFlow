@@ -13,12 +13,24 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "Instruction for joining the challenge.md",
+                "file": "docs/architecture.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "Instruction for joining the challenge"
+              "title": "architecture"
+            }
+          },
+          {
+            "id": "448ddd13c5b2ec42",
+            "type": "leaf",
+            "state": {
+              "type": "release-notes",
+              "state": {
+                "currentVersion": "1.12.4"
+              },
+              "icon": "lucide-book-up",
+              "title": "Release Notes 1.12.4"
             }
           },
           {
@@ -63,8 +75,7 @@
               "title": "Live Director Console"
             }
           }
-        ],
-        "currentTab": 1
+        ]
       }
     ],
     "direction": "vertical"
@@ -121,8 +132,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 300,
-    "collapsed": true
+    "width": 300
   },
   "right": {
     "id": "4e45ffc336892e6d",
@@ -227,37 +237,41 @@
       "bases:Create new base": false
     }
   },
-  "active": "03bca2217ac6496c",
+  "active": "e268579e4da0b9ff",
   "lastOpenFiles": [
-    "api/app/static/assets/audio_scene-1_1772715774891.mp3",
-    "api/app/static/assets/interleaved_scene-1_1772715774874.png",
-    "Instruction for joining the challenge.md",
+    "api/app/static/assets/regen_audio_test-scene-1_1773079485163.mp3",
+    "api/app/static/assets/regen_test-scene-1_1773079485118.png",
+    "api/app/static/assets/source_media_crop_scene-1-proof-1_1773079357207.png",
+    "api/app/static/assets/unit_source_media_scene-source_1773079357169.png",
+    "api/app/static/assets/unit_thumb_cover_scene-1_1773079357120.png",
+    "api/app/static/assets/unit_thumb_source_scene-1_1773079357039.png",
+    "api/app/static/assets/quick_hero_cortical-labs-doom-vc-explainer_1773077331497.png",
+    "api/app/static/assets/quick_block_cortical-labs-doom-vc-explainer-block-proof-3_1773077140302.png",
+    "api/app/static/assets/quick_block_cortical-labs-doom-vc-explainer-block-implication-4_1773072039053.png",
+    "api/app/static/assets/quick_hero_cortical-labs-doom-vc-explainer_1773071980113.png",
+    "api/app/static/assets/quick_hero_CL1DoomVCExplainer_1773068812715.png",
+    "api/app/static/assets/asset-video-6ca3754400.mp4",
+    "api/app/static/assets/asset-video-92e6e8a9f6.mp4",
+    "api/app/static/assets/asset-video-f14f2768e6.mp4",
+    "api/app/static/assets/advanced_audio_scene-7_1773045410209.mp3",
+    "api/app/static/assets/advanced_audio_scene-6_1773045406071.mp3",
+    "api/app/static/assets/advanced_audio_scene-4_1773045371848.mp3",
+    "api/app/static/assets/advanced_audio_scene-5_1773045365732.mp3",
+    "api/app/static/assets/advanced_audio_scene-2_1773045339281.mp3",
+    "api/app/static/assets/advanced_audio_scene-3_1773045309799.mp3",
+    "api/app/static/assets/advanced_audio_scene-2_1773045305031.mp3",
+    "docs/architecture.md",
+    "docs/codex-handoff.md",
     "Live Director Console.md",
-    "api/app/static/assets/regen_audio_scene-2_1772657006814.mp3",
-    "api/app/static/assets/regen_scene-2_1772657006811.png",
-    "api/app/static/assets/advanced_audio_scene-6_1772656922811.mp3",
-    "api/app/static/assets/advanced_interleaved_scene-6_1772656922800.png",
-    "api/app/static/assets/advanced_audio_scene-5_1772656891271.mp3",
-    "api/app/static/assets/advanced_interleaved_scene-5_1772656891264.png",
-    "api/app/static/assets/advanced_audio_scene-4_1772656857178.mp3",
-    "api/app/static/assets/advanced_interleaved_scene-4_1772656857174.png",
-    "api/app/static/assets/advanced_audio_scene-4_1772656823858.mp3",
-    "api/app/static/assets/advanced_audio_scene-3_1772656795189.mp3",
-    "api/app/static/assets/advanced_interleaved_scene-3_1772656795185.png",
-    "api/app/static/assets/advanced_audio_scene-2_1772656761705.mp3",
-    "api/app/static/assets/advanced_interleaved_scene-2_1772656761699.png",
-    "api/app/static/assets/advanced_audio_scene-1_1772656734319.mp3",
-    "api/app/static/assets/advanced_interleaved_scene-1_1772656734313.png",
-    "api/app/static/assets/advanced_audio_scene-6_1772656598335.mp3",
-    "api/app/static/assets/advanced_interleaved_scene-6_1772656598331.png",
-    "api/app/static/assets/advanced_audio_scene-5_1772656568417.mp3",
-    "api/app/static/assets/advanced_interleaved_scene-5_1772656568412.png",
+    "Instruction for joining the challenge.md",
+    "README.md",
+    "GEMINI.md",
+    "Clean way to think about it for ExplainFlow.md",
+    "3 MVP Concepts (ranked for speed + fit).md",
+    "48-Hour Plan (Creative Storyteller, brand-aligned).md",
     "ExplainFlow Architecture.md",
     "docs/humanity-canon.md",
     "docs/collage-sources.md",
-    "GEMINI.md",
-    "48-Hour Plan (Creative Storyteller, brand-aligned).md",
-    "Clean way to think about it for ExplainFlow.md",
     "web/node_modules/@radix-ui/react-slider/README.md",
     "web/node_modules/@radix-ui/react-progress/node_modules/@radix-ui/react-context/README.md",
     "web/node_modules/@radix-ui/react-progress/README.md",
@@ -270,10 +284,6 @@
     "web/node_modules/@radix-ui/react-roving-focus/node_modules/@radix-ui/react-slot/README.md",
     "web/node_modules/@radix-ui/react-roving-focus/node_modules/@radix-ui/react-primitive/README.md",
     "web/node_modules/@radix-ui/react-roving-focus/README.md",
-    "web/node_modules/@radix-ui/react-tooltip/node_modules/@radix-ui/react-slot/README.md",
-    "web/node_modules/@radix-ui/react-tooltip/node_modules/@radix-ui/react-primitive/README.md",
-    "web/node_modules/@radix-ui/react-tooltip/README.md",
-    "web/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-slot/README.md",
-    "web/node_modules/@radix-ui/react-tabs/node_modules/@radix-ui/react-primitive/README.md"
+    "web/node_modules/@radix-ui/react-tooltip/node_modules/@radix-ui/react-slot/README.md"
   ]
 }

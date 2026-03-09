@@ -34,3 +34,5 @@ web/next-env.d.ts
 .DS_Store
 *.pem
 .env
+api/app/static/assets/*.pdf
+api/app/static/assets/*.mp4

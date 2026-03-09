@@ -1,43 +1,54 @@
 #!/bin/bash
 
-# Configuration - Update these or pass as env vars
+# ExplainFlow Automated Deployment Script
+# This script uses Terraform and Cloud Build for a fully automated CI/CD pipeline.
+
+echo "🚀 Starting ExplainFlow Automated Deployment..."
+
+# Ensure we have the project ID
 PROJECT_ID=$(gcloud config get-value project)
-REGION="us-central1"
-API_SERVICE_NAME="explainflow-api"
-WEB_SERVICE_NAME="explainflow-web"
+if [ -z "$PROJECT_ID" ]; then
+    echo "❌ Error: Google Cloud Project ID is not set. Please run 'gcloud config set project <YOUR_PROJECT_ID>'."
+    exit 1
+fi
 
-echo "🚀 Starting deployment to Google Cloud Run..."
+echo "🔹 Project ID: $PROJECT_ID"
 
-# 1. Build and Push API
-echo "📦 Building API Container..."
-gcloud builds submit --tag gcr.io/$PROJECT_ID/$API_SERVICE_NAME api/
+# 1. Infrastructure as Code (Terraform)
+echo "🛠️  Applying Terraform Infrastructure..."
+cd terraform
+terraform init
+# We pass the project_id to Terraform. Assuming 'us-central1' is the default region.
+terraform apply -var="project_id=$PROJECT_ID" -auto-approve
+cd ..
 
-# 2. Deploy API
-echo "🌍 Deploying API to Cloud Run..."
-# CRITICAL: timeout=300s for multimodal "thinking" time
-gcloud run deploy $API_SERVICE_NAME 
-  --image gcr.io/$PROJECT_ID/$API_SERVICE_NAME 
-  --platform managed 
-  --region $REGION 
-  --allow-unauthenticated 
-  --timeout=300 
-  --memory=2Gi 
-  --cpu=2 
-  --set-env-vars="GEMINI_API_KEY=$(cat api/.env | grep GEMINI_API_KEY | cut -d '=' -f2)"
+echo "✅ Infrastructure applied successfully."
 
-# 3. Build and Push Web
-echo "📦 Building Web Container..."
-# Note: In production, the Web app needs to know the API URL.
-# You might want to redeploy Web after API is live to set the NEXT_PUBLIC_API_URL.
-gcloud builds submit --tag gcr.io/$PROJECT_ID/$WEB_SERVICE_NAME --file web/Dockerfile .
+# 2. Secret Management Check
+# The Terraform script creates the secret, but the value needs to be set if it hasn't been already.
+SECRET_CHECK=$(gcloud secrets versions list explainflow-gemini-api-key --limit=1 --format="value(name)" 2>/dev/null)
+if [ -z "$SECRET_CHECK" ]; then
+    echo "⚠️  API Key Secret is empty. Fetching from api/.env and adding to Secret Manager..."
+    if [ -f "api/.env" ]; then
+        API_KEY=$(grep GEMINI_API_KEY api/.env | cut -d '=' -f2)
+        if [ -n "$API_KEY" ]; then
+             echo -n "$API_KEY" | gcloud secrets versions add explainflow-gemini-api-key --data-file=-
+             echo "✅ Secret updated."
+        else
+             echo "❌ Error: GEMINI_API_KEY not found in api/.env. Deployment will fail."
+             exit 1
+        fi
+    else
+        echo "❌ Error: api/.env file not found. Cannot set the API Key secret. Deployment will fail."
+        exit 1
+    fi
+fi
 
-# 4. Deploy Web
-echo "🌍 Deploying Web to Cloud Run..."
-gcloud run deploy $WEB_SERVICE_NAME 
-  --image gcr.io/$PROJECT_ID/$WEB_SERVICE_NAME 
-  --platform managed 
-  --region $REGION 
-  --allow-unauthenticated
+# 3. Global CI/CD (Cloud Build)
+echo "📦 Triggering Cloud Build Pipeline..."
+# This will build both API and Web containers, push them to Artifact Registry, and deploy them to Cloud Run.
+gcloud builds submit --config cloudbuild.yaml .
 
-echo "✅ Deployment complete!"
-gcloud run services list
+echo "🎉 Deployment Pipeline Complete!"
+echo "Check the Cloud Run console for the active service URLs."
+gcloud run services list --region us-central1

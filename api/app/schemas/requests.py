@@ -71,6 +71,107 @@ class RegenerateSceneRequest(BaseModel):
     visual_mode: str = "illustration"
 
 
+class QuickArtifactBlockSchema(BaseModel):
+    block_id: str
+    label: str
+    title: str
+    body: str
+    bullets: list[str] = Field(default_factory=list)
+    visual_direction: str = ""
+    image_url: str | None = None
+    emphasis: Literal["hook", "core", "proof", "implication", "action"] = "core"
+    claim_refs: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    source_media: list["SourceMediaRefSchema"] = Field(default_factory=list)
+
+
+class QuickReelSegmentSchema(BaseModel):
+    segment_id: str
+    block_id: str
+    title: str
+    render_mode: Literal["source_clip", "generated_image", "hybrid"]
+    caption_text: str
+    claim_refs: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    primary_media: SourceMediaRefSchema | None = None
+    fallback_image_url: str | None = None
+    start_ms: int | None = None
+    end_ms: int | None = None
+    timing_inferred: bool = False
+
+
+class QuickReelSchema(BaseModel):
+    reel_id: str
+    title: str
+    summary: str
+    segments: list[QuickReelSegmentSchema] = Field(default_factory=list)
+
+
+class QuickArtifactSchema(BaseModel):
+    artifact_id: str
+    title: str
+    subtitle: str
+    summary: str
+    visual_style: str
+    hero_direction: str
+    hero_image_url: str | None = None
+    reel: QuickReelSchema | None = None
+    blocks: list[QuickArtifactBlockSchema] = Field(default_factory=list)
+
+
+class QuickArtifactRequest(BaseModel):
+    topic: str
+    audience: str
+    tone: str = ""
+    visual_mode: str = "illustration"
+    source_text: str = ""
+    source_manifest: SourceManifestSchema | None = None
+    normalized_source_text: str = ""
+    source_text_origin: str | None = None
+    content_signal: dict[str, Any] = Field(default_factory=dict)
+
+
+class QuickSourceIndexRequest(BaseModel):
+    source_text: str = ""
+    source_manifest: SourceManifestSchema | None = None
+    normalized_source_text: str = ""
+    source_text_origin: str | None = None
+
+
+class QuickReelRequest(BaseModel):
+    artifact: QuickArtifactSchema | dict[str, Any]
+    source_manifest: SourceManifestSchema | None = None
+    content_signal: dict[str, Any] = Field(default_factory=dict)
+
+
+class QuickBlockOverrideRequest(BaseModel):
+    topic: str
+    audience: str
+    tone: str = ""
+    visual_mode: str = "illustration"
+    artifact: QuickArtifactSchema | dict[str, Any]
+    source_manifest: SourceManifestSchema | None = None
+    normalized_source_text: str = ""
+    source_text_origin: str | None = None
+    content_signal: dict[str, Any] = Field(default_factory=dict)
+    block_id: str
+    instruction: str
+
+
+class QuickArtifactOverrideRequest(BaseModel):
+    topic: str
+    audience: str
+    tone: str = ""
+    visual_mode: str = "illustration"
+    artifact: QuickArtifactSchema | dict[str, Any]
+    source_manifest: SourceManifestSchema | None = None
+    normalized_source_text: str = ""
+    source_text_origin: str | None = None
+    content_signal: dict[str, Any] = Field(default_factory=dict)
+    instruction: str
+    anchor_block_id: str | None = None
+
+
 class SourceAssetSchema(BaseModel):
     asset_id: str
     modality: EvidenceModality
@@ -100,6 +201,7 @@ class EvidenceRefSchema(BaseModel):
     speaker: str | None = None
     start_ms: int | None = None
     end_ms: int | None = None
+    timing_inferred: bool = False
     page_index: int | None = None
     bbox_norm: list[float] | None = None
     confidence: float | None = None
@@ -113,6 +215,7 @@ class SourceMediaRefSchema(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
     start_ms: int | None = None
     end_ms: int | None = None
+    timing_inferred: bool = False
     page_index: int | None = None
     bbox_norm: list[float] | None = None
     loop: bool = False

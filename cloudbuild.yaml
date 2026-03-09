@@ -1,0 +1,74 @@
+steps:
+  # 1. Build the API image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-api:latest', '-f', 'api/Dockerfile', '.']
+
+  # 2. Push the API image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-api:latest']
+
+  # 3. Deploy API to Cloud Run (Serverless, Fully Managed)
+  # This uses the image we just built. It sets the timeout to 300s (critical for multimodal streaming).
+  # We fetch the API key from Secret Manager (which must be created via Terraform or manually first).
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'explainflow-api'
+      - '--image'
+      - 'us-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-api:latest'
+      - '--region'
+      - 'us-central1'
+      - '--allow-unauthenticated'
+      - '--timeout'
+      - '300'
+      - '--memory'
+      - '2Gi'
+      - '--cpu'
+      - '2'
+      - '--set-secrets'
+      - 'GEMINI_API_KEY=explainflow-gemini-api-key:latest'
+
+  # 4. Fetch the deployed API URL to pass to the Web build
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        API_URL=$(gcloud run services describe explainflow-api --region us-central1 --format 'value(status.url)')
+        echo "Found API_URL: $$API_URL"
+        echo "$$API_URL" > /workspace/api_url.txt
+
+  # 5. Build the Web image, dynamically injecting the API URL
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        API_URL=$$(cat /workspace/api_url.txt)
+        docker build -t us-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-web:latest -f web/Dockerfile --build-arg NEXT_PUBLIC_API_URL="$$API_URL" .
+
+  # 6. Push the Web image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-web:latest']
+
+  # 7. Deploy Web to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'explainflow-web'
+      - '--image'
+      - 'us-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-web:latest'
+      - '--region'
+      - 'us-central1'
+      - '--allow-unauthenticated'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+images:
+  - 'us-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-api:latest'
+  - 'us-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-web:latest'

@@ -138,9 +138,10 @@ Docs:
 
 These are not sprint regressions; they are next-step roadmap items.
 
-1. Pass 2 default model on GCP
-- The creative extraction pass is model-configurable.
-- It is ready to move to Flash, but not hard-switched yet.
+1. Finish model tiering on GCP
+- Structural extraction, source-text recovery, and planning precompute now default to Flash-class models locally/by default.
+- Creative extraction, main planning, and scene generation still stay on Pro-class models.
+- The remaining deployment task is to confirm final GCP env defaults and quota behavior in production.
 
 2. Better scanned-PDF OCR fallback
 - Digital PDFs are much better now because of `pypdf`.
@@ -189,7 +190,7 @@ Planned for the next morning:
 
 If tomorrow’s manual pass is clean, the next most valuable tasks are:
 
-1. move extraction Pass 2 to Flash on GCP
+1. validate model tiering / bounded scene concurrency on GCP
 2. add source URL + PDF ingest path
 3. improve scanned-PDF OCR fallback
 
