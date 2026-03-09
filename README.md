@@ -47,6 +47,16 @@ npm run dev
 
 ---
 
+## How to Deploy (Google Cloud)
+
+Since everything is committed and pushed to `main`, you can simply run the automated deployment pipeline (uses Terraform + Cloud Build):
+
+```bash
+bash deploy.sh
+```
+
+---
+
 ## Technical Core
 
 ### 1. Signal Extraction Layer
