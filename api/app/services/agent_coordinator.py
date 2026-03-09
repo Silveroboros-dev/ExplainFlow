@@ -230,6 +230,30 @@ class AgentCoordinator:
                 return deepcopy(state.script_pack)
             return None
 
+    async def get_final_bundle_status(self, run_id: str) -> dict[str, Any]:
+        async with self._lock:
+            for state in self._states.values():
+                if state.latest_run_id != run_id:
+                    continue
+                bundle_checkpoint = state.checkpoint_state.get("CP6_BUNDLE_FINALIZED", "pending")
+                bundle_status = (
+                    "ready"
+                    if bundle_checkpoint == "passed"
+                    else "failed" if bundle_checkpoint == "failed" else "pending"
+                )
+                return {
+                    "workflow_id": state.workflow_id,
+                    "run_id": run_id,
+                    "bundle_status": bundle_status,
+                    "bundle_url": state.latest_bundle_url,
+                    "download_ready": False,
+                    "export_endpoint": "/api/final-bundle/export",
+                    "checkpoint_state": dict(state.checkpoint_state),
+                    "last_error": state.last_error,
+                    "updated_at_utc": state.updated_at_utc,
+                }
+        raise KeyError(f"Unknown run_id: {run_id}")
+
     async def record_signal_result(
         self,
         workflow_id: str,

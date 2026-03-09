@@ -263,3 +263,27 @@ def test_source_manifest_propagates_into_script_and_stream_requests() -> None:
         assert stream_request.source_text_origin == "pdf_text"
 
     asyncio.run(run())
+
+
+def test_final_bundle_status_lookup_by_run_id() -> None:
+    async def run() -> None:
+        coordinator = AgentCoordinator()
+        started = await coordinator.start_workflow("Input text")
+        workflow_id = started["workflow_id"]
+
+        await coordinator.record_stream_result(
+            workflow_id,
+            success=True,
+            run_id="run-preview",
+            bundle_url="/api/final-bundle/run-preview",
+        )
+
+        bundle = await coordinator.get_final_bundle_status("run-preview")
+        assert bundle["workflow_id"] == workflow_id
+        assert bundle["run_id"] == "run-preview"
+        assert bundle["bundle_status"] == "ready"
+        assert bundle["bundle_url"] == "/api/final-bundle/run-preview"
+        assert bundle["download_ready"] is False
+        assert bundle["export_endpoint"] == "/api/final-bundle/export"
+
+    asyncio.run(run())

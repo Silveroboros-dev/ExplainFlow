@@ -6,6 +6,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Wand2, Link as LinkIcon } from "lucide-react";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 interface SceneCardProps {
   sceneId: string;
   title?: string;
@@ -81,7 +83,7 @@ export default function SceneCard({
     setIsRegenerating(true);
     
     try {
-      const response = await fetch('http://localhost:8000/api/regenerate-scene', {
+      const response = await fetch(`${API_BASE}/api/regenerate-scene`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
