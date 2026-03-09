@@ -3,6 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 import mimetypes
+import os
 import re
 from urllib.parse import urlparse
 from difflib import SequenceMatcher
@@ -29,11 +30,21 @@ _SUPPORTED_MODALITIES = {
 _SUPPORTED_EXACT_MIME_TYPES = {
     "application/pdf": "pdf_page",
 }
+MAX_SOURCE_UPLOAD_BYTES_DEFAULT = 100 * 1024 * 1024
 
 
 def _guess_mime_type(filename: str, fallback: str | None = None) -> str:
     guessed, _ = mimetypes.guess_type(filename)
     return guessed or (fallback or "application/octet-stream")
+
+
+def _max_source_upload_bytes() -> int:
+    raw_value = os.getenv("EXPLAINFLOW_MAX_SOURCE_UPLOAD_BYTES", str(MAX_SOURCE_UPLOAD_BYTES_DEFAULT)).strip()
+    try:
+        parsed = int(raw_value)
+    except Exception:
+        parsed = MAX_SOURCE_UPLOAD_BYTES_DEFAULT
+    return max(parsed, 1024 * 1024)
 
 
 def _resolve_modality(filename: str, content_type: str | None) -> str:
@@ -79,6 +90,8 @@ async def ingest_source_upload(
     asset_id = f"asset-{modality}-{uuid4().hex[:10]}"
     stored_name = f"{asset_id}{suffix}"
     stored_path = ASSET_DIR / stored_name
+    max_size_bytes = _max_source_upload_bytes()
+    max_size_mb = max(1, round(max_size_bytes / (1024 * 1024)))
 
     size_bytes = 0
     try:
@@ -87,8 +100,16 @@ async def ingest_source_upload(
                 chunk = await upload.read(1024 * 1024)
                 if not chunk:
                     break
-                handle.write(chunk)
                 size_bytes += len(chunk)
+                if size_bytes > max_size_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"{original_name} exceeds the {max_size_mb} MB upload limit.",
+                    )
+                handle.write(chunk)
+    except Exception:
+        stored_path.unlink(missing_ok=True)
+        raise
     finally:
         await upload.close()
 

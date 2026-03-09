@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import os
 import sys
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlparse
+from unittest.mock import patch
 from zipfile import ZipFile
 
 from PIL import Image
@@ -127,3 +129,22 @@ def test_source_asset_upload_returns_manifest_assets() -> None:
     finally:
         for path in created_paths:
             path.unlink(missing_ok=True)
+
+
+def test_source_asset_upload_rejects_oversized_file() -> None:
+    existing_assets = {path.name for path in ASSET_DIR.iterdir()}
+    oversized_payload = b"0" * ((1024 * 1024) + 1)
+
+    with patch.dict(os.environ, {"EXPLAINFLOW_MAX_SOURCE_UPLOAD_BYTES": str(1024 * 1024)}):
+        client = TestClient(app)
+        response = client.post(
+            "/api/source-assets/upload",
+            files=[
+                ("files", ("too-large.png", oversized_payload, "image/png")),
+            ],
+        )
+
+    assert response.status_code == 413
+    payload = response.json()
+    assert "upload limit" in payload["detail"]
+    assert {path.name for path in ASSET_DIR.iterdir()} == existing_assets

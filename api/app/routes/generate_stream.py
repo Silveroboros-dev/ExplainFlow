@@ -3,8 +3,10 @@ import time
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
+from app.schemas.events import build_sse_event
 from app.schemas.requests import (
     AdvancedStreamRequest,
     QuickArtifactOverrideRequest,
@@ -29,6 +31,10 @@ ALLOWED_ARTIFACTS = {
     "voiceover",
     "social_caption",
 }
+LEGACY_QUICK_STREAM_MESSAGE = (
+    "GET /api/generate-stream is a legacy quick SSE route. "
+    "Prefer POST /api/generate-quick-artifact for Quick or the /api/workflow/* routes for Advanced."
+)
 
 
 def _artifact_scope_from_body(body: dict) -> list[str]:
@@ -36,6 +42,31 @@ def _artifact_scope_from_body(body: dict) -> list[str]:
     if not isinstance(raw_scope, list):
         return []
     return [item for item in raw_scope if isinstance(item, str) and item in ALLOWED_ARTIFACTS]
+
+
+def _error_status_code(message: str, *, fallback: int = 500) -> int:
+    normalized = message.strip().lower()
+    if not normalized:
+        return fallback
+    if (
+        normalized.startswith("provide ")
+        or normalized.startswith("at least ")
+        or normalized.startswith("missing ")
+        or "unable to locate" in normalized
+    ):
+        return 400
+    if normalized.startswith("unknown ") or "not found" in normalized:
+        return 404
+    return fallback
+
+
+def _service_response(result: dict, *, error_fallback: int = 500):
+    if result.get("status") != "error":
+        return result
+    return JSONResponse(
+        status_code=_error_status_code(str(result.get("message", "")), fallback=error_fallback),
+        content=result,
+    )
 
 
 async def _run_quick_source_index_job(job_id: str, payload: QuickSourceIndexRequest) -> None:
@@ -85,7 +116,8 @@ async def _run_quick_source_index_job(job_id: str, payload: QuickSourceIndexRequ
 
 @router.post("/extract-signal")
 async def extract_signal(payload: SignalExtractionRequest):
-    return await agent.extract_signal(payload)
+    result = await agent.extract_signal(payload)
+    return _service_response(result, error_fallback=500)
 
 
 @router.post("/quick-source-index/start")
@@ -119,21 +151,39 @@ async def quick_source_index_status(job_id: str):
 
 
 @router.get("/generate-stream")
-async def generate_stream(
+async def generate_stream_legacy_quick(
     request: Request,
     topic: str,
     audience: str,
     tone: str,
     visual_mode: str = "illustration",
 ):
-    return EventSourceResponse(
-        agent.generate_stream_events(
+    async def event_generator():
+        yield build_sse_event(
+            "legacy_route_notice",
+            {
+                "message": LEGACY_QUICK_STREAM_MESSAGE,
+                "replacement_routes": [
+                    "/api/generate-quick-artifact",
+                    "/api/workflow/start",
+                ],
+            },
+        )
+        async for event in agent.generate_stream_events(
             request=request,
             topic=topic,
             audience=audience,
             tone=tone,
             visual_mode=visual_mode,
-        )
+        ):
+            yield event
+
+    return EventSourceResponse(
+        event_generator(),
+        headers={
+            "Deprecation": "true",
+            "X-ExplainFlow-Legacy": "true",
+        },
     )
 
 
@@ -177,29 +227,35 @@ async def generate_script_pack_advanced(request: Request):
         render_profile=body.get("render_profile", {}) if isinstance(body.get("render_profile"), dict) else {},
         artifact_scope=_artifact_scope_from_body(body),
     )
-    return await agent.generate_script_pack_advanced(payload)
+    result = await agent.generate_script_pack_advanced(payload)
+    return _service_response(result, error_fallback=500)
 
 
 @router.post("/generate-quick-artifact")
 async def generate_quick_artifact(payload: QuickArtifactRequest, request: Request):
-    return await agent.generate_quick_artifact(payload, request=request)
+    result = await agent.generate_quick_artifact(payload, request=request)
+    return _service_response(result, error_fallback=500)
 
 
 @router.post("/generate-quick-reel")
 async def generate_quick_reel(payload: QuickReelRequest):
-    return await agent.generate_quick_reel(payload)
+    result = await agent.generate_quick_reel(payload)
+    return _service_response(result, error_fallback=500)
 
 
 @router.post("/regenerate-quick-block")
 async def regenerate_quick_block(payload: QuickBlockOverrideRequest, request: Request):
-    return await agent.regenerate_quick_block(payload, request=request)
+    result = await agent.regenerate_quick_block(payload, request=request)
+    return _service_response(result, error_fallback=500)
 
 
 @router.post("/regenerate-quick-artifact")
 async def regenerate_quick_artifact(payload: QuickArtifactOverrideRequest, request: Request):
-    return await agent.regenerate_quick_artifact(payload, request=request)
+    result = await agent.regenerate_quick_artifact(payload, request=request)
+    return _service_response(result, error_fallback=500)
 
 
 @router.post("/regenerate-scene")
 async def regenerate_scene(payload: RegenerateSceneRequest, request: Request):
-    return await agent.regenerate_scene(payload, request)
+    result = await agent.regenerate_scene(payload, request)
+    return _service_response(result, error_fallback=500)

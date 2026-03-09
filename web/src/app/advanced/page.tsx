@@ -32,6 +32,8 @@ import {
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 const SIGNAL_EXPLAINER_TEXT = [
   "Structured extraction converts long input into a stable JSON contract.",
   "",
@@ -948,7 +950,6 @@ export default function AdvancedStudio() {
     setError('');
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
       const formData = new FormData();
       const assetDescriptors = await Promise.all(
         files.map(async (file) => ({
@@ -959,7 +960,7 @@ export default function AdvancedStudio() {
       files.forEach((file) => formData.append('files', file));
       formData.append('asset_descriptors', JSON.stringify(assetDescriptors));
 
-      const response = await fetch(`${apiUrl}/api/source-assets/upload`, {
+      const response = await fetch(`${API_BASE}/api/source-assets/upload`, {
         method: 'POST',
         body: formData,
       });
@@ -1102,8 +1103,7 @@ export default function AdvancedStudio() {
   };
 
   const fetchWorkflowSnapshot = async (workflowIdValue: string): Promise<void> => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-    const response = await fetch(`${apiUrl}/api/workflow/${workflowIdValue}`);
+    const response = await fetch(`${API_BASE}/api/workflow/${workflowIdValue}`);
     const snapshot = await response.json() as WorkflowSnapshot;
     updateWorkflowSnapshot(snapshot);
     const streamFailed = snapshot.checkpoint_state?.CP5_STREAM_COMPLETE === 'failed'
@@ -1347,9 +1347,8 @@ export default function AdvancedStudio() {
     setWorkflowSnapshot(null);
     
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
       const sourceManifest = buildSourceManifestPayload();
-      const startResponse = await fetch(`${apiUrl}/api/workflow/start`, {
+      const startResponse = await fetch(`${API_BASE}/api/workflow/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1374,7 +1373,7 @@ export default function AdvancedStudio() {
         updateWorkflowSnapshot(startData.workflow);
       }
 
-      const extractResponse = await fetch(`${apiUrl}/api/workflow/${startData.workflow_id}/extract-signal`, {
+      const extractResponse = await fetch(`${API_BASE}/api/workflow/${startData.workflow_id}/extract-signal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1546,10 +1545,9 @@ export default function AdvancedStudio() {
     pushAgentNote('info', 'Render Profile', 'Locking artifact scope and render profile for this run.');
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
       const artifactScope = mapArtifactScope(artifactType);
 
-      const artifactRes = await fetch(`${apiUrl}/api/workflow/${workflowId}/lock-artifacts`, {
+      const artifactRes = await fetch(`${API_BASE}/api/workflow/${workflowId}/lock-artifacts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ artifact_scope: artifactScope })
@@ -1569,7 +1567,7 @@ export default function AdvancedStudio() {
       }
 
       const renderProfile = buildRenderProfilePayload(mode);
-      const renderRes = await fetch(`${apiUrl}/api/workflow/${workflowId}/lock-render`, {
+      const renderRes = await fetch(`${API_BASE}/api/workflow/${workflowId}/lock-render`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ render_profile: renderProfile })
@@ -1649,8 +1647,7 @@ export default function AdvancedStudio() {
     }
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const response = await fetch(`${apiUrl}/api/workflow/${workflowId}/generate-script-pack`, {
+      const response = await fetch(`${API_BASE}/api/workflow/${workflowId}/generate-script-pack`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });
@@ -1731,8 +1728,7 @@ export default function AdvancedStudio() {
     pushAgentNote('info', 'Final Bundle', 'High-fidelity upscale started using the current scene images.');
 
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const response = await fetch(`${apiUrl}/api/final-bundle/upscale`, {
+      const response = await fetch(`${API_BASE}/api/final-bundle/upscale`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1831,8 +1827,7 @@ export default function AdvancedStudio() {
     pushAgentNote('info', 'Generation', startNote);
     
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const response = await fetch(`${apiUrl}/api/workflow/${workflowId}/generate-stream`, {
+      const response = await fetch(`${API_BASE}/api/workflow/${workflowId}/generate-stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2127,7 +2122,6 @@ export default function AdvancedStudio() {
     const message = rawInput.trim();
     if (!message) return;
 
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
     const conversation: WorkflowAgentApiTurn[] = chatMessages.slice(-10).map((turn) => ({
       role: turn.role === 'agent' ? 'agent' : turn.role === 'system' ? 'system' : 'user',
       text: turn.text,
@@ -2135,7 +2129,7 @@ export default function AdvancedStudio() {
 
     try {
       setGenerationError('');
-      const response = await fetch(`${apiUrl}/api/workflow/agent/chat`, {
+      const response = await fetch(`${API_BASE}/api/workflow/agent/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
