@@ -74,10 +74,10 @@ from app.services.source_ingest import (
 SIGNAL_EXTRACTION_PROMPT_VERSION_DEFAULT = "v2"
 SIGNAL_STRUCTURAL_MODEL_DEFAULT = "gemini-3.1-pro-preview"
 SIGNAL_CREATIVE_MODEL_DEFAULT = "gemini-3.1-pro-preview"
-SIGNAL_SOURCE_TEXT_MODEL_DEFAULT = "gemini-3.1-flash-image-preview"
-PLANNER_PRECOMPUTE_MODEL_DEFAULT = "gemini-3.1-flash-image-preview"
+SIGNAL_SOURCE_TEXT_MODEL_DEFAULT = "gemini-3-flash-preview"
+PLANNER_PRECOMPUTE_MODEL_DEFAULT = "gemini-3-flash-preview"
 ADVANCED_SCENE_CONCURRENCY_DEFAULT = 2
-QUICK_ARTIFACT_MODEL_DEFAULT = "gemini-3.1-flash-image-preview"
+QUICK_ARTIFACT_MODEL_DEFAULT = "gemini-3-flash-preview"
 
 
 DEFAULT_PLANNER_ARTIFACT_TYPE = "storyboard_grid"
@@ -3292,7 +3292,7 @@ class GeminiStoryAgent:
         )
 
         plan_response = await self.client.aio.models.generate_content(
-            model="gemini-3.1-pro-preview",
+            model=self._signal_structural_model(),
             contents=planning_prompt,
             config=types.GenerateContentConfig(
                 temperature=0.7,
@@ -3351,7 +3351,7 @@ class GeminiStoryAgent:
                 ),
             )
             replan_response = await self.client.aio.models.generate_content(
-                model="gemini-3.1-pro-preview",
+                model=self._signal_structural_model(),
                 contents=replan_prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.4,
@@ -5114,7 +5114,7 @@ class GeminiStoryAgent:
 
         try:
             plan_response = await self.client.aio.models.generate_content(
-                model="gemini-3.1-pro-preview",
+                model=self._signal_structural_model(),
                 contents=planning_prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.7,
