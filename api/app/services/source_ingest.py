@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 import mimetypes
@@ -9,8 +10,9 @@ from difflib import SequenceMatcher
 from uuid import uuid4
 
 from fastapi import HTTPException, Request, UploadFile
+from google.cloud import storage
 
-from app.config import ASSET_DIR
+from app.config import ASSET_DIR, BUCKET_NAME
 from app.schemas.requests import SourceAssetSchema, SourceManifestSchema
 from app.services.image_pipeline import base_url
 
@@ -96,6 +98,18 @@ async def ingest_source_upload(
         stored_path.unlink(missing_ok=True)
         raise HTTPException(status_code=400, detail=f"{original_name} is empty.")
 
+    # If GCS bucket is configured, upload and use GCS URI
+    asset_uri = f"{base_url(request)}/static/assets/{stored_name}"
+    if BUCKET_NAME:
+        try:
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(BUCKET_NAME)
+            blob = bucket.blob(stored_name)
+            blob.upload_from_filename(str(stored_path), content_type=mime_type)
+            asset_uri = f"https://storage.googleapis.com/{BUCKET_NAME}/{stored_name}"
+        except Exception as exc:
+            print(f"GCS upload failed for {stored_name}: {exc}")
+
     metadata = {
         "original_filename": original_name,
         "size_bytes": size_bytes,
@@ -116,7 +130,7 @@ async def ingest_source_upload(
     return SourceAssetSchema(
         asset_id=asset_id,
         modality=modality,  # type: ignore[arg-type]
-        uri=f"{base_url(request)}/static/assets/{stored_name}",
+        uri=asset_uri,
         mime_type=mime_type,
         title=original_name,
         duration_ms=duration_ms,

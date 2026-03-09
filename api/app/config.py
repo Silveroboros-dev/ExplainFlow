@@ -13,6 +13,8 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 ASSET_DIR = STATIC_DIR / "assets"
 ASSET_DIR.mkdir(parents=True, exist_ok=True)
 
+BUCKET_NAME = os.getenv("EXPLAINFLOW_BUCKET")
+
 
 def get_gemini_client() -> genai.Client:
     api_key = os.getenv("GEMINI_API_KEY")

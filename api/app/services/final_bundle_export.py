@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import urllib.request
 from io import BytesIO
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -27,12 +28,34 @@ def _safe_scene_stem(scene: FinalBundleSceneAsset, index: int) -> str:
     base = scene.scene_id.strip() or f"scene-{index}"
     slug = _slugify(base, f"scene-{index}")
     return f"{index:02d}-{slug}"
+
+
 def _transcript_for_scenes(scenes: list[FinalBundleSceneAsset]) -> str:
     chunks: list[str] = []
     for index, scene in enumerate(scenes, start=1):
         title = (scene.title or "").strip() or f"Scene {index}"
         chunks.append(f"Scene {index}: {title}\n\n{scene.text.strip()}")
     return "\n\n---\n\n".join(chunks).strip() + "\n"
+
+
+def _get_asset_bytes(url: str | None) -> bytes | None:
+    if not url:
+        return None
+    
+    # Try local first
+    path = asset_path_from_url(url)
+    if path and path.exists():
+        return path.read_bytes()
+    
+    # Fallback to downloading (e.g. from GCS)
+    if url.startswith("http"):
+        try:
+            with urllib.request.urlopen(url) as response:
+                return response.read()
+        except Exception as exc:
+            print(f"Failed to download asset from {url}: {exc}")
+    
+    return None
 
 
 def build_final_bundle_zip(
@@ -50,18 +73,18 @@ def build_final_bundle_zip(
         for index, scene in enumerate(ordered_scenes, start=1):
             scene_stem = _safe_scene_stem(scene, index)
 
-            image_path = asset_path_from_url(scene.image_url)
-            if image_path is not None:
-                bundle_zip.write(
-                    image_path,
-                    arcname=f"images/{scene_stem}{image_path.suffix.lower() or '.png'}",
-                )
+            image_content = _get_asset_bytes(scene.image_url)
+            if image_content:
+                ext = ".png"
+                if scene.image_url and "." in scene.image_url.split("/")[-1]:
+                    ext = "." + scene.image_url.split("/")[-1].split(".")[-1]
+                bundle_zip.writestr(f"images/{scene_stem}{ext}", image_content)
 
-            audio_path = asset_path_from_url(scene.audio_url)
-            if audio_path is not None:
-                bundle_zip.write(
-                    audio_path,
-                    arcname=f"audio/{scene_stem}{audio_path.suffix.lower() or '.mp3'}",
-                )
+            audio_content = _get_asset_bytes(scene.audio_url)
+            if audio_content:
+                ext = ".mp3"
+                if scene.audio_url and "." in scene.audio_url.split("/")[-1]:
+                    ext = "." + scene.audio_url.split("/")[-1].split(".")[-1]
+                bundle_zip.writestr(f"audio/{scene_stem}{ext}", audio_content)
 
     return archive_name, buffer.getvalue()

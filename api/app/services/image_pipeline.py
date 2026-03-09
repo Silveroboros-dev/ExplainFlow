@@ -2,12 +2,14 @@ import time
 from io import BytesIO
 from pathlib import Path
 import re
+import os
 from urllib.parse import urlparse
 
 from fastapi import Request
 from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+from google.cloud import storage
 
-from app.config import ASSET_DIR
+from app.config import ASSET_DIR, BUCKET_NAME
 
 
 def base_url(request: Request) -> str:
@@ -83,8 +85,23 @@ def public_asset_url(request: Request, asset_uri: str | None) -> str:
 def save_image_and_get_url(request: Request, scene_id: str, image_bytes: bytes, prefix: str) -> str:
     ts = int(time.time() * 1000)
     img_filename = f"{prefix}_{scene_id}_{ts}.png"
+    
+    # Save locally first (as backup and for immediate processing if needed)
     img_path = ASSET_DIR / img_filename
     img_path.write_bytes(image_bytes)
+
+    # If GCS bucket is configured, upload and return GCS URL
+    if BUCKET_NAME:
+        try:
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(BUCKET_NAME)
+            blob = bucket.blob(img_filename)
+            blob.upload_from_string(image_bytes, content_type="image/png")
+            return f"https://storage.googleapis.com/{BUCKET_NAME}/{img_filename}"
+        except Exception as exc:
+            print(f"GCS upload failed for {img_filename}: {exc}")
+            # Fallback to local URL if GCS fails
+    
     return f"{base_url(request)}/static/assets/{img_filename}"
 
 
