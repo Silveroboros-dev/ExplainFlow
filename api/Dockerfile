@@ -36,4 +36,5 @@ WORKDIR /app/api
 
 # Command to run the production server (Uvicorn)
 # Note the app location is now 'app.main:app' because we are in /app/api
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
+# Cloud Run sets the PORT environment variable
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1"]

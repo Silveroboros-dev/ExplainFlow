@@ -170,8 +170,8 @@ def test_extract_anchor_terms_filters_stopwords_and_limits() -> None:
 def test_signal_model_tiering_defaults() -> None:
     with patch.dict(os.environ, {}, clear=True):
         assert GeminiStoryAgent._signal_structural_model() == "gemini-3.1-pro-preview"
-        assert GeminiStoryAgent._signal_source_text_model() == "gemini-2.5-flash"
-        assert GeminiStoryAgent._planner_precompute_model() == "gemini-2.5-flash"
+        assert GeminiStoryAgent._signal_source_text_model() == "gemini-3.1-flash-image-preview"
+        assert GeminiStoryAgent._planner_precompute_model() == "gemini-3.1-flash-image-preview"
         assert GeminiStoryAgent._signal_creative_model() == "gemini-3.1-pro-preview"
 
 

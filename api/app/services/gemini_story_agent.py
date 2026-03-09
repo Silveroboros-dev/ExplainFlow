@@ -74,10 +74,10 @@ from app.services.source_ingest import (
 SIGNAL_EXTRACTION_PROMPT_VERSION_DEFAULT = "v2"
 SIGNAL_STRUCTURAL_MODEL_DEFAULT = "gemini-3.1-pro-preview"
 SIGNAL_CREATIVE_MODEL_DEFAULT = "gemini-3.1-pro-preview"
-SIGNAL_SOURCE_TEXT_MODEL_DEFAULT = "gemini-2.5-flash"
-PLANNER_PRECOMPUTE_MODEL_DEFAULT = "gemini-2.5-flash"
+SIGNAL_SOURCE_TEXT_MODEL_DEFAULT = "gemini-3.1-flash-image-preview"
+PLANNER_PRECOMPUTE_MODEL_DEFAULT = "gemini-3.1-flash-image-preview"
 ADVANCED_SCENE_CONCURRENCY_DEFAULT = 2
-QUICK_ARTIFACT_MODEL_DEFAULT = "gemini-2.5-flash"
+QUICK_ARTIFACT_MODEL_DEFAULT = "gemini-3.1-flash-image-preview"
 
 
 DEFAULT_PLANNER_ARTIFACT_TYPE = "storyboard_grid"

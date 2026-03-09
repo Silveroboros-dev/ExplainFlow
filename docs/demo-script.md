@@ -86,3 +86,17 @@ Show a clear story in 4 minutes:
 - **Advanced Persona**: "Aerospace Investor"
 - **Taste Bar**: "Very High"
 - **Visual Mode**: `Hybrid` (to show 3D + UI overlays)
+
+## Hackathon Pitch Summary
+
+Use this as the short architecture explanation if a judge asks what is different about ExplainFlow:
+
+> "Most AI demo tools are still one-shot wrappers around a single prompt. ExplainFlow is a staged agentic workflow. We split signal extraction into structural and creative passes, run artifact-aware planning with validation and repair, and then generate scenes as discrete units so they can be retried, regenerated, and proof-linked back to the source. For live performance, we use bounded scene concurrency with ordered SSE flush: Scene 1 is generated serially for immediate time-to-first-byte, then later scenes run in small parallel batches while the user is already reading, but we buffer and flush them in order so continuity, QA retries, and UI rendering stay stable. That lets us hide latency without giving up scene-level control."
+
+Alternative live version:
+
+> "ExplainFlow is not a one-shot generator. It is a controllable production pipeline: extract, plan, validate, stream, and repair. We generate the opener first so the user sees output immediately, then we parallelize later scenes in bounded batches and flush them in order. That gives us source grounding, regeneration, and live-demo speed at the same time."
+
+Shorter fallback version:
+
+> "ExplainFlow is not a one-shot generator. It is a controllable production pipeline: extract, plan, validate, stream, and repair. That gives us better source grounding, better regeneration, and better live-demo resilience than static notebook-style tools."

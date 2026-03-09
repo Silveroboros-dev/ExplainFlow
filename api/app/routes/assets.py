@@ -1,6 +1,7 @@
+import json
 from io import BytesIO
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.schemas.requests import FinalBundleExportRequest, FinalBundleUpscaleRequest
@@ -12,13 +13,30 @@ router = APIRouter()
 
 
 @router.post("/source-assets/upload")
-async def upload_source_assets(request: Request, files: list[UploadFile] = File(...)):
+async def upload_source_assets(
+    request: Request,
+    files: list[UploadFile] = File(...),
+    asset_descriptors: str | None = Form(default=None),
+):
     if not files:
         raise HTTPException(status_code=400, detail="At least one source asset is required.")
 
+    parsed_descriptors: list[dict] = []
+    if isinstance(asset_descriptors, str) and asset_descriptors.strip():
+        try:
+            candidate = json.loads(asset_descriptors)
+            if isinstance(candidate, list):
+                parsed_descriptors = [item for item in candidate if isinstance(item, dict)]
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid source asset descriptors payload.")
+
     assets = [
-        await ingest_source_upload(request=request, upload=upload)
-        for upload in files[:8]
+        await ingest_source_upload(
+            request=request,
+            upload=upload,
+            descriptor=parsed_descriptors[idx] if idx < len(parsed_descriptors) else None,
+        )
+        for idx, upload in enumerate(files[:8])
     ]
     return {
         "status": "success",

@@ -59,19 +59,28 @@ const SIGNAL_JSON_PREVIEW = `{
 }`;
 
 const SCRIPT_EXPLAINER_TEXT = [
-  "Building script pack from your locked signal and render profile.",
+  "Building an artifact-aware script pack from the locked signal and render profile.",
   "",
-  "What happens now:",
-  "- Map claims to scenes",
-  "- Build narration focus + visual directives",
-  "- Add continuity hints and acceptance checks",
+  "Workflow architecture in this stage:",
+  "- Use the locked signal as the source-grounded truth layer",
+  "- Apply artifact policy, audience level, density, and taste controls",
+  "- Build scene roles, module structure, claim coverage, and visual directives",
+  "- Carry forward proof-linked source media where evidence can anchor later rendering",
+  "",
+  "Quality guardrails:",
+  "- Scene-level repair can patch weak planning before the pack is locked",
+  "- Constrained replan can run if mandatory coverage is still missing",
+  "- Later generation can still regenerate individual scenes without reopening the whole workflow",
   "",
   "Result:",
-  "- Scene-by-scene script ready for interleaved generation",
+  "- An artifact-aware script pack ready for interleaved generation and proof-aware rendering",
 ].join("\n");
 
 const SCRIPT_JSON_PREVIEW = `{
   "plan_id": "script-pack-...",
+  "planning_mode": "sequential",
+  "script_shape": "storyboard_grid",
+  "artifact_type": "storyboard_grid",
   "scene_count": 4,
   "scenes": [
     {
@@ -79,15 +88,59 @@ const SCRIPT_JSON_PREVIEW = `{
       "title": "...",
       "narration_focus": "...",
       "visual_prompt": "...",
-      "claim_refs": ["c1"]
+      "claim_refs": ["c1"],
+      "evidence_refs": ["e1"],
+      "render_strategy": "hybrid",
+      "source_media": [{ "asset_id": "page-2", "usage": "proof_clip" }],
+      "acceptance_checks": ["..."]
     }
-  ]
+  ],
+  "planner_qa_summary": {
+    "mode": "repaired",
+    "summary": "Artifact-aware plan repaired and locked with mandatory claim coverage."
+  }
 }`;
 
+const STREAM_EXPLAINER_TEXT = [
+  "Generation Stream runs from the locked script pack, not directly from raw source.",
+  "",
+  "What happens now:",
+  "- Queue scenes and preserve claim/evidence links",
+  "- Stream narration deltas into each scene card",
+  "- Attach visuals, proof media, and audio as they become ready",
+  "- Run per-scene QA and retry weak outputs before completion",
+  "",
+  "Workflow architecture:",
+  "- SSE events keep the studio live and incremental",
+  "- Traceability and proof metadata remain attached throughout",
+  "- Final bundle is assembled after the stream stabilizes",
+].join("\n");
+
+const STREAM_JSON_PREVIEW = `event: scene_queue_ready
+data: {
+  "scenes": [
+    { "scene_id": "scene-1", "title": "Hook", "claim_refs": ["c1"] }
+  ]
+}
+
+event: story_text_delta
+data: { "scene_id": "scene-1", "delta": "..." }
+
+event: diagram_ready
+data: { "scene_id": "scene-1", "url": "/static/assets/scene-1.png" }
+
+event: qa_status
+data: { "scene_id": "scene-1", "status": "PASS" }
+
+event: final_bundle_ready
+data: { "claim_traceability": { "claims_referenced": 6, "claims_total": 6 } }`;
+
 const SIGNAL_TYPEWRITER_DURATION_MS = 45000;
-const SCRIPT_TYPEWRITER_DURATION_MS = 20000;
-const PRIMARY_ACTION_CARD_CLASS = "h-auto w-full rounded-[24px] bg-slate-950 px-5 py-4 text-left text-white shadow-[0_18px_36px_rgba(15,23,42,0.18)] transition-transform hover:-translate-y-0.5 hover:bg-slate-900 disabled:opacity-100 disabled:bg-slate-300 disabled:text-slate-500 disabled:hover:translate-y-0";
+const SCRIPT_TYPEWRITER_DURATION_MS = 32000;
+const STREAM_TYPEWRITER_DURATION_MS = 26000;
+const PRIMARY_ACTION_CARD_CLASS = "group h-auto w-full rounded-[24px] bg-slate-950 px-5 py-4 text-left text-white shadow-[0_18px_36px_rgba(15,23,42,0.18)] transition-transform hover:-translate-y-0.5 hover:bg-slate-900 disabled:opacity-100 disabled:bg-slate-300 disabled:text-slate-500 disabled:hover:translate-y-0";
 const SECONDARY_ACTION_CARD_CLASS = "h-auto w-full rounded-[24px] border-slate-200 bg-slate-50 px-5 py-4 text-left text-slate-900 shadow-none transition-transform hover:-translate-y-0.5 hover:bg-slate-100 disabled:opacity-100 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:hover:translate-y-0";
+const PRIMARY_ACTION_LABEL_CLASS = "block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300 transition-colors group-disabled:text-slate-600";
 
 type SelectionTile = {
   value: string;
@@ -99,6 +152,9 @@ type SelectionTile = {
   iconClassName: string;
   selectedIconClassName: string;
 };
+
+const RENDER_PROFILE_TILE_CLASS = "rounded-[24px] border p-4 text-left transition-all duration-200";
+const RENDER_PROFILE_TILE_HOVER_CLASS = "hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]";
 
 const ARTIFACT_SELECTION_TILES: SelectionTile[] = [
   {
@@ -333,11 +389,12 @@ type SourceMediaViewModel = {
 
 type UploadedSourceAsset = {
   asset_id: string;
-  modality: 'audio' | 'image' | 'pdf_page';
+  modality: 'audio' | 'image' | 'pdf_page' | 'video';
   uri: string;
   mime_type?: string;
   title?: string;
   page_index?: number;
+  duration_ms?: number;
   metadata?: Record<string, unknown>;
 };
 
@@ -594,7 +651,7 @@ const asUploadedSourceAsset = (value: unknown): UploadedSourceAsset | null => {
   const candidate = value as Record<string, unknown>;
   const modality = candidate.modality;
   const uri = candidate.uri;
-  if (modality !== 'audio' && modality !== 'image' && modality !== 'pdf_page') {
+  if (modality !== 'audio' && modality !== 'image' && modality !== 'pdf_page' && modality !== 'video') {
     return null;
   }
   if (typeof uri !== 'string' || !uri.trim()) {
@@ -607,10 +664,36 @@ const asUploadedSourceAsset = (value: unknown): UploadedSourceAsset | null => {
     mime_type: typeof candidate.mime_type === 'string' ? candidate.mime_type : undefined,
     title: typeof candidate.title === 'string' ? candidate.title : undefined,
     page_index: typeof candidate.page_index === 'number' ? candidate.page_index : undefined,
+    duration_ms: typeof candidate.duration_ms === 'number' ? candidate.duration_ms : undefined,
     metadata: candidate.metadata && typeof candidate.metadata === 'object'
       ? candidate.metadata as Record<string, unknown>
       : undefined,
   };
+};
+
+const readVideoDurationMs = async (file: File): Promise<number | undefined> => {
+  if (typeof window === 'undefined' || !file.type.startsWith('video/')) {
+    return undefined;
+  }
+
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    const objectUrl = URL.createObjectURL(file);
+    const finalize = (value?: number) => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(value);
+    };
+
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => {
+      const duration = Number.isFinite(video.duration) && video.duration >= 0
+        ? Math.round(video.duration * 1000)
+        : undefined;
+      finalize(duration);
+    };
+    video.onerror = () => finalize(undefined);
+    video.src = objectUrl;
+  });
 };
 
 const actionInvalidatesGeneratedOutputs = (action?: string): boolean => (
@@ -671,6 +754,17 @@ export default function AdvancedStudio() {
   const [typedPreview, setTypedPreview] = useState('');
   const [typedScriptExplainer, setTypedScriptExplainer] = useState('');
   const [typedScriptPreview, setTypedScriptPreview] = useState('');
+  const [typedStreamExplainer, setTypedStreamExplainer] = useState('');
+  const [typedStreamPreview, setTypedStreamPreview] = useState('');
+  const [signalTypewriterArmed, setSignalTypewriterArmed] = useState(false);
+  const [scriptTypewriterArmed, setScriptTypewriterArmed] = useState(false);
+  const [streamTypewriterArmed, setStreamTypewriterArmed] = useState(false);
+  const [signalTypingComplete, setSignalTypingComplete] = useState(false);
+  const [scriptTypingComplete, setScriptTypingComplete] = useState(false);
+  const [streamTypingComplete, setStreamTypingComplete] = useState(false);
+  const [signalTypingRunId, setSignalTypingRunId] = useState(0);
+  const [scriptTypingRunId, setScriptTypingRunId] = useState(0);
+  const [streamTypingRunId, setStreamTypingRunId] = useState(0);
   const [scriptPresentationMode, setScriptPresentationMode] = useState<'review' | 'auto'>('auto');
 
   const [isGenerating, setIsGenerating] = useState(false);
@@ -696,6 +790,51 @@ export default function AdvancedStudio() {
   // Ref for the typewriter effect to track full text without causing infinite re-renders
   const fullTextBuffer = React.useRef<Record<string, string>>({});
   const sourceAssetsInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  const resetSignalPreviewRun = () => {
+    setTypedExplainer('');
+    setTypedPreview('');
+    setSignalTypewriterArmed(false);
+    setSignalTypingComplete(false);
+  };
+
+  const startSignalPreviewRun = () => {
+    setTypedExplainer('');
+    setTypedPreview('');
+    setSignalTypewriterArmed(true);
+    setSignalTypingComplete(false);
+    setSignalTypingRunId((prev) => prev + 1);
+  };
+
+  const resetScriptPreviewRun = () => {
+    setTypedScriptExplainer('');
+    setTypedScriptPreview('');
+    setScriptTypewriterArmed(false);
+    setScriptTypingComplete(false);
+  };
+
+  const startScriptPreviewRun = () => {
+    setTypedScriptExplainer('');
+    setTypedScriptPreview('');
+    setScriptTypewriterArmed(true);
+    setScriptTypingComplete(false);
+    setScriptTypingRunId((prev) => prev + 1);
+  };
+
+  const resetStreamPreviewRun = () => {
+    setTypedStreamExplainer('');
+    setTypedStreamPreview('');
+    setStreamTypewriterArmed(false);
+    setStreamTypingComplete(false);
+  };
+
+  const startStreamPreviewRun = () => {
+    setTypedStreamExplainer('');
+    setTypedStreamPreview('');
+    setStreamTypewriterArmed(true);
+    setStreamTypingComplete(false);
+    setStreamTypingRunId((prev) => prev + 1);
+  };
 
   const asStringArray = (value: unknown): string[] => (
     Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
@@ -779,6 +918,7 @@ export default function AdvancedStudio() {
           mime_type: asset.mime_type,
           title: asset.title,
           page_index: asset.page_index,
+          duration_ms: asset.duration_ms,
           metadata: asset.metadata,
         })),
       }
@@ -810,7 +950,14 @@ export default function AdvancedStudio() {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
       const formData = new FormData();
+      const assetDescriptors = await Promise.all(
+        files.map(async (file) => ({
+          filename: file.name,
+          duration_ms: await readVideoDurationMs(file),
+        }))
+      );
       files.forEach((file) => formData.append('files', file));
+      formData.append('asset_descriptors', JSON.stringify(assetDescriptors));
 
       const response = await fetch(`${apiUrl}/api/source-assets/upload`, {
         method: 'POST',
@@ -872,10 +1019,21 @@ export default function AdvancedStudio() {
       const currentMedia = Array.isArray(existing.source_media) ? existing.source_media : [];
       const existingIndex = currentMedia.findIndex(item => (
         item.asset_id === media.asset_id
-        && item.url === media.url
         && item.start_ms === media.start_ms
         && item.end_ms === media.end_ms
-        && item.page_index === media.page_index
+        && item.usage === media.usage
+        && (
+          item.url === media.url
+          || (
+            item.original_url === media.original_url
+            && item.page_index === media.page_index
+          )
+          || (
+            item.evidence_refs.length > 0
+            && media.evidence_refs.length > 0
+            && item.evidence_refs.some(ref => media.evidence_refs.includes(ref))
+          )
+        )
       ));
       const nextMedia = [...currentMedia];
       if (existingIndex >= 0) {
@@ -907,9 +1065,13 @@ export default function AdvancedStudio() {
       if (media.modality === 'pdf_page') score += 40;
       if (media.modality === 'image') score += 30;
       if (media.usage === 'region_crop') score += 20;
-      if (typeof media.page_index === 'number') score += 15;
+      if (typeof media.page_index === 'number' && media.page_index >= 1) score += 20;
+      if (typeof media.line_start === 'number') score += 12;
+      if (typeof media.line_end === 'number') score += 4;
+      if (typeof media.matched_excerpt === 'string' && media.matched_excerpt.trim()) score += 10;
       if (typeof media.start_ms === 'number') score += 5;
       if (media.modality === 'audio') score -= 5;
+      if (typeof media.page_index === 'number' && media.page_index < 1) score -= 25;
       return score;
     };
 
@@ -1019,14 +1181,13 @@ export default function AdvancedStudio() {
   }, [isExtracting]);
 
   React.useEffect(() => {
-    if (!isExtracting) {
-      setTypedExplainer('');
-      setTypedPreview('');
+    if (signalTypingRunId === 0) {
       return;
     }
 
     setTypedExplainer('');
     setTypedPreview('');
+    setSignalTypingComplete(false);
 
     const targetDurationMs = SIGNAL_TYPEWRITER_DURATION_MS;
     const tickMs = 60;
@@ -1045,23 +1206,22 @@ export default function AdvancedStudio() {
       setTypedPreview(SIGNAL_JSON_PREVIEW.slice(0, previewChars));
 
       if (cursor >= totalChars) {
+        setSignalTypingComplete(true);
         window.clearInterval(intervalId);
       }
     }, tickMs);
 
     return () => window.clearInterval(intervalId);
-  }, [isExtracting]);
+  }, [signalTypingRunId]);
 
   React.useEffect(() => {
-    const scriptTypingEnabled = isGeneratingScriptPack;
-    if (!scriptTypingEnabled) {
-      setTypedScriptExplainer('');
-      setTypedScriptPreview('');
+    if (scriptTypingRunId === 0) {
       return;
     }
 
     setTypedScriptExplainer('');
     setTypedScriptPreview('');
+    setScriptTypingComplete(false);
 
     const targetDurationMs = SCRIPT_TYPEWRITER_DURATION_MS;
     const tickMs = 60;
@@ -1079,12 +1239,75 @@ export default function AdvancedStudio() {
       setTypedScriptPreview(SCRIPT_JSON_PREVIEW.slice(0, previewChars));
 
       if (cursor >= totalChars) {
+        setScriptTypingComplete(true);
         window.clearInterval(intervalId);
       }
     }, tickMs);
 
     return () => window.clearInterval(intervalId);
-  }, [isGeneratingScriptPack, scriptPresentationMode]);
+  }, [scriptTypingRunId]);
+
+  React.useEffect(() => {
+    if (streamTypingRunId === 0) {
+      return;
+    }
+
+    setTypedStreamExplainer('');
+    setTypedStreamPreview('');
+    setStreamTypingComplete(false);
+
+    const targetDurationMs = STREAM_TYPEWRITER_DURATION_MS;
+    const tickMs = 60;
+    const totalChars = STREAM_EXPLAINER_TEXT.length + STREAM_JSON_PREVIEW.length;
+    const totalTicks = Math.max(1, Math.ceil(targetDurationMs / tickMs));
+    const charsPerTick = totalChars / totalTicks;
+    let cursor = 0;
+
+    const intervalId = window.setInterval(() => {
+      cursor = Math.min(totalChars, cursor + charsPerTick);
+      const shownChars = Math.floor(cursor);
+      const explainerChars = Math.min(shownChars, STREAM_EXPLAINER_TEXT.length);
+      const previewChars = Math.max(0, shownChars - STREAM_EXPLAINER_TEXT.length);
+      setTypedStreamExplainer(STREAM_EXPLAINER_TEXT.slice(0, explainerChars));
+      setTypedStreamPreview(STREAM_JSON_PREVIEW.slice(0, previewChars));
+
+      if (cursor >= totalChars) {
+        setStreamTypingComplete(true);
+        window.clearInterval(intervalId);
+      }
+    }, tickMs);
+
+    return () => window.clearInterval(intervalId);
+  }, [streamTypingRunId]);
+
+  React.useEffect(() => {
+    if (!extractedSignal || !signalTypingComplete) return;
+    setTypedExplainer('');
+    setTypedPreview('');
+    setSignalTypewriterArmed(false);
+  }, [extractedSignal, signalTypingComplete]);
+
+  React.useEffect(() => {
+    if (!scriptPack || !scriptTypingComplete) return;
+    setTypedScriptExplainer('');
+    setTypedScriptPreview('');
+    setScriptTypewriterArmed(false);
+  }, [scriptPack, scriptTypingComplete]);
+
+  React.useEffect(() => {
+    const streamOutputReady = Object.values(scenes).some((scene) => (
+      scene.text.trim().length > 0
+      || Boolean(scene.imageUrl)
+      || Boolean(scene.audioUrl)
+      || (scene.source_media?.length ?? 0) > 0
+      || scene.status === 'ready'
+      || scene.status === 'qa-failed'
+    ));
+    if (!streamOutputReady || !streamTypingComplete) return;
+    setTypedStreamExplainer('');
+    setTypedStreamPreview('');
+    setStreamTypewriterArmed(false);
+  }, [scenes, streamTypingComplete]);
 
   const openActionDialog = (stage: ActionDialogStage) => {
     setActionDialogStage(stage);
@@ -1096,10 +1319,11 @@ export default function AdvancedStudio() {
     setShowAmendHelp(false);
   };
 
-  const runExtraction = async () => {
+  const runExtraction = async (options: { armSignalPreview?: boolean } = {}) => {
     if (!hasSourceInput) {
       return false;
     }
+    const { armSignalPreview = false } = options;
 
     setAgentNotes([]);
     pushAgentNote('info', 'Extraction', 'Signal extraction started from source material.');
@@ -1109,6 +1333,13 @@ export default function AdvancedStudio() {
     setError('');
     setGenerationError('');
     setExtractedSignal(null);
+    if (armSignalPreview) {
+      startSignalPreviewRun();
+    } else {
+      resetSignalPreviewRun();
+    }
+    resetScriptPreviewRun();
+    resetStreamPreviewRun();
     setGenerationStatus('');
     clearGeneratedOutputs();
     setFidelityPreference('preview');
@@ -1208,8 +1439,25 @@ export default function AdvancedStudio() {
 
   const handleApplyRenderProfile = () => {
     setActivePanel('signal');
+    startSignalPreviewRun();
     pushAgentNote('info', 'Render Profile', 'Render profile ready. Waiting for lock confirmation.');
     openActionDialog('profile');
+  };
+
+  const handleRegenerateSignal = () => {
+    if (!hasSourceInput || isExtracting || isUploadingAssets) return;
+    setActivePanel('signal');
+    void runExtraction({ armSignalPreview: true });
+  };
+
+  const handleRegenerateScript = () => {
+    if (!scriptPack || isGeneratingScriptPack || isGenerating) return;
+    void handleGenerateScriptPack('review');
+  };
+
+  const handleRegenerateStream = () => {
+    if (isGenerating || !scriptPack || Object.keys(scenes).length === 0) return;
+    void handleGenerateStreamAction();
   };
 
   const handleProfileStepBack = () => {
@@ -1394,6 +1642,7 @@ export default function AdvancedStudio() {
         ? 'Generating script pack for review.'
         : 'Generating script pack for immediate streaming.'
     );
+    startScriptPreviewRun();
     setScriptPack(null);
     if (mode === 'review') {
       setActivePanel('script');
@@ -1574,6 +1823,7 @@ export default function AdvancedStudio() {
     setIsGenerating(true);
     setGenerationError('');
     setGenerationStatus(preparationMessage);
+    startStreamPreviewRun();
     if (!preserveExistingScenes) {
       setScenes({});
     }
@@ -2048,6 +2298,25 @@ export default function AdvancedStudio() {
       : signalStage === 'ready'
         ? 'Signal extraction complete.'
         : '';
+  const streamOutputReady = Object.values(scenes).some((scene) => (
+    scene.text.trim().length > 0
+    || Boolean(scene.imageUrl)
+    || Boolean(scene.audioUrl)
+    || (scene.source_media?.length ?? 0) > 0
+    || scene.status === 'ready'
+    || scene.status === 'qa-failed'
+  ));
+  const showSignalTypingPreview = signalTypewriterArmed
+    && signalStage !== 'error'
+    && (!extractedSignal || !signalTypingComplete);
+  const scriptPreviewFailed = scriptTypewriterArmed && !isGeneratingScriptPack && !scriptPack && generationError.trim().length > 0;
+  const showScriptTypingPreview = scriptTypewriterArmed
+    && !scriptPreviewFailed
+    && (!scriptPack || !scriptTypingComplete);
+  const streamPreviewFailed = streamTypewriterArmed && !isGenerating && !streamOutputReady && generationError.trim().length > 0;
+  const showStreamTypingPreview = streamTypewriterArmed
+    && !streamPreviewFailed
+    && (!streamOutputReady || !streamTypingComplete);
   const panelOrder: AdvancedPanel[] = ['source', 'profile', 'signal', 'script', 'stream'];
   const panelLabel: Record<AdvancedPanel, string> = {
     source: 'Extract Signal',
@@ -2265,10 +2534,10 @@ export default function AdvancedStudio() {
                   />
                   <Button
                     type="submit"
-                    className="h-auto w-full rounded-[24px] bg-slate-950 px-5 py-4 text-left text-white shadow-[0_18px_36px_rgba(15,23,42,0.18)] transition-transform hover:-translate-y-0.5 hover:bg-slate-900 disabled:opacity-100 disabled:bg-slate-300 disabled:text-slate-500 disabled:hover:translate-y-0"
+                    className={`${PRIMARY_ACTION_CARD_CLASS}`}
                   >
                     <span className="space-y-1 text-left">
-                      <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                      <span className={PRIMARY_ACTION_LABEL_CLASS}>
                         Assistant Action
                       </span>
                       <span className="block text-base font-semibold">Send Request</span>
@@ -2287,27 +2556,37 @@ export default function AdvancedStudio() {
           </div>
 
           <div className="space-y-6">
+        <div className="mx-auto max-w-4xl">
         <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
-          <CardContent className="pt-6 space-y-4">
-            <div className="overflow-x-auto">
-              <div className="min-w-[720px] gap-2 pb-1" style={{ display: 'flex' }}>
-                {panelOrder.map((panel) => (
-                  <button
-                    key={panel}
-                    type="button"
-                    onClick={() => setActivePanel(panel)}
-                    style={{ flex: '1 1 0%' }}
-                    className={`w-full rounded-md border px-3 py-2 text-center text-xs font-semibold transition hover:brightness-95 ${stageBadgeClass(panel)}`}
-                  >
-                    {panelLabel[panel]}
-                  </button>
-                ))}
+          <CardContent className="pt-6">
+            <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-center justify-between gap-3 px-1">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Workflow Stages</p>
+                <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+                  Active Flow
+                </span>
               </div>
+              <div className="overflow-x-auto">
+                <div className="min-w-[720px] gap-2 pb-1" style={{ display: 'flex' }}>
+                  {panelOrder.map((panel) => (
+                    <button
+                      key={panel}
+                      type="button"
+                      onClick={() => setActivePanel(panel)}
+                      style={{ flex: '1 1 0%' }}
+                      className={`w-full rounded-[18px] border px-3 py-2 text-center text-xs font-semibold transition hover:brightness-95 ${stageBadgeClass(panel)}`}
+                    >
+                      {panelLabel[panel]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <Progress value={stageProgress} className="h-2 bg-blue-100 [&>*]:bg-blue-500" />
+              <p className="px-1 text-xs text-slate-600">{activeStageNote}</p>
             </div>
-            <Progress value={stageProgress} className="h-2 bg-blue-100 [&>*]:bg-blue-500" />
-            <p className="text-xs text-slate-600">{activeStageNote}</p>
           </CardContent>
         </Card>
+        </div>
 
         <div className="relative min-h-[420px]">
           <div className="mx-auto max-w-4xl">
@@ -2317,7 +2596,7 @@ export default function AdvancedStudio() {
                   <CardHeader>
                     <CardTitle className="text-slate-900">1. Source Material</CardTitle>
                     <CardDescription className="text-slate-600">
-                      Start with source text, uploaded source assets, or both. Images and audio can flow into claim-level proof links; PDFs are accepted for extraction and page-linked proof viewing with matched excerpts when available.
+                      Start with source text, uploaded source assets, or both. Images and audio can flow into claim-level proof links; PDFs are accepted for extraction and page-linked proof viewing with matched excerpts when available; short videos are supported with transcript-first extraction.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -2332,7 +2611,7 @@ export default function AdvancedStudio() {
                           className="min-h-[280px] text-base bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
                         />
                         <p className="text-xs text-slate-500">
-                          Optional when uploaded assets already contain the source material. Use page-image uploads if you want crop-level proof on slides; PDFs now add page-linked excerpts when local text matching succeeds.
+                          Optional when uploaded assets already contain the source material. For video, paste transcript or captions here if the clip is longer than 2 minutes. Use page-image uploads if you want crop-level proof on slides; PDFs now add page-linked excerpts when local text matching succeeds.
                         </p>
                       </div>
                       <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -2345,15 +2624,15 @@ export default function AdvancedStudio() {
                               <div>
                                 <Label className="text-base text-slate-900">Source Assets</Label>
                                 <p className="text-xs uppercase tracking-[0.14em] text-slate-500">
-                                  PDFs, images, audio
+                                  PDFs, images, audio, video
                                 </p>
                               </div>
                             </div>
                             <p className="text-sm leading-6 text-slate-600">
-                              Upload proof-backed source files. PDFs drive extraction and page-linked proof, while per-page images still give the tightest crop-level evidence.
+                              Upload proof-backed source files. PDFs drive extraction and page-linked proof, per-page images still give the tightest crop-level evidence, and videos use transcript as the truth layer while frames resolve on-screen references and proof clips.
                             </p>
                             <div className="flex flex-wrap gap-2">
-                              {['image', 'audio', 'pdf'].map((kind) => (
+                              {['image', 'audio', 'video', 'pdf'].map((kind) => (
                                 <span
                                   key={kind}
                                   className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600"
@@ -2368,7 +2647,7 @@ export default function AdvancedStudio() {
                               id="sourceAssets"
                               ref={sourceAssetsInputRef}
                               type="file"
-                              accept="image/*,audio/*,application/pdf"
+                              accept="image/*,audio/*,video/*,application/pdf"
                               multiple
                               onChange={handleSourceAssetUpload}
                               disabled={isUploadingAssets || isExtracting}
@@ -2420,6 +2699,7 @@ export default function AdvancedStudio() {
                                   <p className="text-xs text-slate-500">
                                     {asset.mime_type ? `${asset.mime_type}` : 'Source asset'}
                                     {typeof asset.page_index === 'number' ? ` • page ${asset.page_index}` : ''}
+                                    {typeof asset.duration_ms === 'number' ? ` • ${formatMilliseconds(asset.duration_ms)}` : ''}
                                   </p>
                                 </div>
                                 <Button
@@ -2445,7 +2725,7 @@ export default function AdvancedStudio() {
                         >
                           <span className="flex w-full items-center justify-between gap-4">
                             <span className="space-y-1 text-left">
-                              <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                              <span className={PRIMARY_ACTION_LABEL_CLASS}>
                                 Primary Action
                               </span>
                               <span className="block text-base font-semibold">
@@ -2520,28 +2800,26 @@ export default function AdvancedStudio() {
                                   key={tile.value}
                                   type="button"
                                   onClick={() => setArtifactType(tile.value)}
-                                  className={`rounded-[28px] border p-4 text-left transition-all duration-200 ${
+                                  className={`${RENDER_PROFILE_TILE_CLASS} ${
                                     tile.baseClassName
-                                  } ${isSelected ? tile.selectedClassName : 'hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]'}`}
+                                  } ${isSelected ? tile.selectedClassName : RENDER_PROFILE_TILE_HOVER_CLASS}`}
                                 >
-                                  <div className="mb-6 flex items-start justify-between gap-3">
+                                  <div className="mb-4 flex items-center gap-3">
                                     <span
-                                      className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl ${
+                                      className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
                                         isSelected ? tile.selectedIconClassName : tile.iconClassName
                                       }`}
                                     >
                                       <Icon className="h-5 w-5" />
                                     </span>
-                                    {isSelected ? (
-                                      <span className="rounded-full border border-slate-900/10 bg-white/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-700">
-                                        Selected
-                                      </span>
-                                    ) : null}
+                                    <div>
+                                      <p className="font-semibold">{tile.title}</p>
+                                      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-600">
+                                        {isSelected ? 'Selected' : 'Tap to select'}
+                                      </p>
+                                    </div>
                                   </div>
-                                  <div className="space-y-1.5">
-                                    <p className="text-lg font-semibold">{tile.title}</p>
-                                    <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
-                                  </div>
+                                  <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
                                 </button>
                               );
                             })}
@@ -2558,9 +2836,9 @@ export default function AdvancedStudio() {
                                   key={tile.value}
                                   type="button"
                                   onClick={() => setVisualMode(tile.value)}
-                                  className={`rounded-[26px] border p-4 text-left transition-all duration-200 ${
+                                  className={`${RENDER_PROFILE_TILE_CLASS} ${
                                     tile.baseClassName
-                                  } ${isSelected ? tile.selectedClassName : 'hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]'}`}
+                                  } ${isSelected ? tile.selectedClassName : RENDER_PROFILE_TILE_HOVER_CLASS}`}
                                 >
                                   <div className="mb-4 flex items-center gap-3">
                                     <span
@@ -2572,8 +2850,8 @@ export default function AdvancedStudio() {
                                     </span>
                                     <div>
                                       <p className="font-semibold">{tile.title}</p>
-                                      <p className="text-xs uppercase tracking-[0.14em] text-slate-600">
-                                        {isSelected ? 'Active mode' : 'Tap to select'}
+                                      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-600">
+                                        {isSelected ? 'Selected' : 'Tap to select'}
                                       </p>
                                     </div>
                                   </div>
@@ -2606,9 +2884,9 @@ export default function AdvancedStudio() {
                                   key={tile.value}
                                   type="button"
                                   onClick={() => setAudienceLevel(tile.value)}
-                                  className={`rounded-[26px] border p-4 text-left transition-all duration-200 ${
+                                  className={`${RENDER_PROFILE_TILE_CLASS} ${
                                     tile.baseClassName
-                                  } ${isSelected ? tile.selectedClassName : 'hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]'}`}
+                                  } ${isSelected ? tile.selectedClassName : RENDER_PROFILE_TILE_HOVER_CLASS}`}
                                 >
                                   <div className="mb-4 flex items-center gap-3">
                                     <span
@@ -2620,8 +2898,8 @@ export default function AdvancedStudio() {
                                     </span>
                                     <div>
                                       <p className="font-semibold">{tile.title}</p>
-                                      <p className="text-xs uppercase tracking-[0.14em] text-slate-600">
-                                        {isSelected ? 'Active level' : 'Tap to select'}
+                                      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-600">
+                                        {isSelected ? 'Selected' : 'Tap to select'}
                                       </p>
                                     </div>
                                   </div>
@@ -2668,9 +2946,9 @@ export default function AdvancedStudio() {
                                   key={tile.value}
                                   type="button"
                                   onClick={() => setDensity(tile.value)}
-                                  className={`rounded-[26px] border p-4 text-left transition-all duration-200 ${
+                                  className={`${RENDER_PROFILE_TILE_CLASS} ${
                                     tile.baseClassName
-                                  } ${isSelected ? tile.selectedClassName : 'hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]'}`}
+                                  } ${isSelected ? tile.selectedClassName : RENDER_PROFILE_TILE_HOVER_CLASS}`}
                                 >
                                   <div className="mb-4 flex items-center gap-3">
                                     <span
@@ -2682,8 +2960,8 @@ export default function AdvancedStudio() {
                                     </span>
                                     <div>
                                       <p className="font-semibold">{tile.title}</p>
-                                      <p className="text-xs uppercase tracking-[0.14em] text-slate-600">
-                                        {isSelected ? 'Active density' : 'Tap to select'}
+                                      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-600">
+                                        {isSelected ? 'Selected' : 'Tap to select'}
                                       </p>
                                     </div>
                                   </div>
@@ -2704,9 +2982,9 @@ export default function AdvancedStudio() {
                                   key={tile.value}
                                   type="button"
                                   onClick={() => setTasteBar(tile.value)}
-                                  className={`rounded-[26px] border p-4 text-left transition-all duration-200 ${
+                                  className={`${RENDER_PROFILE_TILE_CLASS} ${
                                     tile.baseClassName
-                                  } ${isSelected ? tile.selectedClassName : 'hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]'}`}
+                                  } ${isSelected ? tile.selectedClassName : RENDER_PROFILE_TILE_HOVER_CLASS}`}
                                 >
                                   <div className="mb-4 flex items-center gap-3">
                                     <span
@@ -2718,8 +2996,8 @@ export default function AdvancedStudio() {
                                     </span>
                                     <div>
                                       <p className="font-semibold">{tile.title}</p>
-                                      <p className="text-xs uppercase tracking-[0.14em] text-slate-600">
-                                        {isSelected ? 'Active taste bar' : 'Tap to select'}
+                                      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-600">
+                                        {isSelected ? 'Selected' : 'Tap to select'}
                                       </p>
                                     </div>
                                   </div>
@@ -2789,7 +3067,7 @@ export default function AdvancedStudio() {
                       >
                         <span className="flex w-full items-center justify-between gap-4">
                           <span className="space-y-1 text-left">
-                            <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                            <span className={PRIMARY_ACTION_LABEL_CLASS}>
                               Primary Action
                             </span>
                             <span className="block text-base font-semibold">
@@ -2826,7 +3104,7 @@ export default function AdvancedStudio() {
                     <CardDescription className="text-slate-600">Style-agnostic structured extraction from the source document.</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    {extractedSignal ? (
+                    {extractedSignal && !showSignalTypingPreview ? (
                       <div className="space-y-4">
                         <div className="bg-slate-900 text-slate-50 p-4 rounded-md overflow-auto max-h-[460px] text-xs font-mono">
                           <pre>{JSON.stringify(extractedSignal, null, 2)}</pre>
@@ -2838,7 +3116,7 @@ export default function AdvancedStudio() {
                           </p>
                         </div>
                       </div>
-                    ) : isExtracting ? (
+                    ) : showSignalTypingPreview ? (
                       <div className="space-y-4">
                         <Progress value={extractProgress} className="h-2 bg-amber-100 [&>*]:bg-amber-500" />
                         <p className="text-sm text-slate-700">{extractionPhaseText}</p>
@@ -2870,7 +3148,7 @@ export default function AdvancedStudio() {
                         disabled={!extractedSignal}
                       >
                         <span className="space-y-1 text-left">
-                          <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                          <span className={PRIMARY_ACTION_LABEL_CLASS}>
                             Primary Action
                           </span>
                           <span className="block text-base font-semibold">Confirm Signal</span>
@@ -2880,13 +3158,14 @@ export default function AdvancedStudio() {
                         type="button"
                         variant="outline"
                         className={SECONDARY_ACTION_CARD_CLASS}
-                        onClick={() => setActivePanel(collapseTarget.signal)}
+                        onClick={handleRegenerateSignal}
+                        disabled={!hasSourceInput || isExtracting || isUploadingAssets}
                       >
                         <span className="space-y-1 text-left">
                           <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
                             Secondary Action
                           </span>
-                          <span className="block text-base font-semibold">Collapse Window</span>
+                          <span className="block text-base font-semibold">Regenerate Signal</span>
                         </span>
                       </Button>
                     </div>
@@ -2907,7 +3186,7 @@ export default function AdvancedStudio() {
                       <Button className={PRIMARY_ACTION_CARD_CLASS} size="lg" onClick={() => void handleGenerateStreamAction()} disabled={isGenerating || !workflowSnapshot?.ready_for_stream || !scriptPack || isGeneratingScriptPack}>
                         <span className="flex w-full items-center justify-between gap-4">
                           <span className="space-y-1 text-left">
-                            <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                            <span className={PRIMARY_ACTION_LABEL_CLASS}>
                               Primary Action
                             </span>
                             <span className="block text-base font-semibold">
@@ -2935,16 +3214,34 @@ export default function AdvancedStudio() {
                         type="button"
                         variant="outline"
                         className={SECONDARY_ACTION_CARD_CLASS}
-                        onClick={() => setActivePanel(collapseTarget.stream)}
+                        onClick={handleRegenerateStream}
+                        disabled={isGenerating || !scriptPack || Object.keys(scenes).length === 0}
                       >
                         <span className="space-y-1 text-left">
                           <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
                             Secondary Action
                           </span>
-                          <span className="block text-base font-semibold">Collapse Window</span>
+                          <span className="block text-base font-semibold">Regenerate Stream</span>
                         </span>
                       </Button>
                     </div>
+                    {showStreamTypingPreview && (
+                      <div className="space-y-4">
+                        <div className="p-4 bg-indigo-50 text-indigo-950 rounded-md border border-indigo-200">
+                          <h4 className="font-semibold mb-2">Orchestrating Generation Stream...</h4>
+                          <p className="text-sm whitespace-pre-wrap font-mono leading-6">
+                            {typedStreamExplainer}
+                            <span className="animate-pulse">|</span>
+                          </p>
+                        </div>
+                        <div className="bg-slate-900 text-slate-50 p-4 rounded-md overflow-auto max-h-[360px] text-xs font-mono">
+                          <pre>
+                            {typedStreamPreview}
+                            <span className="animate-pulse">|</span>
+                          </pre>
+                        </div>
+                      </div>
+                    )}
                     {generationStatus && (
                       <div className="p-4 bg-blue-50 text-blue-900 rounded-md border border-blue-200">
                         <h4 className="font-semibold mb-1">Generation Status</h4>
@@ -2973,7 +3270,7 @@ export default function AdvancedStudio() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    {scriptPack ? (
+                    {scriptPack && !showScriptTypingPreview ? (
                       <div className="space-y-3">
                         <div className="bg-slate-900 text-slate-50 p-4 rounded-md overflow-auto max-h-[460px] text-xs font-mono">
                           <pre>{JSON.stringify(scriptPack, null, 2)}</pre>
@@ -2982,7 +3279,7 @@ export default function AdvancedStudio() {
                           Change render profile settings and run generation again to regenerate this script pack.
                         </p>
                       </div>
-                    ) : isGeneratingScriptPack ? (
+                    ) : showScriptTypingPreview ? (
                       <div className="space-y-4">
                         <div className="p-4 bg-blue-50 text-blue-900 rounded-md border border-blue-200">
                           <h4 className="font-semibold mb-2">Drafting Script Pack...</h4>
@@ -3013,7 +3310,7 @@ export default function AdvancedStudio() {
                       >
                         <span className="flex w-full items-center justify-between gap-4">
                           <span className="space-y-1 text-left">
-                            <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                            <span className={PRIMARY_ACTION_LABEL_CLASS}>
                               Primary Action
                             </span>
                             <span className="block text-base font-semibold">
@@ -3029,13 +3326,14 @@ export default function AdvancedStudio() {
                         type="button"
                         variant="outline"
                         className={SECONDARY_ACTION_CARD_CLASS}
-                        onClick={() => setActivePanel(collapseTarget.script)}
+                        onClick={handleRegenerateScript}
+                        disabled={isGeneratingScriptPack || isGenerating || !scriptPack}
                       >
                         <span className="space-y-1 text-left">
                           <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
                             Secondary Action
                           </span>
-                          <span className="block text-base font-semibold">Collapse Window</span>
+                          <span className="block text-base font-semibold">Regenerate Script</span>
                         </span>
                       </Button>
                     </div>

@@ -4,6 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 import mimetypes
 import re
+from urllib.parse import urlparse
 from difflib import SequenceMatcher
 from uuid import uuid4
 
@@ -22,6 +23,7 @@ except Exception:  # pragma: no cover - optional dependency at runtime
 _SUPPORTED_MODALITIES = {
     "image/": "image",
     "audio/": "audio",
+    "video/": "video",
 }
 
 _SUPPORTED_EXACT_MIME_TYPES = {
@@ -53,7 +55,7 @@ def _resolve_modality(filename: str, content_type: str | None) -> str:
     raise HTTPException(
         status_code=400,
         detail=(
-            "Unsupported source asset type. Upload image, audio, or PDF files only."
+            "Unsupported source asset type. Upload image, audio, video, or PDF files only."
         ),
     )
 
@@ -62,6 +64,7 @@ async def ingest_source_upload(
     *,
     request: Request,
     upload: UploadFile,
+    descriptor: dict | None = None,
 ) -> SourceAssetSchema:
     original_name = Path(upload.filename or "source_asset").name
     if not original_name:
@@ -97,6 +100,12 @@ async def ingest_source_upload(
         "original_filename": original_name,
         "size_bytes": size_bytes,
     }
+    duration_ms = None
+    if isinstance(descriptor, dict):
+        descriptor_duration = descriptor.get("duration_ms")
+        if isinstance(descriptor_duration, (int, float)) and descriptor_duration >= 0:
+            duration_ms = int(descriptor_duration)
+            metadata["duration_ms"] = duration_ms
     if modality == "pdf_page":
         extracted_text, page_count = _extract_pdf_text(stored_path)
         if extracted_text:
@@ -110,6 +119,7 @@ async def ingest_source_upload(
         uri=f"{base_url(request)}/static/assets/{stored_name}",
         mime_type=mime_type,
         title=original_name,
+        duration_ms=duration_ms,
         metadata=metadata,
     )
 
@@ -156,6 +166,26 @@ def _extract_pdf_page_text(path_str: str, page_index: int) -> str:
         return (reader.pages[page_index - 1].extract_text() or "").strip()
     except Exception:
         return ""
+
+
+@lru_cache(maxsize=32)
+def _extract_pdf_pages_text(path_str: str) -> tuple[str, ...]:
+    if PdfReader is None:
+        return ()
+
+    try:
+        reader = PdfReader(path_str)
+    except Exception:
+        return ()
+
+    pages: list[str] = []
+    for page in reader.pages[:200]:
+        try:
+            text = (page.extract_text() or "").strip()
+        except Exception:
+            text = ""
+        pages.append(text)
+    return tuple(pages)
 
 
 def _normalize_match_text(text: str) -> str:
@@ -232,7 +262,7 @@ def resolve_pdf_proof_locator(
     transcript_text: str | None = None,
     visual_context: str | None = None,
 ) -> dict[str, int | str] | None:
-    if PdfReader is None or page_index is None or page_index < 1:
+    if PdfReader is None:
         return None
 
     source_path = Path(asset_ref).expanduser().resolve() if asset_ref and not str(asset_ref).startswith(("http://", "https://", "/static/")) else None
@@ -247,21 +277,48 @@ def resolve_pdf_proof_locator(
     if source_path is None or source_path.suffix.lower() != ".pdf":
         return None
 
-    page_text = _extract_pdf_page_text(str(source_path), page_index)
-    if not page_text:
-        return None
-
     query_candidates = [
         quote_text or "",
         transcript_text or "",
         visual_context or "",
     ]
-    for query_text in query_candidates:
-        if not str(query_text or "").strip():
+
+    def try_page(candidate_page_index: int) -> dict[str, int | str] | None:
+        page_text = _extract_pdf_page_text(str(source_path), candidate_page_index)
+        if not page_text:
+            return None
+        for query_text in query_candidates:
+            if not str(query_text or "").strip():
+                continue
+            match = locate_excerpt_in_page_text(page_text=page_text, query_text=query_text)
+            if match is not None:
+                return {
+                    "page_index": candidate_page_index,
+                    **match,
+                }
+        return None
+
+    if page_index is not None and page_index >= 1:
+        direct_match = try_page(page_index)
+        if direct_match is not None:
+            return direct_match
+
+    pages_text = _extract_pdf_pages_text(str(source_path))
+    if not pages_text:
+        return None
+
+    for resolved_page_index, page_text in enumerate(pages_text, start=1):
+        if not page_text:
             continue
-        match = locate_excerpt_in_page_text(page_text=page_text, query_text=query_text)
-        if match is not None:
-            return match
+        for query_text in query_candidates:
+            if not str(query_text or "").strip():
+                continue
+            match = locate_excerpt_in_page_text(page_text=page_text, query_text=query_text)
+            if match is not None:
+                return {
+                    "page_index": resolved_page_index,
+                    **match,
+                }
 
     return None
 
@@ -303,3 +360,62 @@ def best_effort_manifest_text(source_manifest: SourceManifestSchema | dict | Non
         return "", None
 
     return "\n\n".join(sections).strip(), "asset_embedded_text"
+
+
+def validate_video_manifest_constraints(
+    *,
+    source_manifest: SourceManifestSchema | dict | None,
+    source_text: str = "",
+    normalized_source_text: str = "",
+) -> str | None:
+    if source_manifest is None:
+        return None
+
+    manifest: SourceManifestSchema
+    if isinstance(source_manifest, SourceManifestSchema):
+        manifest = source_manifest
+    elif isinstance(source_manifest, dict):
+        try:
+            manifest = SourceManifestSchema.model_validate(source_manifest)
+        except Exception:
+            return None
+    else:
+        return None
+
+    has_transcript_layer = bool(str(source_text or "").strip()) or bool(str(normalized_source_text or "").strip())
+
+    def _is_remote_youtube_asset(asset: SourceAssetSchema) -> bool:
+        raw_uri = str(asset.uri or "").strip()
+        if not raw_uri:
+            return False
+        try:
+            host = urlparse(raw_uri).netloc.lower()
+        except Exception:
+            return False
+        return any(domain in host for domain in ("youtube.com", "youtu.be", "youtube-nocookie.com"))
+
+    for asset in manifest.assets:
+        if asset.modality != "video":
+            continue
+        asset_has_transcript = has_transcript_layer or bool(str(asset.transcript_text or "").strip())
+        duration_ms = asset.duration_ms
+        if duration_ms is None and isinstance(asset.metadata, dict):
+            raw_duration = asset.metadata.get("duration_ms")
+            if isinstance(raw_duration, (int, float)) and raw_duration >= 0:
+                duration_ms = int(raw_duration)
+
+        if duration_ms is None:
+            if _is_remote_youtube_asset(asset) and asset_has_transcript:
+                continue
+            return (
+                "Video uploads require readable duration metadata. Re-upload from a browser that can read the clip "
+                "duration, or provide the content as text/transcript instead."
+            )
+        if duration_ms > 10 * 60 * 1000:
+            return "Video uploads are currently limited to 10 minutes."
+        if duration_ms > 2 * 60 * 1000 and not asset_has_transcript:
+            return (
+                "Videos longer than 2 minutes require transcript or captions. Paste the transcript into Document Text "
+                "or attach a video asset that already contains transcript text."
+            )
+    return None
