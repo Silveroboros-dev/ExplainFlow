@@ -13,6 +13,7 @@ from app.schemas.requests import (
     QuickArtifactRequest,
     QuickBlockOverrideRequest,
     QuickReelRequest,
+    QuickVideoRequest,
     QuickSourceIndexRequest,
     RegenerateSceneRequest,
     ScriptPackRequest,
@@ -240,6 +241,12 @@ async def generate_quick_artifact(payload: QuickArtifactRequest, request: Reques
 @router.post("/generate-quick-reel")
 async def generate_quick_reel(payload: QuickReelRequest):
     result = await agent.generate_quick_reel(payload)
+    return _service_response(result, error_fallback=500)
+
+
+@router.post("/generate-quick-video")
+async def generate_quick_video(payload: QuickVideoRequest, request: Request):
+    result = await agent.generate_quick_video(payload, request=request)
     return _service_response(result, error_fallback=500)
 
 

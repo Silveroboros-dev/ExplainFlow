@@ -107,6 +107,28 @@ class QuickReelSchema(BaseModel):
     segments: list[QuickReelSegmentSchema] = Field(default_factory=list)
 
 
+class QuickVideoSegmentSchema(BaseModel):
+    segment_id: str
+    block_id: str
+    title: str
+    caption_text: str
+    voiceover_url: str | None = None
+    visual_url: str | None = None
+    source_video_url: str | None = None
+    source_start_ms: int | None = None
+    source_end_ms: int | None = None
+    duration_ms: int | None = None
+    render_mode: Literal["image_only", "image_plus_clip", "clip_only"]
+
+
+class QuickVideoSchema(BaseModel):
+    video_id: str
+    status: Literal["ready"] = "ready"
+    video_url: str
+    duration_ms: int | None = None
+    segments: list[QuickVideoSegmentSchema] = Field(default_factory=list)
+
+
 class QuickArtifactSchema(BaseModel):
     artifact_id: str
     title: str
@@ -116,6 +138,7 @@ class QuickArtifactSchema(BaseModel):
     hero_direction: str
     hero_image_url: str | None = None
     reel: QuickReelSchema | None = None
+    video: QuickVideoSchema | None = None
     blocks: list[QuickArtifactBlockSchema] = Field(default_factory=list)
 
 
@@ -139,6 +162,12 @@ class QuickSourceIndexRequest(BaseModel):
 
 
 class QuickReelRequest(BaseModel):
+    artifact: QuickArtifactSchema | dict[str, Any]
+    source_manifest: SourceManifestSchema | None = None
+    content_signal: dict[str, Any] = Field(default_factory=dict)
+
+
+class QuickVideoRequest(BaseModel):
     artifact: QuickArtifactSchema | dict[str, Any]
     source_manifest: SourceManifestSchema | None = None
     content_signal: dict[str, Any] = Field(default_factory=dict)

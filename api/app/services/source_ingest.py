@@ -31,6 +31,8 @@ _SUPPORTED_EXACT_MIME_TYPES = {
     "application/pdf": "pdf_page",
 }
 MAX_SOURCE_UPLOAD_BYTES_DEFAULT = 100 * 1024 * 1024
+MAX_PDF_INGEST_PAGES_DEFAULT = 24
+MAX_PDF_INGEST_CHARS_DEFAULT = 20000
 
 
 def _guess_mime_type(filename: str, fallback: str | None = None) -> str:
@@ -45,6 +47,24 @@ def _max_source_upload_bytes() -> int:
     except Exception:
         parsed = MAX_SOURCE_UPLOAD_BYTES_DEFAULT
     return max(parsed, 1024 * 1024)
+
+
+def _max_pdf_ingest_pages() -> int:
+    raw_value = os.getenv("EXPLAINFLOW_MAX_PDF_INGEST_PAGES", str(MAX_PDF_INGEST_PAGES_DEFAULT)).strip()
+    try:
+        parsed = int(raw_value)
+    except Exception:
+        parsed = MAX_PDF_INGEST_PAGES_DEFAULT
+    return max(1, parsed)
+
+
+def _max_pdf_ingest_chars() -> int:
+    raw_value = os.getenv("EXPLAINFLOW_MAX_PDF_INGEST_CHARS", str(MAX_PDF_INGEST_CHARS_DEFAULT)).strip()
+    try:
+        parsed = int(raw_value)
+    except Exception:
+        parsed = MAX_PDF_INGEST_CHARS_DEFAULT
+    return max(2000, parsed)
 
 
 def _resolve_modality(filename: str, content_type: str | None) -> str:
@@ -156,17 +176,29 @@ def _extract_pdf_text(path: Path) -> tuple[str, int | None]:
 
     page_count = len(reader.pages)
     sections: list[str] = []
-    for page in reader.pages[:80]:
+    max_pages = _max_pdf_ingest_pages()
+    max_chars = _max_pdf_ingest_chars()
+    chars_collected = 0
+
+    for page in reader.pages[:max_pages]:
         try:
             text = (page.extract_text() or "").strip()
         except Exception:
             text = ""
         if text:
-            sections.append(text)
+            remaining_chars = max_chars - chars_collected
+            if remaining_chars <= 0:
+                break
+            chunk = text[:remaining_chars].strip()
+            if chunk:
+                sections.append(chunk)
+                chars_collected += len(chunk)
+        if chars_collected >= max_chars:
+            break
 
     recovered = "\n\n".join(sections).strip()
-    if len(recovered) > 40000:
-        recovered = recovered[:40000]
+    if len(recovered) > max_chars:
+        recovered = recovered[:max_chars]
     return recovered, page_count
 
 

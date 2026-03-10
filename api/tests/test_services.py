@@ -22,6 +22,9 @@ from app.schemas.requests import (
     QuickArtifactSchema,
     QuickBlockOverrideRequest,
     QuickReelRequest,
+    QuickVideoRequest,
+    QuickVideoSchema,
+    ScriptPack,
     ScriptPackRequest,
     ScriptPackScene,
     SignalExtractionRequest,
@@ -41,6 +44,7 @@ from app.services.interleaved_parser import (
 )
 from app.services.source_ingest import locate_excerpt_in_page_text
 from app.services.source_ingest import validate_video_manifest_constraints
+from app.services.video_pipeline import build_quick_video_segment
 
 
 class FakeResponse:
@@ -661,7 +665,247 @@ def test_generate_quick_reel_builds_ordered_segments_from_blocks() -> None:
     assert artifact.reel.segments[0].caption_text == "Lead with the reveal. Show the chart bend immediately."
 
 
-def test_populate_quick_block_visuals_generates_only_for_blocks_without_source_media() -> None:
+def test_build_quick_video_segment_prefers_local_proof_clip_and_generated_visual() -> None:
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [],
+        "query_string": b"",
+        "client": ("testclient", 50000),
+        "server": ("127.0.0.1", 8000),
+        "scheme": "http",
+    }
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    request = Request(scope, receive)
+
+    artifact = QuickArtifactSchema.model_validate(
+        {
+            "artifact_id": "artifact-video",
+            "title": "Video artifact",
+            "subtitle": "Sub",
+            "summary": "Summary",
+            "visual_style": "hybrid",
+            "hero_direction": "Hero",
+            "reel": {
+                "reel_id": "artifact-video-reel",
+                "title": "Video artifact proof reel",
+                "summary": "Three segments.",
+                "segments": [
+                    {
+                        "segment_id": "artifact-video-segment-1",
+                        "block_id": "block-1",
+                        "title": "Proof clip",
+                        "render_mode": "hybrid",
+                        "caption_text": "Explain the clip, then show the proof.",
+                        "claim_refs": ["c1"],
+                        "evidence_refs": ["e1"],
+                        "primary_media": {
+                            "asset_id": "video-1",
+                            "modality": "video",
+                            "usage": "proof_clip",
+                            "claim_refs": ["c1"],
+                            "evidence_refs": ["e1"],
+                            "start_ms": 1000,
+                            "end_ms": 5000,
+                        },
+                        "fallback_image_url": "http://127.0.0.1:8000/static/assets/generated.png",
+                        "start_ms": 1000,
+                        "end_ms": 5000,
+                        "timing_inferred": False,
+                    }
+                ],
+            },
+            "blocks": [],
+        }
+    )
+
+    with patch("app.services.video_pipeline.generate_audio_and_get_url", return_value="http://127.0.0.1:8000/static/assets/voice.mp3") as audio_mock, patch(
+        "app.services.video_pipeline._audio_duration_ms",
+        return_value=2400,
+    ), patch(
+        "app.services.video_pipeline.asset_path_from_reference",
+        side_effect=lambda ref: Path("/tmp/demo.mp4") if ref else None,
+    ):
+        segment = build_quick_video_segment(
+            request=request,
+            artifact=artifact,
+            segment=artifact.reel.segments[0],
+            source_manifest={
+                "assets": [
+                    {
+                        "asset_id": "video-1",
+                        "modality": "video",
+                        "uri": "http://127.0.0.1:8000/static/assets/source.mp4",
+                        "duration_ms": 30000,
+                    }
+                ]
+            },
+        )
+
+    assert segment.render_mode == "image_plus_clip"
+    assert segment.voiceover_url == "http://127.0.0.1:8000/static/assets/voice.mp3"
+    assert segment.visual_url == "http://127.0.0.1:8000/static/assets/generated.png"
+    assert segment.source_video_url == "http://127.0.0.1:8000/static/assets/source.mp4"
+    assert segment.source_start_ms == 1000
+    assert segment.source_end_ms == 5000
+    assert segment.duration_ms == 6400
+    assert audio_mock.call_args.kwargs["playback_rate"] == 1.1
+
+
+def test_build_quick_video_segment_uses_artifact_block_image_when_reel_fallback_missing() -> None:
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [],
+        "query_string": b"",
+        "client": ("testclient", 50000),
+        "server": ("127.0.0.1", 8000),
+        "scheme": "http",
+    }
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    request = Request(scope, receive)
+    artifact = QuickArtifactSchema.model_validate(
+        {
+            "artifact_id": "artifact-video",
+            "title": "Prompt-only artifact",
+            "subtitle": "Sub",
+            "summary": "Summary",
+            "visual_style": "diagram",
+            "hero_direction": "Hero",
+            "reel": {
+                "reel_id": "artifact-video-reel",
+                "title": "Video artifact proof reel",
+                "summary": "One segment.",
+                "segments": [
+                    {
+                        "segment_id": "artifact-video-segment-1",
+                        "block_id": "block-1",
+                        "title": "Generated panel",
+                        "render_mode": "generated_image",
+                        "caption_text": "Explain the generated visual.",
+                        "claim_refs": [],
+                        "evidence_refs": [],
+                        "fallback_image_url": None,
+                        "timing_inferred": False,
+                    }
+                ],
+            },
+            "blocks": [
+                {
+                    "block_id": "block-1",
+                    "label": "Hook",
+                    "title": "Generated panel",
+                    "body": "Explain the generated visual.",
+                    "bullets": [],
+                    "visual_direction": "Use the generated visual.",
+                    "image_url": "http://127.0.0.1:8000/static/assets/generated.png",
+                    "emphasis": "hook",
+                    "claim_refs": [],
+                    "evidence_refs": [],
+                    "source_media": [],
+                }
+            ],
+        }
+    )
+
+    with patch("app.services.video_pipeline.generate_audio_and_get_url", return_value=""), patch(
+        "app.services.video_pipeline.asset_path_from_reference",
+        side_effect=lambda ref: Path("/tmp/generated.png") if ref else None,
+    ):
+        segment = build_quick_video_segment(
+            request=request,
+            artifact=artifact,
+            segment=artifact.reel.segments[0],
+            source_manifest=None,
+        )
+
+    assert segment.render_mode == "image_only"
+    assert segment.visual_url == "http://127.0.0.1:8000/static/assets/generated.png"
+
+
+def test_generate_quick_video_builds_reel_if_missing_and_attaches_video() -> None:
+    agent = GeminiStoryAgent()
+
+    with patch(
+        "app.services.gemini_story_agent.build_quick_video",
+        return_value=QuickVideoSchema(
+            video_id="artifact-video-1",
+            video_url="http://127.0.0.1:8000/static/assets/quick_video_demo.mp4",
+            duration_ms=12345,
+            segments=[],
+        ),
+    ):
+        result = asyncio.run(
+            agent.generate_quick_video(
+                QuickVideoRequest(
+                    artifact={
+                        "artifact_id": "artifact-video",
+                        "title": "Battery launch brief",
+                        "subtitle": "A fast operator update",
+                        "summary": "Summarize the reveal and implication.",
+                        "visual_style": "hybrid",
+                        "hero_direction": "Use the reveal frame as the cover.",
+                        "blocks": [
+                            {
+                                "block_id": "block-1",
+                                "label": "Hook",
+                                "title": "The reveal",
+                                "body": "Lead with the reveal.",
+                                "bullets": [],
+                                "visual_direction": "Use the actual reveal clip.",
+                                "image_url": "http://127.0.0.1:8000/static/assets/hook.png",
+                                "emphasis": "hook",
+                                "claim_refs": ["c1"],
+                                "evidence_refs": ["e1"],
+                                "source_media": [
+                                    {
+                                        "asset_id": "video-1",
+                                        "modality": "video",
+                                        "usage": "proof_clip",
+                                        "claim_refs": ["c1"],
+                                        "evidence_refs": ["e1"],
+                                        "start_ms": 12000,
+                                        "end_ms": 18000,
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    source_manifest={
+                        "assets": [
+                            {
+                                "asset_id": "video-1",
+                                "modality": "video",
+                                "uri": "http://127.0.0.1:8000/static/assets/reveal.mp4",
+                            }
+                        ]
+                    },
+                    content_signal={
+                        "key_claims": [
+                            {"claim_id": "c1", "claim_text": "The reveal shows the demand spike."},
+                        ]
+                    },
+                ),
+                request=SimpleNamespace(base_url="http://127.0.0.1:8000/"),
+            )
+        )
+
+    assert result["status"] == "success"
+    artifact = QuickArtifactSchema.model_validate(result["artifact"])
+    assert artifact.reel is not None
+    assert artifact.video is not None
+    assert artifact.video.video_url == "http://127.0.0.1:8000/static/assets/quick_video_demo.mp4"
+
+
+def test_populate_quick_block_visuals_generates_images_even_for_source_backed_blocks() -> None:
     agent = GeminiStoryAgent()
     artifact = QuickArtifactSchema.model_validate(
         {
@@ -723,8 +967,8 @@ def test_populate_quick_block_visuals_generates_only_for_blocks_without_source_m
         )
 
     assert visualized.blocks[0].image_url == "http://127.0.0.1:8000/static/assets/quick_block_demo.png"
-    assert visualized.blocks[1].image_url is None
-    assert block_image_mock.await_count == 1
+    assert visualized.blocks[1].image_url == "http://127.0.0.1:8000/static/assets/quick_block_demo.png"
+    assert block_image_mock.await_count == 2
 
 
 def test_structured_evidence_refs_normalizes_string_video_timecodes() -> None:
@@ -822,6 +1066,26 @@ def test_transcript_only_video_prompts_include_no_frame_access_guardrail() -> No
     )
     assert "without direct frame access" in prompt
     assert "do not invent exact visual details" in prompt
+
+
+def test_pdf_prompts_discourage_frontmatter_overuse() -> None:
+    structural_prompt = GeminiStoryAgent._build_structural_signal_prompt(
+        document_text="A roadmap for evaluating moral competence in large language models.",
+        source_inventory_text="- asset-pdf-1: pdf_page | paper.pdf | application/pdf",
+        transcript_only_video=False,
+    )
+    one_pass_prompt = GeminiStoryAgent._build_signal_extraction_prompt(
+        document_text="A roadmap for evaluating moral competence in large language models.",
+        schema_text='{"type":"object"}',
+        version="v2",
+        source_inventory_text="- asset-pdf-1: pdf_page | paper.pdf | application/pdf",
+        transcript_only_video=False,
+    )
+
+    assert "prefer later body-page evidence" in structural_prompt
+    assert "Avoid anchoring most claims to abstract/frontmatter evidence" in structural_prompt
+    assert "do not anchor most claims to the abstract" in one_pass_prompt
+    assert "Use frontmatter evidence mainly for opener context" in one_pass_prompt
 
 
 def test_regenerate_quick_block_preserves_block_id() -> None:
@@ -1594,9 +1858,10 @@ def test_extract_signal_prefers_manifest_embedded_text_before_gemini_recovery() 
             assert result["status"] == "success"
             assert result["normalized_source_text"] == "A roadmap for evaluating moral competence in large language models."
             assert result["source_text_origin"] == "asset_embedded_text"
-            assert len(agent.client.files.upload_calls) == 1
-            assert agent.client.files.deleted_names == ["files/1"]
+            assert len(agent.client.files.upload_calls) == 0
+            assert agent.client.files.deleted_names == []
             assert len(agent.client.models.contents) == 2
+            assert result["trace"]["checkpoints"][-1]["details"]["uploaded_asset_count"] == 0
             assert all(
                 "recover clean reading-order source text" not in (
                     item[0] if isinstance(item, list) and item and isinstance(item[0], str) else str(item)
@@ -2621,6 +2886,301 @@ def test_generate_stream_advanced_events_emits_source_media_ready_payloads() -> 
         assert final_bundle_event["claim_traceability"]["evidence_referenced"] == 2
 
     asyncio.run(run())
+
+
+def test_generate_stream_advanced_events_emits_source_media_warning_when_links_cannot_resolve() -> None:
+    async def run() -> None:
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [],
+            "query_string": b"",
+            "client": ("testclient", 50000),
+            "server": ("testserver", 80),
+            "scheme": "http",
+        }
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        request = Request(scope, receive)
+
+        agent = object.__new__(GeminiStoryAgent)
+
+        async def fake_stream_scene_assets(**kwargs):  # noqa: ANN003
+            result_collector = kwargs["result_collector"]
+            text = "This scene should have proof, but the proof asset URL cannot be resolved."
+            result_collector["text"] = text
+            result_collector["image_url"] = ""
+            result_collector["audio_url"] = ""
+            result_collector["word_count"] = len(text.split())
+            if False:
+                yield {}
+
+        agent._stream_scene_assets = fake_stream_scene_assets  # type: ignore[method-assign]
+
+        approved_script_pack = {
+            "plan_id": "plan-proof-warning",
+            "plan_summary": "Proof-backed storyboard",
+            "audience_descriptor": "Engineers",
+            "scene_count": 1,
+            "artifact_type": "storyboard_grid",
+            "planning_mode": "sequential",
+            "script_shape": "sequential_storyboard",
+            "scenes": [
+                {
+                    "scene_id": "scene-warning",
+                    "title": "Missing Proof Link",
+                    "scene_goal": "Show proof link diagnostics.",
+                    "narration_focus": "Explain that source proof could not be linked.",
+                    "visual_prompt": "Diagnostic visual.",
+                    "claim_refs": ["c1"],
+                    "continuity_refs": [],
+                    "acceptance_checks": [],
+                }
+            ],
+        }
+
+        events: list[dict[str, str]] = []
+        async for event in agent.generate_stream_advanced_events(
+            request=request,
+            payload=AdvancedStreamRequest.model_validate(
+                {
+                    "source_text": "",
+                    "source_manifest": {
+                        "assets": [
+                            {
+                                "asset_id": "asset-audio-missing",
+                                "modality": "audio",
+                                "uri": None,
+                                "duration_ms": 120000,
+                            },
+                        ]
+                    },
+                    "content_signal": {
+                        "thesis": {"one_liner": "Proof should be linked when possible."},
+                        "key_claims": [
+                            {
+                                "claim_id": "c1",
+                                "claim_text": "The narrated claim should point back to source media.",
+                                "evidence_snippets": [
+                                    {
+                                        "evidence_id": "e1",
+                                        "type": "audio",
+                                        "asset_id": "asset-audio-missing",
+                                        "start_ms": 1200,
+                                        "end_ms": 4200,
+                                        "transcript_text": "This is the supporting source clip.",
+                                    },
+                                ],
+                            }
+                        ],
+                        "narrative_beats": [{"beat_id": "b1", "message": "Explain why the proof link is missing."}],
+                    },
+                    "render_profile": {
+                        "artifact_type": "storyboard_grid",
+                        "density": "standard",
+                        "audience": {"persona": "Engineers", "level": "intermediate"},
+                        "output_controls": {"target_duration_sec": 30},
+                    },
+                    "script_pack": approved_script_pack,
+                    "artifact_scope": ["storyboard", "voiceover"],
+                }
+            ),
+        ):
+            events.append(event)
+
+        parsed_events = [
+            (event["event"], json.loads(event["data"]))
+            for event in events
+        ]
+        scene_start_event = next(data for name, data in parsed_events if name == "scene_start")
+        warning_event = next(data for name, data in parsed_events if name == "source_media_warning")
+        proof_events = [data for name, data in parsed_events if name == "source_media_ready"]
+
+        assert scene_start_event["scene_id"] == "scene-warning"
+        assert scene_start_event["source_media"] == []
+        assert proof_events == []
+        assert warning_event["scene_id"] == "scene-warning"
+        assert warning_event["asset_ids"] == ["asset-audio-missing"]
+        assert warning_event["expected_count"] == 1
+        assert "no resolvable proof links" in warning_event["message"].lower()
+
+    asyncio.run(run())
+
+
+def test_enrich_script_pack_with_source_media_falls_back_to_scene_evidence_refs() -> None:
+    script_pack = ScriptPack.model_validate(
+        {
+            "plan_id": "plan-evidence-fallback",
+            "plan_summary": "Fallback proof enrichment",
+            "audience_descriptor": "Engineers",
+            "scene_count": 1,
+            "artifact_type": "storyboard_grid",
+            "scenes": [
+                {
+                    "scene_id": "scene-1",
+                    "title": "Evidence First",
+                    "scene_goal": "Recover proof links from evidence refs.",
+                    "narration_focus": "Use direct evidence refs even when claim refs are sparse.",
+                    "visual_prompt": "Technical evidence panel.",
+                    "claim_refs": [],
+                    "evidence_refs": ["e1"],
+                    "continuity_refs": [],
+                    "acceptance_checks": [],
+                }
+            ],
+        }
+    )
+
+    enriched, scene_evidence_map, evidence_ids = GeminiStoryAgent._enrich_script_pack_with_source_media(
+        script_pack=script_pack,
+        content_signal={
+            "key_claims": [
+                {
+                    "claim_id": "c1",
+                    "claim_text": "The source document contains a verifiable proof excerpt.",
+                    "evidence_snippets": [
+                        {
+                            "evidence_id": "e1",
+                            "type": "pdf_page",
+                            "asset_id": "asset-paper-1",
+                            "page_index": 3,
+                            "quote_text": "The exact supporting sentence lives on page three.",
+                        }
+                    ],
+                }
+            ]
+        },
+        source_manifest={
+            "assets": [
+                {
+                    "asset_id": "asset-paper-1",
+                    "modality": "pdf_page",
+                    "uri": "http://example.com/paper.pdf",
+                    "page_index": 3,
+                }
+            ]
+        },
+    )
+
+    scene = enriched.scenes[0]
+    assert scene.source_media
+    assert scene.source_media[0].asset_id == "asset-paper-1"
+    assert scene.source_media[0].evidence_refs == ["e1"]
+    assert scene_evidence_map["scene-1"] == ["e1"]
+    assert evidence_ids == ["e1"]
+
+
+def test_enrich_script_pack_with_source_media_merges_duplicate_pdf_refs() -> None:
+    script_pack = ScriptPack.model_validate(
+        {
+            "plan_id": "plan-dedupe",
+            "plan_summary": "Deduplicate planner and evidence proof refs",
+            "audience_descriptor": "Researchers",
+            "scene_count": 1,
+            "artifact_type": "storyboard_grid",
+            "scenes": [
+                {
+                    "scene_id": "scene-1",
+                    "title": "Competence Shift",
+                    "scene_goal": "Keep one merged proof entry per PDF citation.",
+                    "narration_focus": "Explain the shift from moral performance to moral competence.",
+                    "visual_prompt": "Use the cited paper excerpt as the proof anchor.",
+                    "claim_refs": ["c1"],
+                    "evidence_refs": [],
+                    "continuity_refs": [],
+                    "acceptance_checks": [],
+                    "source_media": [
+                        {
+                            "asset_id": "asset-pdf-1",
+                            "modality": "pdf_page",
+                            "usage": "callout",
+                            "claim_refs": ["c1"],
+                            "evidence_refs": [],
+                            "page_index": 1,
+                            "quote_text": "moving beyond evaluating for mere moral performance... to evaluating for moral competence",
+                            "visual_context": "Highlighted text emphasizing the shift from performance to competence.",
+                        }
+                    ],
+                    "modules": [
+                        {
+                            "module_id": "module-proof",
+                            "label": "Primary proof",
+                            "purpose": "Show the cited passage.",
+                            "content_type": "support_panel",
+                            "claim_refs": ["c1"],
+                            "source_media": [
+                                {
+                                    "asset_id": "asset-pdf-1",
+                                    "modality": "pdf_page",
+                                    "usage": "callout",
+                                    "claim_refs": ["c1"],
+                                    "evidence_refs": ["c1-e1"],
+                                    "page_index": 1,
+                                    "label": "moving beyond evaluating for mere moral performance... to evaluating for moral competence",
+                                    "quote_text": "moving beyond evaluating for mere moral performance... to evaluating for moral competence",
+                                },
+                                {
+                                    "asset_id": "asset-pdf-1",
+                                    "modality": "pdf_page",
+                                    "usage": "callout",
+                                    "claim_refs": ["c1"],
+                                    "evidence_refs": ["c1-e1"],
+                                    "page_index": 1,
+                                    "label": "moving beyond evaluating for mere moral performance... to evaluating for moral competence",
+                                    "quote_text": "moving beyond evaluating for mere moral performance... to evaluating for moral competence",
+                                },
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    enriched, _, _ = GeminiStoryAgent._enrich_script_pack_with_source_media(
+        script_pack=script_pack,
+        content_signal={
+            "key_claims": [
+                {
+                    "claim_id": "c1",
+                    "claim_text": "The paper argues for evaluating moral competence rather than just performance.",
+                    "evidence_snippets": [
+                        {
+                            "evidence_id": "c1-e1",
+                            "type": "text",
+                            "asset_id": "asset-pdf-1",
+                            "page_index": 1,
+                            "quote_text": "moving beyond evaluating for mere moral performance... to evaluating for moral competence",
+                        }
+                    ],
+                }
+            ]
+        },
+        source_manifest={
+            "assets": [
+                {
+                    "asset_id": "asset-pdf-1",
+                    "modality": "pdf_page",
+                    "uri": "http://example.com/paper.pdf",
+                    "page_index": 1,
+                }
+            ]
+        },
+    )
+
+    scene = enriched.scenes[0]
+    assert len(scene.source_media) == 1
+    assert scene.source_media[0].asset_id == "asset-pdf-1"
+    assert scene.source_media[0].evidence_refs == ["c1-e1"]
+    assert scene.source_media[0].visual_context == "Highlighted text emphasizing the shift from performance to competence."
+    assert scene.source_media[0].quote_text == "moving beyond evaluating for mere moral performance... to evaluating for moral competence"
+
+    module = scene.modules[0]
+    assert len(module.source_media) == 1
+    assert module.source_media[0].evidence_refs == ["c1-e1"]
 
 
 def test_generate_stream_advanced_events_overlaps_later_scenes_after_scene_one() -> None:

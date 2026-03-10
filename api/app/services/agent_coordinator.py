@@ -230,6 +230,15 @@ class AgentCoordinator:
                 return deepcopy(state.script_pack)
             return None
 
+    async def get_content_signal(self, workflow_id: str) -> dict[str, Any] | None:
+        async with self._lock:
+            state = self._states.get(workflow_id)
+            if state is None:
+                raise KeyError(f"Unknown workflow_id: {workflow_id}")
+            if isinstance(state.content_signal, dict):
+                return deepcopy(state.content_signal)
+            return None
+
     async def get_final_bundle_status(self, run_id: str) -> dict[str, Any]:
         async with self._lock:
             for state in self._states.values():
