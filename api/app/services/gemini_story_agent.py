@@ -294,12 +294,14 @@ class GeminiStoryAgent:
             "if later body pages provide stronger support.\n"
             "12) Prefer diverse body-page evidence across distinct claims. Use frontmatter evidence mainly for opener "
             "context, unless the source is genuinely one-page or only frontmatter contains the claim.\n"
+            "13) EVIDENCE SELECTION RULE: If a claim appears on page 1 and is later proven, detailed, or debated on a "
+            "body page, you MUST cite the body-page evidence snippet instead of the summary mention.\n"
             if source_inventory_text.strip()
             else ""
         )
         transcript_only_guardrail = (
-            "13) This source path is transcript-backed video without direct frame access.\n"
-            "14) If the transcript says 'this chart', 'as you can see', or similar, do not invent exact on-screen visuals. "
+            "14) This source path is transcript-backed video without direct frame access.\n"
+            "15) If the transcript says 'this chart', 'as you can see', or similar, do not invent exact on-screen visuals. "
             "Infer only what surrounding text supports, or keep visual_context generic.\n"
             if transcript_only_video
             else ""
@@ -721,6 +723,7 @@ class GeminiStoryAgent:
             "6) Do not invent facts, beats, or visuals.\n"
             "7) For PDFs or documents, prefer later body-page evidence when it supports the claim more directly than the abstract or page 1.\n"
             "8) Avoid anchoring most claims to abstract/frontmatter evidence unless the claim genuinely appears only there.\n"
+            "9) If a claim is summarized on page 1 but substantiated later, cite the later body page in evidence_snippets.\n"
             f"{transcript_guardrail}"
             "SOURCE:\n"
             f"{source_body}"
@@ -1614,6 +1617,95 @@ class GeminiStoryAgent:
         return scene_role in {"hook", "bait", "bait_hook", "setup"}
 
     @staticmethod
+    def _is_frontmatter_pdf_media(
+        media: SourceMediaRefSchema,
+        asset: SourceAssetSchema | None = None,
+    ) -> bool:
+        effective_modality = media.modality or (asset.modality if asset is not None else None)
+        if effective_modality != "pdf_page":
+            return False
+        page_index = media.page_index if media.page_index is not None else (asset.page_index if asset is not None else None)
+        text_blob = " ".join(
+            part.strip()
+            for part in [
+                media.label or "",
+                media.quote_text or "",
+                media.visual_context or "",
+            ]
+            if part and part.strip()
+        ).lower()
+        if "abstract" in text_blob or "executive summary" in text_blob:
+            return True
+        return page_index == 1
+
+    @staticmethod
+    def _claim_has_non_frontmatter_media(
+        claim_ref: str,
+        evidence_items: list[EvidenceRefSchema],
+        asset_lookup: dict[str, SourceAssetSchema],
+    ) -> bool:
+        return any(
+            evidence.asset_id in asset_lookup
+            and not GeminiStoryAgent._is_frontmatter_pdf_evidence(
+                evidence,
+                asset_lookup.get(evidence.asset_id),
+            )
+            for evidence in evidence_items
+            if GeminiStoryAgent._effective_evidence_media_modality(
+                evidence,
+                asset_lookup.get(evidence.asset_id),
+            ) in {"audio", "image", "pdf_page", "video"}
+        )
+
+    @staticmethod
+    def _should_exclude_frontmatter_evidence(
+        *,
+        evidence: EvidenceRefSchema,
+        claim_refs: list[str],
+        allow_frontmatter: bool,
+        evidence_by_claim: dict[str, list[EvidenceRefSchema]],
+        asset_lookup: dict[str, SourceAssetSchema],
+    ) -> bool:
+        if allow_frontmatter:
+            return False
+        asset = asset_lookup.get(evidence.asset_id)
+        if not GeminiStoryAgent._is_frontmatter_pdf_evidence(evidence, asset):
+            return False
+        return any(
+            GeminiStoryAgent._claim_has_non_frontmatter_media(
+                claim_ref,
+                evidence_by_claim.get(claim_ref, []),
+                asset_lookup,
+            )
+            for claim_ref in claim_refs
+            if claim_ref
+        )
+
+    @staticmethod
+    def _should_exclude_frontmatter_media(
+        *,
+        media: SourceMediaRefSchema,
+        claim_refs: list[str],
+        allow_frontmatter: bool,
+        evidence_by_claim: dict[str, list[EvidenceRefSchema]],
+        asset_lookup: dict[str, SourceAssetSchema],
+    ) -> bool:
+        if allow_frontmatter:
+            return False
+        asset = asset_lookup.get(media.asset_id)
+        if not GeminiStoryAgent._is_frontmatter_pdf_media(media, asset):
+            return False
+        return any(
+            GeminiStoryAgent._claim_has_non_frontmatter_media(
+                claim_ref,
+                evidence_by_claim.get(claim_ref, []),
+                asset_lookup,
+            )
+            for claim_ref in claim_refs
+            if claim_ref
+        )
+
+    @staticmethod
     def _sort_claim_evidence_for_scene(
         *,
         scene: ScriptPackScene,
@@ -1628,17 +1720,10 @@ class GeminiStoryAgent:
         if not evidence_items:
             return []
 
-        claim_has_non_frontmatter_media = any(
-            evidence.asset_id in asset_lookup
-            and not GeminiStoryAgent._is_frontmatter_pdf_evidence(
-                evidence,
-                asset_lookup.get(evidence.asset_id),
-            )
-            for evidence in evidence_items
-            if GeminiStoryAgent._effective_evidence_media_modality(
-                evidence,
-                asset_lookup.get(evidence.asset_id),
-            ) in {"audio", "image", "pdf_page", "video"}
+        claim_has_non_frontmatter_media = GeminiStoryAgent._claim_has_non_frontmatter_media(
+            claim_ref,
+            evidence_items,
+            asset_lookup,
         )
 
         filtered_items = [
@@ -1721,18 +1806,50 @@ class GeminiStoryAgent:
         page_usage_counts: dict[tuple[str, int | None], int] = {}
         evidence_usage_counts: dict[str, int] = {}
         abstract_scene_claimed = False
+        evidence_claim_refs: dict[str, list[str]] = {}
+
+        for claim_ref, evidence_items in evidence_by_claim.items():
+            for evidence in evidence_items:
+                if evidence.evidence_id:
+                    evidence_claim_refs.setdefault(evidence.evidence_id, [])
+                    if claim_ref not in evidence_claim_refs[evidence.evidence_id]:
+                        evidence_claim_refs[evidence.evidence_id].append(claim_ref)
 
         for scene_index, scene in enumerate(enriched.scenes):
-            evidence_refs = list(scene.evidence_refs)
-            source_media = GeminiStoryAgent._merge_source_media_list(list(scene.source_media))
+            allow_frontmatter = GeminiStoryAgent._scene_is_opener_or_hook(scene, scene_index) and not abstract_scene_claimed
+            scene_claim_refs = [claim_ref for claim_ref in scene.claim_refs if claim_ref]
+            evidence_refs = [
+                evidence_ref
+                for evidence_ref in list(scene.evidence_refs)
+                if not (
+                    (evidence := evidence_by_id.get(evidence_ref)) is not None
+                    and GeminiStoryAgent._should_exclude_frontmatter_evidence(
+                        evidence=evidence,
+                        claim_refs=evidence_claim_refs.get(evidence_ref, scene_claim_refs) or scene_claim_refs,
+                        allow_frontmatter=allow_frontmatter,
+                        evidence_by_claim=evidence_by_claim,
+                        asset_lookup=asset_lookup,
+                    )
+                )
+            ]
+            source_media = [
+                media
+                for media in GeminiStoryAgent._merge_source_media_list(list(scene.source_media))
+                if not GeminiStoryAgent._should_exclude_frontmatter_media(
+                    media=media,
+                    claim_refs=list(media.claim_refs) or scene_claim_refs,
+                    allow_frontmatter=allow_frontmatter,
+                    evidence_by_claim=evidence_by_claim,
+                    asset_lookup=asset_lookup,
+                )
+            ]
             media_index_by_key = {
                 GeminiStoryAgent._source_media_merge_key(item): index
                 for index, item in enumerate(source_media)
             }
-            allow_frontmatter = GeminiStoryAgent._scene_is_opener_or_hook(scene, scene_index) and not abstract_scene_claimed
             scene_uses_frontmatter = False
 
-            for claim_ref in scene.claim_refs[:4]:
+            for claim_ref in scene_claim_refs[:4]:
                 claim_page_like_selected = False
                 claim_audio_selected = False
                 ranked_evidence = GeminiStoryAgent._sort_claim_evidence_for_scene(
@@ -1794,10 +1911,19 @@ class GeminiStoryAgent:
                     break
 
             if len(source_media) < 3:
-                fallback_claim_ref = next((claim for claim in scene.claim_refs if claim), "evidence")
+                fallback_claim_ref = next((claim for claim in scene_claim_refs if claim), "evidence")
                 for evidence_ref in scene.evidence_refs[:6]:
                     evidence = evidence_by_id.get(evidence_ref)
                     if evidence is None or evidence.asset_id not in asset_lookup:
+                        continue
+                    fallback_claim_refs = evidence_claim_refs.get(evidence_ref, scene_claim_refs) or scene_claim_refs
+                    if GeminiStoryAgent._should_exclude_frontmatter_evidence(
+                        evidence=evidence,
+                        claim_refs=fallback_claim_refs,
+                        allow_frontmatter=allow_frontmatter,
+                        evidence_by_claim=evidence_by_claim,
+                        asset_lookup=asset_lookup,
+                    ):
                         continue
 
                     media_ref = GeminiStoryAgent._media_ref_for_evidence(
@@ -1806,6 +1932,14 @@ class GeminiStoryAgent:
                         asset=asset_lookup.get(evidence.asset_id),
                     )
                     if media_ref is None:
+                        continue
+                    if GeminiStoryAgent._should_exclude_frontmatter_media(
+                        media=media_ref,
+                        claim_refs=fallback_claim_refs,
+                        allow_frontmatter=allow_frontmatter,
+                        evidence_by_claim=evidence_by_claim,
+                        asset_lookup=asset_lookup,
+                    ):
                         continue
 
                     media_key = GeminiStoryAgent._source_media_merge_key(media_ref)

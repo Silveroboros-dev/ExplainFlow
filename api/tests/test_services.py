@@ -3073,6 +3073,114 @@ def test_enrich_script_pack_with_source_media_falls_back_to_scene_evidence_refs(
     assert evidence_ids == ["e1"]
 
 
+def test_enrich_script_pack_with_source_media_removes_non_opener_frontmatter_when_body_evidence_exists() -> None:
+    script_pack = ScriptPack.model_validate(
+        {
+            "plan_id": "plan-frontmatter-filter",
+            "plan_summary": "Frontmatter should stay on the opener only.",
+            "audience_descriptor": "Researchers",
+            "scene_count": 2,
+            "artifact_type": "storyboard_grid",
+            "scenes": [
+                {
+                    "scene_id": "scene-1",
+                    "title": "Hook",
+                    "scene_role": "bait_hook",
+                    "scene_goal": "Open with the paper framing.",
+                    "narration_focus": "Use the abstract only for the opener.",
+                    "visual_prompt": "Paper opener.",
+                    "claim_refs": ["c1"],
+                    "evidence_refs": ["e-abstract"],
+                    "source_media": [
+                        {
+                            "asset_id": "asset-paper-1",
+                            "modality": "pdf_page",
+                            "usage": "callout",
+                            "claim_refs": ["c1"],
+                            "evidence_refs": ["e-abstract"],
+                            "page_index": 1,
+                            "quote_text": "Abstract: The paper introduces the roadmap.",
+                        }
+                    ],
+                    "continuity_refs": [],
+                    "acceptance_checks": [],
+                },
+                {
+                    "scene_id": "scene-2",
+                    "title": "Body Detail",
+                    "scene_role": "payoff",
+                    "scene_goal": "Use the later body page, not the abstract.",
+                    "narration_focus": "Ground the claim in the body of the paper.",
+                    "visual_prompt": "Body-page framework figure.",
+                    "claim_refs": ["c1"],
+                    "evidence_refs": ["e-abstract", "e-body-4"],
+                    "source_media": [
+                        {
+                            "asset_id": "asset-paper-1",
+                            "modality": "pdf_page",
+                            "usage": "callout",
+                            "claim_refs": ["c1"],
+                            "evidence_refs": ["e-abstract"],
+                            "page_index": 1,
+                            "quote_text": "Abstract: The paper introduces the roadmap.",
+                        }
+                    ],
+                    "continuity_refs": [],
+                    "acceptance_checks": [],
+                },
+            ],
+        }
+    )
+
+    enriched, scene_evidence_map, evidence_ids = GeminiStoryAgent._enrich_script_pack_with_source_media(
+        script_pack=script_pack,
+        content_signal={
+            "key_claims": [
+                {
+                    "claim_id": "c1",
+                    "claim_text": "The paper proposes a roadmap for evaluating moral competence.",
+                    "evidence_snippets": [
+                        {
+                            "evidence_id": "e-abstract",
+                            "type": "pdf_page",
+                            "asset_id": "asset-paper-1",
+                            "page_index": 1,
+                            "quote_text": "Abstract: The paper introduces the roadmap.",
+                        },
+                        {
+                            "evidence_id": "e-body-4",
+                            "type": "pdf_page",
+                            "asset_id": "asset-paper-1",
+                            "page_index": 4,
+                            "visual_context": "Framework diagram in the paper body.",
+                        },
+                    ],
+                }
+            ]
+        },
+        source_manifest={
+            "assets": [
+                {
+                    "asset_id": "asset-paper-1",
+                    "modality": "pdf_page",
+                    "uri": "http://example.com/paper.pdf",
+                    "mime_type": "application/pdf",
+                    "title": "paper.pdf",
+                }
+            ]
+        },
+    )
+
+    assert evidence_ids == ["e-abstract", "e-body-4"]
+    assert scene_evidence_map["scene-1"] == ["e-abstract"]
+    assert scene_evidence_map["scene-2"] == ["e-body-4"]
+    assert any(media.page_index == 1 for media in enriched.scenes[0].source_media)
+    assert all(media.page_index != 1 for media in enriched.scenes[1].source_media)
+    assert any(media.page_index == 4 for media in enriched.scenes[1].source_media)
+    assert "e-abstract" not in enriched.scenes[1].evidence_refs
+    assert "e-body-4" in enriched.scenes[1].evidence_refs
+
+
 def test_enrich_script_pack_with_source_media_merges_duplicate_pdf_refs() -> None:
     script_pack = ScriptPack.model_validate(
         {

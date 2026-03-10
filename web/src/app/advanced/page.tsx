@@ -3901,14 +3901,30 @@ export default function AdvancedStudio() {
                     evidenceViewer.media.url.toLowerCase().includes('.pdf')
                     || evidenceViewer.media.original_url?.toLowerCase().includes('.pdf')
                   ) ? (
-                  <iframe
-                    src={withPdfPageFragment(
-                      evidenceViewer.media.url,
-                      evidenceViewer.media.page_index,
-                    )}
-                    title={evidenceViewer.media.label || 'Source document proof'}
-                    className="h-[520px] w-full rounded-md border border-slate-200 bg-white"
-                  />
+                  <div className="rounded-md border border-slate-200 bg-white px-5 py-6">
+                    <p className="text-sm font-semibold text-slate-900">PDF proof opens in a new tab</p>
+                    <p className="mt-2 text-sm leading-6 text-slate-700">
+                      Inline PDF viewing can fail in deployed environments. Open the source proof directly to jump to the linked page.
+                    </p>
+                    {(evidenceViewer.media.original_url || evidenceViewer.media.url) ? (
+                      <div className="mt-4">
+                        <Button type="button" variant="outline" className="border-slate-300" asChild>
+                          <a
+                            href={withPdfPageFragment(
+                              evidenceViewer.media.original_url || evidenceViewer.media.url,
+                              evidenceViewer.media.page_index,
+                            )}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {typeof evidenceViewer.media.page_index === 'number'
+                              ? `View Source Proof (Page ${evidenceViewer.media.page_index})`
+                              : 'View Source Proof'}
+                          </a>
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
                 ) : (
                   <div className="overflow-hidden rounded-md border border-slate-200 bg-white">
                     <img
@@ -3958,16 +3974,19 @@ export default function AdvancedStudio() {
                 ) : null}
               </div>
               <DialogFooter className="gap-2">
-                {evidenceViewer.media.original_url ? (
+                {(evidenceViewer.media.original_url || evidenceViewer.media.url) ? (
                   <Button type="button" variant="outline" className="border-slate-300" asChild>
                     <a
                       href={evidenceViewer.media.modality === 'pdf_page'
-                        ? withPdfPageFragment(evidenceViewer.media.original_url, evidenceViewer.media.page_index)
-                        : evidenceViewer.media.original_url}
+                        ? withPdfPageFragment(
+                          evidenceViewer.media.original_url || evidenceViewer.media.url,
+                          evidenceViewer.media.page_index,
+                        )
+                        : (evidenceViewer.media.original_url || evidenceViewer.media.url)}
                       target="_blank"
                       rel="noreferrer"
                     >
-                      Open Original Asset
+                      {evidenceViewer.media.modality === 'pdf_page' ? 'Open PDF Source' : 'Open Original Asset'}
                     </a>
                   </Button>
                 ) : null}
