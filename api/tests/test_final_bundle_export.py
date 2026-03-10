@@ -148,3 +148,37 @@ def test_source_asset_upload_rejects_oversized_file() -> None:
     payload = response.json()
     assert "upload limit" in payload["detail"]
     assert {path.name for path in ASSET_DIR.iterdir()} == existing_assets
+
+
+def test_quick_video_download_returns_attachment() -> None:
+    video_name = "quick_video_test.mp4"
+    video_path = ASSET_DIR / video_name
+    video_path.write_bytes(b"fake-mp4")
+
+    try:
+        client = TestClient(app)
+        response = client.get(
+            "/api/quick-video/download",
+            params={
+                "video_url": f"http://testserver/static/assets/{video_name}",
+                "filename": "proof reel final",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "video/mp4"
+        assert 'attachment; filename="proof-reel-final.mp4"' in response.headers["content-disposition"]
+        assert response.content == b"fake-mp4"
+    finally:
+        video_path.unlink(missing_ok=True)
+
+
+def test_quick_video_download_rejects_missing_asset() -> None:
+    client = TestClient(app)
+    response = client.get(
+        "/api/quick-video/download",
+        params={"video_url": "http://testserver/static/assets/does-not-exist.mp4"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Quick MP4 asset not found."

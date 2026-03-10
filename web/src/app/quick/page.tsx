@@ -1024,20 +1024,14 @@ export default function QuickGenerate() {
     setVideoError('');
 
     try {
-      const response = await fetch(activeVideo.video_url);
-      if (!response.ok) {
-        throw new Error('Unable to download the rendered MP4.');
-      }
-
-      const videoBlob = await response.blob();
-      const blobUrl = URL.createObjectURL(videoBlob);
+      const downloadUrl = new URL(`${API_BASE}/api/quick-video/download`);
+      downloadUrl.searchParams.set('video_url', activeVideo.video_url);
+      downloadUrl.searchParams.set('filename', quickVideoFilename(activeVideo.video_url, artifact?.title));
       const anchor = document.createElement('a');
-      anchor.href = blobUrl;
-      anchor.download = quickVideoFilename(activeVideo.video_url, artifact?.title);
+      anchor.href = downloadUrl.toString();
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-      URL.revokeObjectURL(blobUrl);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to download the rendered MP4.';
       setVideoError(message);

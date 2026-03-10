@@ -1,15 +1,29 @@
 import json
 from io import BytesIO
+import re
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from app.schemas.requests import FinalBundleExportRequest, FinalBundleUpscaleRequest
 from app.services import build_final_bundle_zip
-from app.services.image_pipeline import upscale_image_and_get_url
+from app.services.image_pipeline import asset_path_from_reference, upscale_image_and_get_url
 from app.services.source_ingest import ingest_source_upload
 
 router = APIRouter()
+
+
+def _safe_download_filename(filename: str | None, fallback: str) -> str:
+    candidate = (filename or "").strip()
+    if not candidate:
+        return fallback
+
+    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "-", candidate).strip("-.")
+    if not sanitized:
+        return fallback
+    if not sanitized.lower().endswith(".mp4"):
+        sanitized = f"{sanitized}.mp4"
+    return sanitized
 
 
 @router.post("/source-assets/upload")
@@ -57,6 +71,21 @@ async def export_final_bundle(payload: FinalBundleExportRequest):
         BytesIO(archive_bytes),
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{archive_name}"'},
+    )
+
+
+@router.get("/quick-video/download")
+async def download_quick_video(video_url: str, filename: str | None = None):
+    video_path = asset_path_from_reference(video_url)
+    if video_path is None or not video_path.exists() or video_path.suffix.lower() != ".mp4":
+        raise HTTPException(status_code=404, detail="Quick MP4 asset not found.")
+
+    download_name = _safe_download_filename(filename, fallback=video_path.name)
+    return FileResponse(
+        path=video_path,
+        media_type="video/mp4",
+        filename=download_name,
+        headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
     )
 
 
