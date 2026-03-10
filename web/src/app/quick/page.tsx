@@ -17,6 +17,7 @@ import {
   Bot,
   Clapperboard,
   ChevronRight,
+  Download,
   GalleryVerticalEnd,
   GraduationCap,
   LayoutGrid,
@@ -154,6 +155,7 @@ type QuickArtifact = {
   hero_direction: string;
   hero_image_url?: string | null;
   reel?: QuickReel | null;
+  video?: QuickVideo | null;
   blocks: QuickArtifactBlock[];
 };
 
@@ -177,6 +179,28 @@ type QuickReel = {
   title: string;
   summary: string;
   segments: QuickReelSegment[];
+};
+
+type QuickVideoSegment = {
+  segment_id: string;
+  block_id: string;
+  title: string;
+  caption_text: string;
+  voiceover_url?: string | null;
+  visual_url?: string | null;
+  source_video_url?: string | null;
+  source_start_ms: number | null;
+  source_end_ms: number | null;
+  duration_ms: number | null;
+  render_mode: 'image_only' | 'image_plus_clip' | 'clip_only';
+};
+
+type QuickVideo = {
+  video_id: string;
+  status: 'ready';
+  video_url: string;
+  duration_ms: number | null;
+  segments: QuickVideoSegment[];
 };
 
 type QuickSourceMedia = {
@@ -324,6 +348,25 @@ const buildYouTubeEmbedUrl = (videoId: string, startMs?: number | null, endMs?: 
   return `https://www.youtube-nocookie.com/embed/${videoId}?${params.toString()}`;
 };
 
+const quickVideoFilename = (videoUrl: string, artifactTitle?: string | null) => {
+  try {
+    const parsed = new URL(videoUrl);
+    const assetName = parsed.pathname.split('/').filter(Boolean).pop();
+    if (assetName) {
+      return assetName;
+    }
+  } catch {
+    // Fall back to a title-based filename below.
+  }
+
+  const normalizedTitle = (artifactTitle || 'quick-proof-reel')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+  return `${normalizedTitle || 'quick-proof-reel'}.mp4`;
+};
+
 const asYouTubeQuickSourceAsset = (rawUrl: string): UploadedQuickSourceAsset | null => {
   const videoId = extractYouTubeVideoId(rawUrl);
   if (!videoId) {
@@ -407,6 +450,9 @@ export default function QuickGenerate() {
   const [activeQuickView, setActiveQuickView] = useState<'artifact' | 'reel'>('artifact');
   const [isBuildingReel, setIsBuildingReel] = useState(false);
   const [reelError, setReelError] = useState('');
+  const [isRenderingVideo, setIsRenderingVideo] = useState(false);
+  const [isDownloadingVideo, setIsDownloadingVideo] = useState(false);
+  const [videoError, setVideoError] = useState('');
   const [indexedSignal, setIndexedSignal] = useState<Record<string, unknown> | null>(null);
   const [indexedNormalizedSourceText, setIndexedNormalizedSourceText] = useState('');
   const [indexedSourceTextOrigin, setIndexedSourceTextOrigin] = useState<string | null>(null);
@@ -666,6 +712,7 @@ export default function QuickGenerate() {
     setArtifact(null);
     setActiveQuickView('artifact');
     setReelError('');
+    setVideoError('');
     setAgentNotes([]);
     pushAgentNote("info", "Session", "Quick generation started. Building HTML-first artifact.");
 
@@ -735,7 +782,7 @@ export default function QuickGenerate() {
           source_manifest: sourceManifest,
           normalized_source_text: nextNormalizedSourceText,
           source_text_origin: nextSourceTextOrigin,
-          content_signal: nextContentSignal,
+          content_signal: nextContentSignal ?? {},
         }),
       });
       const data = await response.json();
@@ -744,6 +791,7 @@ export default function QuickGenerate() {
       }
       setArtifact(data.artifact as QuickArtifact);
       setReelError('');
+      setVideoError('');
       setGenerationStatus('Quick artifact ready.');
       pushAgentNote("checkpoint", "Session", "Quick artifact ready. Blocks can now be directed individually.");
     } catch (error) {
@@ -776,7 +824,7 @@ export default function QuickGenerate() {
           source_manifest: buildQuickSourceManifest(),
           normalized_source_text: indexedNormalizedSourceText,
           source_text_origin: indexedSourceTextOrigin,
-          content_signal: indexedSignal,
+          content_signal: indexedSignal ?? {},
           block_id: activeOverrideBlockId,
           instruction: overrideInstruction,
         }),
@@ -800,12 +848,14 @@ export default function QuickGenerate() {
       const nextArtifact: QuickArtifact = {
         ...artifact,
         reel: null,
+        video: null,
         blocks: artifact.blocks.map((block) => (
           block.block_id === activeOverrideBlockId ? updatedBlock : block
         )),
       };
       setArtifact(nextArtifact);
       setReelError('');
+      setVideoError('');
       if (activeQuickView === 'reel') {
         void ensureQuickReel(nextArtifact);
       }
@@ -850,7 +900,7 @@ export default function QuickGenerate() {
           source_manifest: buildQuickSourceManifest(),
           normalized_source_text: indexedNormalizedSourceText,
           source_text_origin: indexedSourceTextOrigin,
-          content_signal: indexedSignal,
+          content_signal: indexedSignal ?? {},
           instruction: globalOverrideInstruction,
         }),
       });
@@ -861,9 +911,11 @@ export default function QuickGenerate() {
       const nextArtifact = {
         ...(data.artifact as QuickArtifact),
         reel: null,
+        video: null,
       };
       setArtifact(nextArtifact);
       setReelError('');
+      setVideoError('');
       if (activeQuickView === 'reel') {
         void ensureQuickReel(nextArtifact);
       }
@@ -914,6 +966,88 @@ export default function QuickGenerate() {
   }) ?? null;
   const heroSourceMediaUrl = heroSourceMedia ? resolveSourceMediaUrl(heroSourceMedia) : null;
   const activeReel = artifact?.reel ?? null;
+  const activeVideo = artifact?.video ?? null;
+
+  const handleGenerateQuickVideo = async () => {
+    const reelArtifact = await ensureQuickReel();
+    if (!reelArtifact) {
+      return;
+    }
+
+    setIsRenderingVideo(true);
+    setVideoError('');
+    setGenerationError('');
+    setGenerationStatus('Rendering MP4...');
+    pushAgentNote("info", "Video", "Rendering Quick MP4 from the current Proof Reel.");
+
+    try {
+      const response = await fetch(`${API_BASE}/api/generate-quick-video`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          artifact: reelArtifact,
+          content_signal: indexedSignal ?? {},
+          source_manifest: buildQuickSourceManifest(),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || data.status !== 'success' || !data.artifact) {
+        throw new Error(data.detail || data.message || 'Quick MP4 generation failed.');
+      }
+
+      const nextArtifact = data.artifact as QuickArtifact;
+      setArtifact(nextArtifact);
+      setGenerationStatus('Quick MP4 ready.');
+      pushAgentNote("checkpoint", "Video", "Quick MP4 ready. Preview or download the rendered explainer.");
+      toast.success('Quick MP4 ready.', {
+        description: 'Proof Reel rendered into a downloadable MP4.',
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Quick MP4 generation failed.';
+      setVideoError(message);
+      setGenerationStatus('');
+      pushAgentNote("error", "Video", message);
+      toast.error('Quick MP4 generation failed.', {
+        description: message,
+      });
+    } finally {
+      setIsRenderingVideo(false);
+    }
+  };
+
+  const handleDownloadQuickVideo = async () => {
+    if (!activeVideo?.video_url) {
+      return;
+    }
+
+    setIsDownloadingVideo(true);
+    setVideoError('');
+
+    try {
+      const response = await fetch(activeVideo.video_url);
+      if (!response.ok) {
+        throw new Error('Unable to download the rendered MP4.');
+      }
+
+      const videoBlob = await response.blob();
+      const blobUrl = URL.createObjectURL(videoBlob);
+      const anchor = document.createElement('a');
+      anchor.href = blobUrl;
+      anchor.download = quickVideoFilename(activeVideo.video_url, artifact?.title);
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to download the rendered MP4.';
+      setVideoError(message);
+      toast.error('MP4 download failed.', {
+        description: message,
+      });
+    } finally {
+      setIsDownloadingVideo(false);
+    }
+  };
 
   return (
     <>
@@ -1640,24 +1774,102 @@ export default function QuickGenerate() {
                     </Card>
                   ) : null}
 
+                  {videoError ? (
+                    <Card className="border-rose-200 bg-rose-50 text-rose-900 shadow-[0_20px_44px_rgba(15,23,42,0.12)]">
+                      <CardContent className="p-6 text-sm font-medium">
+                        {videoError}
+                      </CardContent>
+                    </Card>
+                  ) : null}
+
                   {activeReel ? (
                     <>
                       <Card className="overflow-hidden border-white/15 bg-white/95 text-slate-900 shadow-[0_20px_44px_rgba(15,23,42,0.18)]">
                         <CardContent className="space-y-3 p-6">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge className="rounded-full bg-slate-900 text-white hover:bg-slate-900">
-                              Proof Reel v1
-                            </Badge>
-                            <Badge variant="outline" className="rounded-full border-slate-300 text-slate-600">
-                              {activeReel.segments.length} Segments
-                            </Badge>
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge className="rounded-full bg-slate-900 text-white hover:bg-slate-900">
+                                Proof Reel v1
+                              </Badge>
+                              <Badge variant="outline" className="rounded-full border-slate-300 text-slate-600">
+                                {activeReel.segments.length} Segments
+                              </Badge>
+                              {activeVideo?.duration_ms ? (
+                                <Badge variant="outline" className="rounded-full border-slate-300 text-slate-600">
+                                  {formatMilliseconds(activeVideo.duration_ms)}
+                                </Badge>
+                              ) : null}
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="gap-2 rounded-full"
+                              onClick={() => void handleGenerateQuickVideo()}
+                              disabled={isBuildingReel || isRenderingVideo}
+                            >
+                              {isRenderingVideo ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  Rendering MP4...
+                                </>
+                              ) : (
+                                <>
+                                  <PlayCircle className="h-4 w-4" />
+                                  Generate MP4
+                                </>
+                              )}
+                            </Button>
                           </div>
                           <div>
                             <h3 className="text-2xl font-semibold text-slate-950">{activeReel.title}</h3>
                             <p className="mt-2 text-sm leading-6 text-slate-600">{activeReel.summary}</p>
+                            {activeSourceAsset?.provider === 'youtube' ? (
+                              <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                                MP4 export used generated visuals only; source clip intercuts currently support uploaded local video.
+                              </p>
+                            ) : null}
                           </div>
                         </CardContent>
                       </Card>
+
+                      {activeVideo?.video_url ? (
+                        <Card className="overflow-hidden border-white/15 bg-white/95 text-slate-900 shadow-[0_20px_44px_rgba(15,23,42,0.18)]">
+                          <CardContent className="space-y-4 p-6">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                              <div>
+                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                                  Quick MP4
+                                </p>
+                                <h3 className="text-xl font-semibold text-slate-950">Rendered Explainer</h3>
+                              </div>
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:text-slate-950"
+                                onClick={() => void handleDownloadQuickVideo()}
+                                disabled={isDownloadingVideo}
+                              >
+                                {isDownloadingVideo ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    Downloading...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download className="h-4 w-4" />
+                                    Download MP4
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                            <video
+                              controls
+                              preload="metadata"
+                              className="w-full rounded-[22px] border border-slate-200 bg-slate-950"
+                              src={activeVideo.video_url}
+                            />
+                          </CardContent>
+                        </Card>
+                      ) : null}
 
                       <div className="space-y-5">
                         {activeReel.segments.map((segment, index) => {

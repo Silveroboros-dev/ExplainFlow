@@ -9,3 +9,4 @@ gTTS
 pypdf
 python-multipart
 google-cloud-storage
+moviepy

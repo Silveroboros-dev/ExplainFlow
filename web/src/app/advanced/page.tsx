@@ -33,6 +33,7 @@ import {
 import { Toaster, toast } from "sonner";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const ADVANCED_WORKFLOW_STORAGE_KEY = 'explainflow.advanced.workflow_id';
 
 const SIGNAL_EXPLAINER_TEXT = [
   "Structured extraction converts long input into a stable JSON contract.",
@@ -138,7 +139,7 @@ event: final_bundle_ready
 data: { "claim_traceability": { "claims_referenced": 6, "claims_total": 6 } }`;
 
 const SIGNAL_TYPEWRITER_DURATION_MS = 45000;
-const SCRIPT_TYPEWRITER_DURATION_MS = 32000;
+const SCRIPT_TYPEWRITER_DURATION_MS = 62000;
 const STREAM_TYPEWRITER_DURATION_MS = 26000;
 const PRIMARY_ACTION_CARD_CLASS = "group h-auto w-full rounded-[24px] bg-slate-950 px-5 py-4 text-left text-white shadow-[0_18px_36px_rgba(15,23,42,0.18)] transition-transform hover:-translate-y-0.5 hover:bg-slate-900 disabled:opacity-100 disabled:bg-slate-300 disabled:text-slate-500 disabled:hover:translate-y-0";
 const SECONDARY_ACTION_CARD_CLASS = "h-auto w-full rounded-[24px] border-slate-200 bg-slate-50 px-5 py-4 text-left text-slate-900 shadow-none transition-transform hover:-translate-y-0.5 hover:bg-slate-100 disabled:opacity-100 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:hover:translate-y-0";
@@ -358,6 +359,8 @@ type SceneViewModel = {
   evidence_refs?: string[];
   render_strategy?: 'generated' | 'source_media' | 'hybrid';
   source_media?: SourceMediaViewModel[];
+  expected_source_media_count?: number;
+  source_proof_warning?: string;
   status: string;
   qa_status?: 'PASS' | 'WARN' | 'FAIL';
   qa_reasons?: string[];
@@ -557,6 +560,49 @@ const snapshotStatusSummary = (snapshot: WorkflowSnapshot | null): string => {
   return snapshot.workflow_id ? 'Workflow initialized. Signal extraction is pending.' : '';
 };
 
+const apiErrorMessage = (payload: unknown, fallback: string): string => {
+  if (payload && typeof payload === 'object') {
+    const candidate = payload as Record<string, unknown>;
+    if (typeof candidate.detail === 'string' && candidate.detail.trim()) return candidate.detail;
+    if (typeof candidate.message === 'string' && candidate.message.trim()) return candidate.message;
+  }
+  return fallback;
+};
+
+type WorkflowRequestError = Error & { statusCode?: number };
+
+const createApiRequestError = (
+  payload: unknown,
+  fallback: string,
+  statusCode?: number,
+): WorkflowRequestError => {
+  const error = new Error(apiErrorMessage(payload, fallback)) as WorkflowRequestError;
+  error.statusCode = statusCode;
+  return error;
+};
+
+const isUnknownWorkflowMessage = (value: unknown): boolean => (
+  typeof value === 'string' && value.includes('Unknown workflow_id:')
+);
+
+const isUnknownWorkflowError = (error: unknown): boolean => (
+  error instanceof Error
+  && (
+    isUnknownWorkflowMessage(error.message)
+    || ((error as WorkflowRequestError).statusCode === 404 && isUnknownWorkflowMessage(error.message))
+  )
+);
+
+const EXPIRED_WORKFLOW_MESSAGE = 'Saved workflow session expired on the server. Start extraction again.';
+
+const deriveSceneCount = (scriptPack: ScriptPackPayload | null | undefined): number => {
+  if (!scriptPack) return 0;
+  if (typeof scriptPack.scene_count === 'number' && Number.isFinite(scriptPack.scene_count) && scriptPack.scene_count > 0) {
+    return scriptPack.scene_count;
+  }
+  return Array.isArray(scriptPack.scenes) ? scriptPack.scenes.length : 0;
+};
+
 const asPlannerQaSummary = (value: unknown): PlannerQaSummary | null => {
   if (!value || typeof value !== 'object') return null;
   const candidate = value as Record<string, unknown>;
@@ -749,6 +795,8 @@ export default function AdvancedStudio() {
   const [extractedSignal, setExtractedSignal] = useState<ExtractedSignal | null>(null);
   const [extractProgress, setExtractProgress] = useState(0);
   const [signalStage, setSignalStage] = useState<'idle' | 'sending' | 'structuring' | 'ready' | 'error'>('idle');
+  const [scriptPackProgress, setScriptPackProgress] = useState(0);
+  const [scriptPackStage, setScriptPackStage] = useState<'idle' | 'outlining' | 'structuring' | 'validating' | 'ready' | 'error'>('idle');
   const [error, setError] = useState('');
   const [generationError, setGenerationError] = useState('');
   const [generationStatus, setGenerationStatus] = useState('');
@@ -773,6 +821,7 @@ export default function AdvancedStudio() {
   const [isGeneratingScriptPack, setIsGeneratingScriptPack] = useState(false);
   const [isApplyingProfile, setIsApplyingProfile] = useState(false);
   const [scenes, setScenes] = useState<Record<string, SceneViewModel>>({});
+  const [expectedSceneCount, setExpectedSceneCount] = useState(0);
   const [scriptPack, setScriptPack] = useState<ScriptPackPayload | null>(null);
   const [workflowId, setWorkflowId] = useState<string | null>(null);
   const [workflowSnapshot, setWorkflowSnapshot] = useState<WorkflowSnapshot | null>(null);
@@ -872,6 +921,74 @@ export default function AdvancedStudio() {
     }
   };
 
+  const clearPersistedWorkflowId = () => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    window.localStorage.removeItem(ADVANCED_WORKFLOW_STORAGE_KEY);
+  };
+
+  const resetWorkflowSession = (
+    options: {
+      silent?: boolean;
+      noteStage?: string;
+      noteMessage?: string;
+      statusMessage?: string;
+    } = {},
+  ) => {
+    const {
+      silent = false,
+      noteStage = 'Recovery',
+      noteMessage = EXPIRED_WORKFLOW_MESSAGE,
+      statusMessage = EXPIRED_WORKFLOW_MESSAGE,
+    } = options;
+    clearPersistedWorkflowId();
+    setWorkflowId(null);
+    setWorkflowSnapshot(null);
+    setExtractedSignal(null);
+    setSignalStage('idle');
+    setExtractProgress(0);
+    setScriptPack(null);
+    setScriptPackStage('idle');
+    setScriptPackProgress(0);
+    setScenes({});
+    setExpectedSceneCount(0);
+    setEvidenceViewer(null);
+    setError('');
+    setGenerationError('');
+    setGenerationStatus(statusMessage);
+    setIsExtracting(false);
+    setIsApplyingProfile(false);
+    setIsGeneratingScriptPack(false);
+    setIsGenerating(false);
+    setActionDialogStage(null);
+    setShowAmendHelp(false);
+    setActivePanel('source');
+    fullTextBuffer.current = {};
+    resetSignalPreviewRun();
+    resetScriptPreviewRun();
+    resetStreamPreviewRun();
+    if (!silent) {
+      pushAgentNote('error', noteStage, noteMessage);
+    }
+  };
+
+  const handleUnknownWorkflowError = (
+    error: unknown,
+    options: {
+      silent?: boolean;
+      noteStage?: string;
+      noteMessage?: string;
+      statusMessage?: string;
+    } = {},
+  ): boolean => {
+    if (!isUnknownWorkflowError(error)) {
+      return false;
+    }
+    resetWorkflowSession(options);
+    return true;
+  };
+
   const pushPlannerQaNote = (summary: PlannerQaSummary | null | undefined) => {
     if (!summary?.summary) return;
     const extras: string[] = [];
@@ -887,7 +1004,7 @@ export default function AdvancedStudio() {
 
   React.useEffect(() => {
     chatScrollAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [chatMessages.length, isExtracting, isApplyingProfile, isGeneratingScriptPack, isGenerating]);
+  }, [chatMessages.length]);
 
   const mapArtifactScope = (selectedArtifactType: string): string[] => {
     if (selectedArtifactType === 'slide_thumbnail') {
@@ -910,6 +1027,30 @@ export default function AdvancedStudio() {
     setWorkflowId(candidate.workflow_id);
   };
 
+  const syncWorkflowUiFromSnapshot = (snapshot: WorkflowSnapshot) => {
+    const checkpoints = snapshot.checkpoint_state ?? {};
+    if (checkpoints.CP1_SIGNAL_READY === 'passed' || snapshot.has_signal) {
+      setSignalStage('ready');
+      setExtractProgress(100);
+      setError('');
+    } else if (checkpoints.CP1_SIGNAL_READY === 'failed') {
+      setSignalStage('error');
+      setExtractProgress(0);
+    }
+
+    if (checkpoints.CP6_BUNDLE_FINALIZED === 'passed' || checkpoints.CP5_STREAM_COMPLETE === 'passed') {
+      setActivePanel('stream');
+    } else if (snapshot.has_script_pack) {
+      setActivePanel('script');
+    } else if (snapshot.ready_for_script_pack || snapshot.has_render_profile || snapshot.render_profile_queued) {
+      setActivePanel('signal');
+    } else if (snapshot.workflow_id) {
+      setActivePanel('profile');
+    }
+
+    setGenerationStatus(snapshotStatusSummary(snapshot));
+  };
+
   const buildSourceManifestPayload = () => (
     uploadedSourceAssets.length > 0
       ? {
@@ -930,7 +1071,10 @@ export default function AdvancedStudio() {
   const hasSourceInput = sourceDoc.trim().length > 0 || uploadedSourceAssets.length > 0;
   const clearGeneratedOutputs = () => {
     setScriptPack(null);
+    setScriptPackProgress(0);
+    setScriptPackStage('idle');
     setScenes({});
+    setExpectedSceneCount(0);
     setEvidenceViewer(null);
     fullTextBuffer.current = {};
   };
@@ -1102,10 +1246,15 @@ export default function AdvancedStudio() {
     });
   };
 
-  const fetchWorkflowSnapshot = async (workflowIdValue: string): Promise<void> => {
+  const fetchWorkflowSnapshot = async (workflowIdValue: string): Promise<WorkflowSnapshot> => {
     const response = await fetch(`${API_BASE}/api/workflow/${workflowIdValue}`);
-    const snapshot = await response.json() as WorkflowSnapshot;
+    const payload = await response.json();
+    if (!response.ok) {
+      throw createApiRequestError(payload, 'Unable to load workflow state.', response.status);
+    }
+    const snapshot = payload as WorkflowSnapshot;
     updateWorkflowSnapshot(snapshot);
+    syncWorkflowUiFromSnapshot(snapshot);
     const streamFailed = snapshot.checkpoint_state?.CP5_STREAM_COMPLETE === 'failed'
       || snapshot.checkpoint_state?.CP6_BUNDLE_FINALIZED === 'failed';
     if (streamFailed && typeof snapshot.last_error === 'string' && snapshot.last_error.trim()) {
@@ -1116,7 +1265,96 @@ export default function AdvancedStudio() {
     ) {
       setGenerationError('');
     }
+    return snapshot;
   };
+
+  const fetchWorkflowSignal = async (workflowIdValue: string): Promise<ExtractedSignal> => {
+    const response = await fetch(`${API_BASE}/api/workflow/${workflowIdValue}/content-signal`);
+    const payload = await response.json();
+    if (!response.ok || payload?.status !== 'success' || !payload?.content_signal) {
+      throw createApiRequestError(payload, 'Unable to load extracted signal.', response.status);
+    }
+    return payload.content_signal as ExtractedSignal;
+  };
+
+  const fetchWorkflowScriptPack = async (workflowIdValue: string): Promise<ScriptPackPayload> => {
+    const response = await fetch(`${API_BASE}/api/workflow/${workflowIdValue}/script-pack`);
+    const payload = await response.json();
+    if (!response.ok || payload?.status !== 'success' || !payload?.script_pack) {
+      throw createApiRequestError(payload, 'Unable to load script pack.', response.status);
+    }
+    return payload.script_pack as ScriptPackPayload;
+  };
+
+  const recoverWorkflowState = async (
+    workflowIdValue: string,
+    options: { silent?: boolean } = {},
+  ): Promise<WorkflowSnapshot | null> => {
+    const { silent = false } = options;
+
+    try {
+      const snapshot = await fetchWorkflowSnapshot(workflowIdValue);
+      if (snapshot.has_signal) {
+        try {
+          const recoveredSignal = await fetchWorkflowSignal(workflowIdValue);
+          setExtractedSignal(recoveredSignal);
+        } catch (signalError) {
+          console.warn('Signal recovery error:', signalError);
+        }
+      }
+      if (snapshot.has_script_pack) {
+        try {
+          const recoveredScriptPack = await fetchWorkflowScriptPack(workflowIdValue);
+          setScriptPack(recoveredScriptPack);
+          setExpectedSceneCount(deriveSceneCount(recoveredScriptPack));
+          setScriptPackStage('ready');
+          setScriptPackProgress(100);
+        } catch (scriptPackError) {
+          console.warn('Script pack recovery error:', scriptPackError);
+        }
+      } else {
+        setExpectedSceneCount(0);
+        setScriptPackStage('idle');
+        setScriptPackProgress(0);
+      }
+      if (!silent) {
+        pushAgentNote('info', 'Recovery', 'Recovered workflow state from the latest saved checkpoint.');
+      }
+      return snapshot;
+    } catch (recoveryError) {
+      if (handleUnknownWorkflowError(recoveryError, { silent, noteStage: 'Recovery' })) {
+        return null;
+      }
+      console.error('Workflow recovery error:', recoveryError);
+      if (!silent) {
+        pushAgentNote('error', 'Recovery', 'Unable to recover saved workflow state.');
+      }
+      return null;
+    }
+  };
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    if (workflowId) {
+      window.localStorage.setItem(ADVANCED_WORKFLOW_STORAGE_KEY, workflowId);
+    } else {
+      window.localStorage.removeItem(ADVANCED_WORKFLOW_STORAGE_KEY);
+    }
+  }, [workflowId]);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    const storedWorkflowId = window.localStorage.getItem(ADVANCED_WORKFLOW_STORAGE_KEY);
+    if (!storedWorkflowId || storedWorkflowId === workflowId) {
+      return;
+    }
+    void recoverWorkflowState(storedWorkflowId, { silent: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Typewriter effect loop
   React.useEffect(() => {
@@ -1181,7 +1419,45 @@ export default function AdvancedStudio() {
   }, [isExtracting]);
 
   React.useEffect(() => {
-    if (signalTypingRunId === 0) {
+    if (!isGeneratingScriptPack) {
+      return;
+    }
+
+    setScriptPackStage('outlining');
+    setScriptPackProgress((prev) => Math.max(prev, 10));
+
+    const structuringTimer = window.setTimeout(() => {
+      setScriptPackStage((prev) => (prev === 'outlining' ? 'structuring' : prev));
+    }, 1300);
+
+    const validatingTimer = window.setTimeout(() => {
+      setScriptPackStage((prev) => (
+        prev === 'outlining' || prev === 'structuring'
+          ? 'validating'
+          : prev
+      ));
+    }, 3200);
+
+    const progressSteps = [16, 24, 35, 47, 58, 68, 77, 85, 91, 95];
+    let stepIndex = 0;
+    const progressTimer = window.setInterval(() => {
+      setScriptPackProgress((prev) => {
+        if (prev >= 95) return prev;
+        const nextValue = progressSteps[Math.min(stepIndex, progressSteps.length - 1)];
+        stepIndex += 1;
+        return Math.max(prev, nextValue);
+      });
+    }, 950);
+
+    return () => {
+      window.clearTimeout(structuringTimer);
+      window.clearTimeout(validatingTimer);
+      window.clearInterval(progressTimer);
+    };
+  }, [isGeneratingScriptPack]);
+
+  React.useEffect(() => {
+    if (signalTypingRunId === 0 || extractedSignal) {
       return;
     }
 
@@ -1212,10 +1488,10 @@ export default function AdvancedStudio() {
     }, tickMs);
 
     return () => window.clearInterval(intervalId);
-  }, [signalTypingRunId]);
+  }, [signalTypingRunId, extractedSignal]);
 
   React.useEffect(() => {
-    if (scriptTypingRunId === 0) {
+    if (scriptTypingRunId === 0 || scriptPack) {
       return;
     }
 
@@ -1245,10 +1521,18 @@ export default function AdvancedStudio() {
     }, tickMs);
 
     return () => window.clearInterval(intervalId);
-  }, [scriptTypingRunId]);
+  }, [scriptTypingRunId, scriptPack]);
 
   React.useEffect(() => {
-    if (streamTypingRunId === 0) {
+    const streamOutputReady = Object.values(scenes).some((scene) => (
+      scene.text.trim().length > 0
+      || Boolean(scene.imageUrl)
+      || Boolean(scene.audioUrl)
+      || (scene.source_media?.length ?? 0) > 0
+      || scene.status === 'ready'
+      || scene.status === 'qa-failed'
+    ));
+    if (streamTypingRunId === 0 || streamOutputReady) {
       return;
     }
 
@@ -1278,21 +1562,23 @@ export default function AdvancedStudio() {
     }, tickMs);
 
     return () => window.clearInterval(intervalId);
-  }, [streamTypingRunId]);
+  }, [streamTypingRunId, scenes]);
 
   React.useEffect(() => {
-    if (!extractedSignal || !signalTypingComplete) return;
+    if (!extractedSignal) return;
     setTypedExplainer('');
     setTypedPreview('');
     setSignalTypewriterArmed(false);
-  }, [extractedSignal, signalTypingComplete]);
+    setSignalTypingComplete(true);
+  }, [extractedSignal]);
 
   React.useEffect(() => {
-    if (!scriptPack || !scriptTypingComplete) return;
+    if (!scriptPack) return;
     setTypedScriptExplainer('');
     setTypedScriptPreview('');
     setScriptTypewriterArmed(false);
-  }, [scriptPack, scriptTypingComplete]);
+    setScriptTypingComplete(true);
+  }, [scriptPack]);
 
   React.useEffect(() => {
     const streamOutputReady = Object.values(scenes).some((scene) => (
@@ -1303,11 +1589,12 @@ export default function AdvancedStudio() {
       || scene.status === 'ready'
       || scene.status === 'qa-failed'
     ));
-    if (!streamOutputReady || !streamTypingComplete) return;
+    if (!streamOutputReady) return;
     setTypedStreamExplainer('');
     setTypedStreamPreview('');
     setStreamTypewriterArmed(false);
-  }, [scenes, streamTypingComplete]);
+    setStreamTypingComplete(true);
+  }, [scenes]);
 
   const openActionDialog = (stage: ActionDialogStage) => {
     setActionDialogStage(stage);
@@ -1324,6 +1611,12 @@ export default function AdvancedStudio() {
       return false;
     }
     const { armSignalPreview = false } = options;
+    const sourceManifest = buildSourceManifestPayload();
+    const canReuseWorkflow = Boolean(
+      workflowId
+      && workflowSnapshot?.checkpoint_state?.CP1_SIGNAL_READY !== 'passed',
+    );
+    let activeWorkflowId = canReuseWorkflow ? workflowId : null;
 
     setAgentNotes([]);
     pushAgentNote('info', 'Extraction', 'Signal extraction started from source material.');
@@ -1343,37 +1636,42 @@ export default function AdvancedStudio() {
     setGenerationStatus('');
     clearGeneratedOutputs();
     setFidelityPreference('preview');
-    setWorkflowId(null);
-    setWorkflowSnapshot(null);
     
     try {
-      const sourceManifest = buildSourceManifestPayload();
-      const startResponse = await fetch(`${API_BASE}/api/workflow/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source_text: sourceDoc,
-          ...(sourceManifest ? { source_manifest: sourceManifest } : {}),
-        })
-      });
-      const startData: {
-        workflow_id?: string;
-        workflow?: WorkflowSnapshot;
-        status?: string;
-      } = await startResponse.json();
-      if (!startResponse.ok || startData.status !== 'success' || !startData.workflow_id) {
-        setError('Unable to initialize workflow.');
-        pushAgentNote('error', 'Extraction', 'Workflow initialization failed.');
-        setSignalStage('error');
-        setExtractProgress(0);
-        return false;
-      }
-      setWorkflowId(startData.workflow_id);
-      if (startData.workflow) {
-        updateWorkflowSnapshot(startData.workflow);
+      if (!activeWorkflowId) {
+        const startResponse = await fetch(`${API_BASE}/api/workflow/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source_text: sourceDoc,
+            ...(sourceManifest ? { source_manifest: sourceManifest } : {}),
+          })
+        });
+        const startData: {
+          workflow_id?: string;
+          workflow?: WorkflowSnapshot;
+          status?: string;
+          detail?: string;
+          message?: string;
+        } = await startResponse.json();
+        if (!startResponse.ok || startData.status !== 'success' || !startData.workflow_id) {
+          setError(apiErrorMessage(startData, 'Unable to initialize workflow.'));
+          pushAgentNote('error', 'Extraction', 'Workflow initialization failed.');
+          setSignalStage('error');
+          setExtractProgress(0);
+          return false;
+        }
+        activeWorkflowId = startData.workflow_id;
+        setWorkflowId(startData.workflow_id);
+        if (startData.workflow) {
+          updateWorkflowSnapshot(startData.workflow);
+          syncWorkflowUiFromSnapshot(startData.workflow);
+        } else {
+          setWorkflowSnapshot(null);
+        }
       }
 
-      const extractResponse = await fetch(`${API_BASE}/api/workflow/${startData.workflow_id}/extract-signal`, {
+      const extractResponse = await fetch(`${API_BASE}/api/workflow/${activeWorkflowId}/extract-signal`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1391,6 +1689,7 @@ export default function AdvancedStudio() {
       } = await extractResponse.json();
       if (data.workflow) {
         updateWorkflowSnapshot(data.workflow);
+        syncWorkflowUiFromSnapshot(data.workflow);
       }
       if (data.status === 'success') {
         setExtractedSignal(data.content_signal ?? null);
@@ -1412,6 +1711,14 @@ export default function AdvancedStudio() {
       }
     } catch (err) {
       console.error(err);
+      if (activeWorkflowId) {
+        const recoveredSnapshot = await recoverWorkflowState(activeWorkflowId, { silent: true });
+        if (recoveredSnapshot?.has_signal || recoveredSnapshot?.checkpoint_state?.CP1_SIGNAL_READY === 'passed') {
+          pushAgentNote('checkpoint', 'Extraction', 'Recovered extracted signal after a network interruption.');
+          setError('');
+          return true;
+        }
+      }
       setError('Network error during extraction');
       pushAgentNote('error', 'Extraction', 'Network error during signal extraction.');
       setSignalStage('error');
@@ -1476,12 +1783,37 @@ export default function AdvancedStudio() {
   };
 
   const handleConfirmSignal = async () => {
-    if (!extractedSignal) {
+    let currentSnapshot = workflowSnapshot;
+    let signalToUse = extractedSignal;
+
+    if (workflowId) {
+      try {
+        currentSnapshot = await fetchWorkflowSnapshot(workflowId);
+      } catch (snapshotError) {
+        if (handleUnknownWorkflowError(snapshotError, { noteStage: 'Signal' })) {
+          return;
+        }
+        console.error('Signal confirmation snapshot refresh error:', snapshotError);
+      }
+    }
+    if (!signalToUse && workflowId && currentSnapshot?.has_signal) {
+      try {
+        signalToUse = await fetchWorkflowSignal(workflowId);
+        setExtractedSignal(signalToUse);
+      } catch (signalError) {
+        if (handleUnknownWorkflowError(signalError, { noteStage: 'Signal' })) {
+          return;
+        }
+        console.error('Signal confirmation recovery error:', signalError);
+      }
+    }
+
+    if (!signalToUse) {
       setGenerationStatus('Extract signal first.');
       pushAgentNote('error', 'Signal', 'Signal confirmation blocked: extract signal first.');
       return;
     }
-    if (!workflowSnapshot?.ready_for_script_pack) {
+    if (!currentSnapshot?.ready_for_script_pack) {
       setGenerationStatus('Workflow gate not ready. Lock artifact scope and render profile first.');
       pushAgentNote('error', 'Signal', 'Signal confirmation blocked by join gate (artifacts/render not locked).');
       return;
@@ -1604,6 +1936,26 @@ export default function AdvancedStudio() {
       return updatedWorkflow ?? null;
     } catch (err) {
       console.error('Apply profile error:', err);
+      const recoveredSnapshot = await recoverWorkflowState(workflowId, { silent: true });
+      if (recoveredSnapshot) {
+        const cp3Status = recoveredSnapshot.checkpoint_state?.CP3_RENDER_LOCKED;
+        if (cp3Status === 'passed') {
+          setGenerationError('');
+          setGenerationStatus(
+            mode === 'high'
+              ? 'High-fidelity profile locked. Current bundle images can now be upscaled without changing the script.'
+              : 'Render profile locked. Continue to signal confirmation and script planning.'
+          );
+          pushAgentNote('checkpoint', 'Render Profile', 'Recovered render profile lock after a network interruption.');
+          return recoveredSnapshot;
+        }
+        if (recoveredSnapshot.render_profile_queued) {
+          setGenerationError('');
+          setGenerationStatus('Artifacts locked. Render profile queued and will auto-lock when signal extraction completes.');
+          pushAgentNote('info', 'Render Profile', 'Recovered queued render profile after a network interruption.');
+          return recoveredSnapshot;
+        }
+      }
       setGenerationError('Unable to lock render profile in workflow.');
       pushAgentNote('error', 'Render Profile', 'Unable to lock render profile in workflow.');
       setGenerationStatus('');
@@ -1619,7 +1971,16 @@ export default function AdvancedStudio() {
       pushAgentNote('error', 'Script Pack', 'Cannot generate script pack before extraction workflow starts.');
       return;
     }
-    if (!workflowSnapshot?.ready_for_script_pack) {
+    let currentSnapshot = workflowSnapshot;
+    try {
+      currentSnapshot = await fetchWorkflowSnapshot(workflowId);
+    } catch (snapshotError) {
+      if (handleUnknownWorkflowError(snapshotError, { noteStage: 'Script Pack' })) {
+        return;
+      }
+      console.error('Script pack snapshot refresh error:', snapshotError);
+    }
+    if (!currentSnapshot?.ready_for_script_pack) {
       setGenerationStatus('Workflow gate not ready. Lock artifacts and render profile first.');
       pushAgentNote('error', 'Script Pack', 'Script pack generation blocked by workflow gate.');
       return;
@@ -1633,6 +1994,9 @@ export default function AdvancedStudio() {
         ? 'Preparing script pack for your confirmation...'
         : 'Preparing script pack for immediate use...'
     );
+    setActivePanel('script');
+    setScriptPackStage('outlining');
+    setScriptPackProgress(10);
     pushAgentNote(
       'info',
       'Script Pack',
@@ -1642,6 +2006,7 @@ export default function AdvancedStudio() {
     );
     startScriptPreviewRun();
     setScriptPack(null);
+    setExpectedSceneCount(0);
     if (mode === 'review') {
       setActivePanel('script');
     }
@@ -1658,6 +2023,9 @@ export default function AdvancedStudio() {
       if (data?.status === 'success' && data?.script_pack) {
         const approvedScriptPack = data.script_pack as ScriptPackPayload;
         setScriptPack(approvedScriptPack);
+        setExpectedSceneCount(deriveSceneCount(approvedScriptPack));
+        setScriptPackStage('ready');
+        setScriptPackProgress(100);
         pushPlannerQaNote(asPlannerQaSummary(data.planner_qa_summary));
         if (mode === 'review') {
           setGenerationStatus('Script pack is ready. Review and amend before starting stream generation.');
@@ -1679,12 +2047,34 @@ export default function AdvancedStudio() {
         const detail = typeof data?.detail === 'string'
           ? data.detail
           : (typeof data?.message === 'string' ? data.message : 'Script pack generation failed.');
+        setScriptPackStage('error');
+        setScriptPackProgress(0);
         setGenerationError(detail);
         pushAgentNote('error', 'Script Pack', detail);
         setGenerationStatus('');
       }
     } catch (err) {
       console.error("Script pack error:", err);
+      const recoveredSnapshot = await recoverWorkflowState(workflowId, { silent: true });
+      if (recoveredSnapshot?.has_script_pack) {
+        setScriptPackStage('ready');
+        setScriptPackProgress(100);
+        setGenerationError('');
+        if (scriptPack) {
+          setExpectedSceneCount(deriveSceneCount(scriptPack));
+        }
+        if (mode === 'review') {
+          setGenerationStatus('Script pack is ready. Review and amend before starting stream generation.');
+          setActivePanel('script');
+        } else {
+          setGenerationStatus('Recovered script pack after a network interruption.');
+          setActivePanel('script');
+        }
+        pushAgentNote('checkpoint', 'Script Pack', 'Recovered script pack after a network interruption.');
+        return;
+      }
+      setScriptPackStage('error');
+      setScriptPackProgress(0);
       setGenerationError('Unable to generate script pack.');
       pushAgentNote('error', 'Script Pack', 'Unable to generate script pack.');
       setGenerationStatus('');
@@ -1820,6 +2210,7 @@ export default function AdvancedStudio() {
     setGenerationError('');
     setGenerationStatus(preparationMessage);
     startStreamPreviewRun();
+    setExpectedSceneCount(deriveSceneCount(scriptPackOverride ?? scriptPack ?? null));
     if (!preserveExistingScenes) {
       setScenes({});
     }
@@ -1875,11 +2266,13 @@ export default function AdvancedStudio() {
                     claim_refs: sceneItem.claim_refs,
                     evidence_refs: sceneItem.evidence_refs,
                     render_strategy: sceneItem.render_strategy,
+                    expected_source_media_count: sceneItem.source_media_count,
                     text: '',
                     status: 'queued'
                   };
                   fullTextBuffer.current[sceneItem.scene_id] = sceneItem.narration_focus || '';
                 });
+                setExpectedSceneCount(queueScenes.length);
                 setScenes(initialScenes);
                 pushAgentNote(
                   'info',
@@ -1889,7 +2282,9 @@ export default function AdvancedStudio() {
               } else if (currentEvent === 'script_pack_ready') {
                 const rawPack = data.script_pack;
                 if (rawPack && typeof rawPack === 'object') {
-                  setScriptPack(rawPack as ScriptPackPayload);
+                  const streamScriptPack = rawPack as ScriptPackPayload;
+                  setScriptPack(streamScriptPack);
+                  setExpectedSceneCount(deriveSceneCount(streamScriptPack));
                   pushAgentNote('checkpoint', 'Script Pack', 'Script pack received in stream context.');
                 }
                 pushPlannerQaNote(asPlannerQaSummary(data.planner_qa_summary));
@@ -1908,6 +2303,7 @@ export default function AdvancedStudio() {
                     ? data.render_strategy
                     : undefined,
                   source_media: asSourceMediaList(data.source_media),
+                  source_proof_warning: undefined,
                   status: 'generating',
                 };
                 if (typeof data.title === 'string' && data.title.trim()) {
@@ -1933,6 +2329,13 @@ export default function AdvancedStudio() {
                 const sourceMedia = asSourceMedia(data);
                 if (!sourceMedia) continue;
                 appendSourceMedia(sceneId, sourceMedia);
+                updateSceneMetadata(sceneId, { source_proof_warning: undefined });
+              } else if (currentEvent === 'source_media_warning') {
+                const sceneId = typeof data.scene_id === 'string' ? data.scene_id : '';
+                const message = typeof data.message === 'string' ? data.message.trim() : '';
+                if (!sceneId || !message) continue;
+                updateSceneMetadata(sceneId, { source_proof_warning: message });
+                pushAgentNote('qa', sceneId, message);
               } else if (currentEvent === 'qa_status') {
                 const qa = data as unknown as SceneQaPayload;
                 if (!qa.scene_id) continue;
@@ -1975,9 +2378,26 @@ export default function AdvancedStudio() {
                 if (!sceneId) continue;
                 const qaStatus = typeof data.qa_status === 'string' ? data.qa_status : '';
                 const autoRetries = typeof data.auto_retries === 'number' ? data.auto_retries : undefined;
-                updateSceneMetadata(sceneId, {
-                  status: qaStatus === 'FAIL' ? 'qa-failed' : 'ready',
-                  auto_retry_count: autoRetries,
+                setScenes((prev) => {
+                  const existing = prev[sceneId] ?? { id: sceneId, text: '', status: 'queued' };
+                  const sourceMediaCount = Array.isArray(existing.source_media) ? existing.source_media.length : 0;
+                  const expectedSourceMediaCount = existing.expected_source_media_count ?? 0;
+                  const nextWarning = (
+                    (expectedSourceMediaCount > 0 || (existing.evidence_refs?.length ?? 0) > 0)
+                    && sourceMediaCount === 0
+                    && !existing.source_proof_warning
+                  )
+                    ? 'Source proof was planned for this scene, but no resolved proof links were attached.'
+                    : existing.source_proof_warning;
+                  return {
+                    ...prev,
+                    [sceneId]: {
+                      ...existing,
+                      status: qaStatus === 'FAIL' ? 'qa-failed' : 'ready',
+                      auto_retry_count: autoRetries,
+                      source_proof_warning: nextWarning,
+                    },
+                  };
                 });
                 if (qaStatus) {
                   pushAgentNote('info', sceneId, `Scene done with QA ${qaStatus}.`);
@@ -2025,7 +2445,8 @@ export default function AdvancedStudio() {
                 if (workflowId) {
                   try {
                     await fetchWorkflowSnapshot(workflowId);
-                  } catch {
+                  } catch (snapshotError) {
+                    handleUnknownWorkflowError(snapshotError, { silent: true, noteStage: 'Generation' });
                     // Snapshot refresh is best-effort.
                   }
                 }
@@ -2037,7 +2458,8 @@ export default function AdvancedStudio() {
                 if (workflowId) {
                   try {
                     await fetchWorkflowSnapshot(workflowId);
-                  } catch {
+                  } catch (snapshotError) {
+                    handleUnknownWorkflowError(snapshotError, { silent: true, noteStage: 'Generation' });
                     // Snapshot refresh is best-effort.
                   }
                 }
@@ -2057,7 +2479,8 @@ export default function AdvancedStudio() {
       if (workflowId) {
         try {
           await fetchWorkflowSnapshot(workflowId);
-        } catch {
+        } catch (snapshotError) {
+          handleUnknownWorkflowError(snapshotError, { silent: true, noteStage: 'Generation' });
           // Snapshot refresh is best-effort.
         }
       }
@@ -2147,6 +2570,16 @@ export default function AdvancedStudio() {
         }),
       });
       const data = await response.json() as WorkflowAgentChatResponse;
+      if (!response.ok) {
+        const detail = apiErrorMessage(data, 'Agent request failed.');
+        if (isUnknownWorkflowMessage(detail)) {
+          resetWorkflowSession({ noteStage: 'Agent' });
+          return;
+        }
+        setGenerationError(detail);
+        pushAgentNote('error', 'Agent', detail);
+        return;
+      }
       const returnedWorkflow = data.workflow && typeof data.workflow === 'object'
         ? data.workflow as WorkflowSnapshot
         : null;
@@ -2173,6 +2606,7 @@ export default function AdvancedStudio() {
         }
         if (returnedWorkflow.has_script_pack === false && !data.script_pack) {
           setScriptPack(null);
+          setExpectedSceneCount(0);
         }
         if (
           workflowChanged
@@ -2194,6 +2628,7 @@ export default function AdvancedStudio() {
       if (data.script_pack && typeof data.script_pack === 'object') {
         scriptPackOverride = data.script_pack as ScriptPackPayload;
         setScriptPack(scriptPackOverride);
+        setExpectedSceneCount(deriveSceneCount(scriptPackOverride));
       }
       pushPlannerQaNote(asPlannerQaSummary(data.planner_qa_summary));
       if (data.ui?.active_panel) {
@@ -2205,7 +2640,7 @@ export default function AdvancedStudio() {
 
       const detail = typeof data.message === 'string'
         ? data.message
-        : (!response.ok ? 'Agent request failed.' : '');
+        : '';
       if (detail) {
         setGenerationError(detail);
         pushAgentNote('error', 'Agent', detail);
@@ -2246,7 +2681,7 @@ export default function AdvancedStudio() {
     }));
   };
 
-  const totalSceneCount = Object.keys(scenes).length;
+  const totalSceneCount = Math.max(expectedSceneCount, Object.keys(scenes).length);
   const completedSceneCount = Object.values(scenes).filter(
     scene => scene.status === 'ready' || scene.status === 'qa-failed'
   ).length;
@@ -2292,6 +2727,15 @@ export default function AdvancedStudio() {
       : signalStage === 'ready'
         ? 'Signal extraction complete.'
         : '';
+  const scriptPackPhaseText = scriptPackStage === 'outlining'
+    ? 'Mapping scene roles, claim coverage, and artifact structure...'
+    : scriptPackStage === 'structuring'
+      ? 'Drafting narration focus, visual directives, and continuity...'
+      : scriptPackStage === 'validating'
+        ? 'Running planner QA, repairs, and script-pack locking...'
+        : scriptPackStage === 'ready'
+          ? 'Script pack ready for review.'
+          : '';
   const streamOutputReady = Object.values(scenes).some((scene) => (
     scene.text.trim().length > 0
     || Boolean(scene.imageUrl)
@@ -2302,15 +2746,22 @@ export default function AdvancedStudio() {
   ));
   const showSignalTypingPreview = signalTypewriterArmed
     && signalStage !== 'error'
-    && (!extractedSignal || !signalTypingComplete);
+    && !extractedSignal;
   const scriptPreviewFailed = scriptTypewriterArmed && !isGeneratingScriptPack && !scriptPack && generationError.trim().length > 0;
   const showScriptTypingPreview = scriptTypewriterArmed
     && !scriptPreviewFailed
-    && (!scriptPack || !scriptTypingComplete);
+    && !scriptPack;
   const streamPreviewFailed = streamTypewriterArmed && !isGenerating && !streamOutputReady && generationError.trim().length > 0;
   const showStreamTypingPreview = streamTypewriterArmed
     && !streamPreviewFailed
-    && (!streamOutputReady || !streamTypingComplete);
+    && !streamOutputReady;
+  const signalAlreadyConfirmed = Boolean(
+    isGeneratingScriptPack
+    || scriptPack
+    || workflowSnapshot?.has_script_pack
+    || workflowSnapshot?.ready_for_stream
+    || workflowSnapshot?.checkpoint_state?.CP4_SCRIPT_LOCKED === 'passed'
+  );
   const panelOrder: AdvancedPanel[] = ['source', 'profile', 'signal', 'script', 'stream'];
   const panelLabel: Record<AdvancedPanel, string> = {
     source: 'Extract Signal',
@@ -3139,13 +3590,15 @@ export default function AdvancedStudio() {
                         type="button"
                         className={PRIMARY_ACTION_CARD_CLASS}
                         onClick={() => void handleConfirmSignal()}
-                        disabled={!extractedSignal}
+                        disabled={!extractedSignal || signalAlreadyConfirmed}
                       >
                         <span className="space-y-1 text-left">
                           <span className={PRIMARY_ACTION_LABEL_CLASS}>
                             Primary Action
                           </span>
-                          <span className="block text-base font-semibold">Confirm Signal</span>
+                          <span className="block text-base font-semibold">
+                            {signalAlreadyConfirmed ? 'Signal Confirmed' : 'Confirm Signal'}
+                          </span>
                         </span>
                       </Button>
                       <Button
@@ -3221,6 +3674,9 @@ export default function AdvancedStudio() {
                     </div>
                     {showStreamTypingPreview && (
                       <div className="space-y-4">
+                        <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+                          Generation can continue for a while after the stream starts. You can keep asking questions in the assistant chat while scenes render.
+                        </div>
                         <div className="p-4 bg-indigo-50 text-indigo-950 rounded-md border border-indigo-200">
                           <h4 className="font-semibold mb-2">Orchestrating Generation Stream...</h4>
                           <p className="text-sm whitespace-pre-wrap font-mono leading-6">
@@ -3275,6 +3731,11 @@ export default function AdvancedStudio() {
                       </div>
                     ) : showScriptTypingPreview ? (
                       <div className="space-y-4">
+                        <Progress value={scriptPackProgress} className="h-2 bg-blue-100 [&>*]:bg-blue-500" />
+                        <p className="text-sm text-slate-700">{scriptPackPhaseText}</p>
+                        <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+                          Script planning can take around a minute on the current architecture. You can keep asking questions in the assistant chat while it runs.
+                        </div>
                         <div className="p-4 bg-blue-50 text-blue-900 rounded-md border border-blue-200">
                           <h4 className="font-semibold mb-2">Drafting Script Pack...</h4>
                           <p className="text-sm whitespace-pre-wrap font-mono leading-6">
@@ -3374,6 +3835,7 @@ export default function AdvancedStudio() {
                 qaScore={scene.qa_score}
                 qaWordCount={scene.qa_word_count}
                 autoRetryCount={scene.auto_retry_count}
+                sourceProofWarning={scene.source_proof_warning}
                 audioStatus={isGenerating && !scene.audioUrl ? "Generating..." : "Ready"} 
               />
             ))}

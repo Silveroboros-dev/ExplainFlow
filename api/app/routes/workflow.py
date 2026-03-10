@@ -22,7 +22,8 @@ chat_agent = WorkflowChatAgent(coordinator=coordinator, story_agent=agent)
 
 def _handle_error(exc: Exception, status_code: int = 409) -> HTTPException:
     if isinstance(exc, KeyError):
-        return HTTPException(status_code=404, detail=str(exc))
+        detail = exc.args[0] if exc.args and isinstance(exc.args[0], str) else str(exc)
+        return HTTPException(status_code=404, detail=detail)
     return HTTPException(status_code=status_code, detail=str(exc))
 
 
@@ -80,6 +81,36 @@ async def workflow_extract_signal(workflow_id: str, payload: WorkflowStartReques
 async def workflow_snapshot(workflow_id: str):
     try:
         return await coordinator.get_snapshot(workflow_id)
+    except Exception as exc:
+        raise _handle_error(exc) from exc
+
+
+@router.get("/workflow/{workflow_id}/content-signal")
+async def workflow_content_signal(workflow_id: str):
+    try:
+        content_signal = await coordinator.get_content_signal(workflow_id)
+        if content_signal is None:
+            raise ValueError("Content signal is not available for this workflow yet.")
+        return {
+            "status": "success",
+            "workflow_id": workflow_id,
+            "content_signal": content_signal,
+        }
+    except Exception as exc:
+        raise _handle_error(exc) from exc
+
+
+@router.get("/workflow/{workflow_id}/script-pack")
+async def workflow_script_pack(workflow_id: str):
+    try:
+        script_pack = await coordinator.get_script_pack(workflow_id)
+        if script_pack is None:
+            raise ValueError("Script pack is not available for this workflow yet.")
+        return {
+            "status": "success",
+            "workflow_id": workflow_id,
+            "script_pack": script_pack,
+        }
     except Exception as exc:
         raise _handle_error(exc) from exc
 

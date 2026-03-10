@@ -30,6 +30,7 @@ interface SceneCardProps {
   qaScore?: number;
   qaWordCount?: number;
   autoRetryCount?: number;
+  sourceProofWarning?: string;
   onRegenerate?: (sceneId: string, newText: string, newImageUrl: string, newAudioUrl: string) => void;
   onOpenEvidence?: (sceneId: string, claimRef?: string) => void;
 }
@@ -51,6 +52,7 @@ export default function SceneCard({
   qaScore,
   qaWordCount,
   autoRetryCount,
+  sourceProofWarning,
   onRegenerate,
   onOpenEvidence,
 }: SceneCardProps) {
@@ -194,6 +196,12 @@ export default function SceneCard({
                 )}
               </div>
             )}
+            {!hasSourceProofs && sourceProofWarning ? (
+              <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-900">Source Proof Warning</p>
+                <p className="mt-1 text-sm text-amber-950">{sourceProofWarning}</p>
+              </div>
+            ) : null}
             {hasSourceProofs && onOpenEvidence && (
               <Button
                 type="button"

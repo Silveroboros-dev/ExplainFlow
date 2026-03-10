@@ -160,6 +160,194 @@ These are not sprint regressions; they are next-step roadmap items.
 5. Video ingest and Live API mode
 - not part of this sprint
 
+## Planned Next Feature: Quick MP4 v0
+
+This is the recommended hackathon-grade next feature for Quick.
+
+### Goal
+
+Generate a hacky but demoable MP4 from Quick with:
+
+- reel-driven segment order
+- generated visuals
+- voiceover from segment captions
+- optional local proof clip intercuts
+- crossfades
+
+### Core Rule
+
+Treat video as the third derived layer in Quick:
+
+1. artifact first
+2. reel second
+3. video third
+
+Do not compose from raw extracted signal directly. Compose from `artifact.reel`, because it already contains ordered segments, render mode, captions, claim/evidence refs, and source timing.
+
+### Scope
+
+- `/quick` only
+- artifact -> reel -> video
+- local uploaded video supported for proof intercuts
+- YouTube allowed as input for artifact/reel, but video export falls back to generated-image segments
+- no Advanced changes
+- no editor
+- no live streaming render
+
+### Backend Plan
+
+Files:
+
+- `api/app/schemas/requests.py`
+- `api/app/routes/generate_stream.py`
+- new `api/app/services/video_pipeline.py`
+- `api/app/services/audio_pipeline.py`
+- `api/requirements.txt`
+
+Add schemas:
+
+- `QuickVideoSegmentSchema`
+  - `segment_id: str`
+  - `block_id: str`
+  - `title: str`
+  - `caption_text: str`
+  - `voiceover_url: str | None = None`
+  - `visual_url: str | None = None`
+  - `source_video_url: str | None = None`
+  - `source_start_ms: int | None = None`
+  - `source_end_ms: int | None = None`
+  - `duration_ms: int | None = None`
+  - `render_mode: Literal["image_only", "image_plus_clip", "clip_only"]`
+- `QuickVideoSchema`
+  - `video_id: str`
+  - `status: Literal["ready"]`
+  - `video_url: str`
+  - `duration_ms: int | None = None`
+  - `segments: list[QuickVideoSegmentSchema] = Field(default_factory=list)`
+- `QuickVideoRequest`
+  - `artifact: QuickArtifactSchema | dict[str, Any]`
+  - `source_manifest: SourceManifestSchema | None = None`
+  - `content_signal: dict[str, Any] = Field(default_factory=dict)`
+
+Extend `QuickArtifactSchema`:
+
+- `video: QuickVideoSchema | None = None`
+
+Add service functions:
+
+- `build_quick_video(...)`
+- `build_quick_video_segment(...)`
+- `render_quick_video_mp4(...)`
+
+Composition rules:
+
+- ensure `artifact.reel` exists first
+- per segment:
+  - generate voiceover from `caption_text`
+  - if segment has generated image:
+    - image clip duration = voiceover duration
+    - apply slow Ken Burns zoom
+  - if segment has local uploaded source video and timing:
+    - append a 3-5 second muted proof clip
+  - if segment is source-only and local clip exists:
+    - use clip-only
+- concatenate segments with 0.35s crossfade
+- export one mp4 to `api/app/static/assets`
+
+Add endpoint:
+
+- `POST /api/generate-quick-video`
+- input: current `artifact`, `source_manifest`, optional `content_signal`
+- output: `status`, `artifact` with populated `video`
+
+### Frontend Plan
+
+File:
+
+- `web/src/app/quick/page.tsx`
+
+Add:
+
+- `Generate MP4` button in Proof Reel view
+- loading state: `Rendering MP4...`
+- render result:
+  - inline `<video controls src={artifact.video.video_url} />`
+  - download link
+  - optional duration badge
+
+Behavior:
+
+- if artifact changes, clear `artifact.video`
+- if reel is missing, backend builds it implicitly
+- if source is YouTube, show a note:
+  - `MP4 export used generated visuals only; source clip intercuts currently support uploaded local video.`
+
+### Why This Is Fast
+
+The repo already has most prerequisites:
+
+- ffmpeg already exists in `api/Dockerfile`
+- MP3 generation already exists in `api/app/services/audio_pipeline.py`
+- asset export paths already exist in `api/app/services/final_bundle_export.py`
+
+So the missing piece is mainly composition.
+
+Preferred implementation:
+
+- use `moviepy`
+- keep the surface small
+- stick to `ImageClip`, `VideoFileClip`, `AudioFileClip`, `CompositeVideoClip`, and `concatenate_videoclips`
+
+### Do Not Do In v0
+
+These will slow the feature down and are intentionally out of scope:
+
+- YouTube source intercuts
+- MP4 export for Advanced
+- editable timing controls
+- text-overlay typography system
+- Live API integration
+- streaming render progress beyond simple polling
+- perfect narration/clip sync tuning
+
+### Hackathon Compromise
+
+- uploaded local video only for proof intercuts
+- YouTube falls back to image-led video
+- one title slate at the start if time allows, otherwise skip it
+
+### Verification
+
+1. Prompt-only Quick artifact
+- generate reel
+- generate MP4
+- confirm downloadable mp4 exists
+
+2. Uploaded local video Quick artifact
+- generate reel
+- generate MP4
+- confirm at least one source intercut appears when timing exists
+
+3. YouTube input
+- generate MP4
+- confirm fallback succeeds without local clip intercuts
+
+### Risk Controls
+
+- no subtitle system in v0
+- no timeline editing
+- no Advanced export
+- do not block on perfect audio-duration measurement; use a fallback estimate if needed
+
+### Build Order
+
+1. schema additions
+2. `video_pipeline.py`
+3. endpoint
+4. Quick UI button/player
+5. happy-path tests
+6. manual smoke test
+
 ## Manual QA To Run Next
 
 Planned for the next morning:

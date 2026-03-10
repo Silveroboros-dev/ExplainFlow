@@ -37,6 +37,7 @@ from app.schemas.requests import (
     QuickReelRequest,
     QuickReelSchema,
     QuickReelSegmentSchema,
+    QuickVideoRequest,
     RegenerateSceneRequest,
     SourceAssetSchema,
     SourceManifestSchema,
@@ -70,6 +71,7 @@ from app.services.source_ingest import (
     resolve_pdf_proof_locator,
     validate_video_manifest_constraints,
 )
+from app.services.video_pipeline import build_quick_video
 
 SIGNAL_EXTRACTION_PROMPT_VERSION_DEFAULT = "v2"
 SIGNAL_STRUCTURAL_MODEL_DEFAULT = "gemini-3.1-pro-preview"
@@ -288,12 +290,16 @@ class GeminiStoryAgent:
             "9) When speaker identity is knowable from the media, populate speaker for the evidence snippet.\n"
             "10) For video, only use frames to resolve on-screen references, clip-worthy moments, and proof playback. "
             "Do not replace transcript-grounded claims with vague visual summaries.\n"
+            "11) For PDFs or document uploads, do not anchor most claims to the abstract, executive summary, or page 1 "
+            "if later body pages provide stronger support.\n"
+            "12) Prefer diverse body-page evidence across distinct claims. Use frontmatter evidence mainly for opener "
+            "context, unless the source is genuinely one-page or only frontmatter contains the claim.\n"
             if source_inventory_text.strip()
             else ""
         )
         transcript_only_guardrail = (
-            "11) This source path is transcript-backed video without direct frame access.\n"
-            "12) If the transcript says 'this chart', 'as you can see', or similar, do not invent exact on-screen visuals. "
+            "13) This source path is transcript-backed video without direct frame access.\n"
+            "14) If the transcript says 'this chart', 'as you can see', or similar, do not invent exact on-screen visuals. "
             "Infer only what surrounding text supports, or keep visual_context generic.\n"
             if transcript_only_video
             else ""
@@ -401,6 +407,30 @@ class GeminiStoryAgent:
         if manifest is None or not manifest.assets:
             return False
         return any(GeminiStoryAgent._is_youtube_video_asset(asset) for asset in manifest.assets)
+
+    @staticmethod
+    def _should_upload_source_assets_for_extraction(
+        source_manifest: SourceManifestSchema | dict[str, Any] | None,
+        *,
+        has_embedded_manifest_text: bool,
+    ) -> bool:
+        manifest = GeminiStoryAgent._source_manifest_for_extraction(source_manifest)
+        if manifest is None or not manifest.assets:
+            return False
+
+        uploadable_assets = [
+            asset
+            for asset in manifest.assets[:6]
+            if asset.modality in {"audio", "image", "pdf_page"}
+            and asset_path_from_reference(asset.uri) is not None
+        ]
+        if not uploadable_assets:
+            return False
+
+        if has_embedded_manifest_text and all(asset.modality == "pdf_page" for asset in uploadable_assets):
+            return False
+
+        return True
 
     @staticmethod
     def _transcript_needs_normalization(text: str) -> bool:
@@ -689,6 +719,8 @@ class GeminiStoryAgent:
             "4) If uploaded media is available, use structured evidence_snippets with type, asset_id, and page_index/start_ms/end_ms when supported.\n"
             "5) Lower confidence when support is weak.\n"
             "6) Do not invent facts, beats, or visuals.\n"
+            "7) For PDFs or documents, prefer later body-page evidence when it supports the claim more directly than the abstract or page 1.\n"
+            "8) Avoid anchoring most claims to abstract/frontmatter evidence unless the claim genuinely appears only there.\n"
             f"{transcript_guardrail}"
             "SOURCE:\n"
             f"{source_body}"
@@ -1401,11 +1433,19 @@ class GeminiStoryAgent:
         *,
         claim_ref: str,
         evidence: EvidenceRefSchema,
+        asset: SourceAssetSchema | None = None,
     ) -> SourceMediaRefSchema | None:
-        if evidence.modality not in {"audio", "video", "image", "pdf_page"}:
+        resolved_modality = evidence.modality
+        if resolved_modality not in {"audio", "video", "image", "pdf_page"}:
+            asset_modality = asset.modality if asset is not None else None
+            if asset_modality not in {"audio", "video", "image", "pdf_page"}:
+                return None
+            resolved_modality = asset_modality
+
+        if resolved_modality not in {"audio", "video", "image", "pdf_page"}:
             return None
 
-        if evidence.modality in {"audio", "video"}:
+        if resolved_modality in {"audio", "video"}:
             usage = "proof_clip"
         else:
             usage = "region_crop" if evidence.bbox_norm else "callout"
@@ -1417,21 +1457,32 @@ class GeminiStoryAgent:
         )
         return SourceMediaRefSchema(
             asset_id=evidence.asset_id,
-            modality=evidence.modality,  # type: ignore[arg-type]
+            modality=resolved_modality,  # type: ignore[arg-type]
             usage=usage,  # type: ignore[arg-type]
             claim_refs=[claim_ref],
             evidence_refs=[evidence.evidence_id],
             start_ms=evidence.start_ms,
             end_ms=evidence.end_ms,
             timing_inferred=evidence.timing_inferred,
-            page_index=evidence.page_index,
+            page_index=evidence.page_index if evidence.page_index is not None else (asset.page_index if asset is not None else None),
             bbox_norm=evidence.bbox_norm,
             label=label[:96],
             quote_text=evidence.quote_text,
             visual_context=evidence.visual_context,
-            muted=evidence.modality != "audio",
-            loop=evidence.modality == "audio",
+            muted=resolved_modality != "audio",
+            loop=resolved_modality == "audio",
         )
+
+    @staticmethod
+    def _effective_evidence_media_modality(
+        evidence: EvidenceRefSchema,
+        asset: SourceAssetSchema | None = None,
+    ) -> str | None:
+        if evidence.modality in {"audio", "video", "image", "pdf_page"}:
+            return evidence.modality
+        if asset is not None and asset.modality in {"audio", "video", "image", "pdf_page"}:
+            return asset.modality
+        return None
 
     @staticmethod
     def _evidence_page_index(
@@ -1456,6 +1507,78 @@ class GeminiStoryAgent:
         return (media.asset_id, media.page_index)
 
     @staticmethod
+    def _source_media_merge_key(
+        media: SourceMediaRefSchema,
+    ) -> tuple[str, str, str, int | None, int | None, int | None, tuple[float, ...]]:
+        return (
+            media.asset_id,
+            media.modality,
+            media.usage,
+            media.start_ms,
+            media.end_ms,
+            media.page_index,
+            tuple(float(value) for value in (media.bbox_norm or [])),
+        )
+
+    @staticmethod
+    def _richer_optional_text(existing: str | None, incoming: str | None) -> str | None:
+        existing_clean = str(existing or "").strip()
+        incoming_clean = str(incoming or "").strip()
+        if not existing_clean:
+            return incoming_clean or None
+        if not incoming_clean:
+            return existing_clean
+        return incoming_clean if len(incoming_clean) > len(existing_clean) else existing_clean
+
+    @staticmethod
+    def _merge_source_media_item(
+        existing: SourceMediaRefSchema,
+        incoming: SourceMediaRefSchema,
+    ) -> SourceMediaRefSchema:
+        existing_page_index = existing.page_index if isinstance(existing.page_index, int) and existing.page_index > 0 else None
+        incoming_page_index = incoming.page_index if isinstance(incoming.page_index, int) and incoming.page_index > 0 else None
+        return existing.model_copy(
+            update={
+                "claim_refs": list(dict.fromkeys([*existing.claim_refs, *incoming.claim_refs])),
+                "evidence_refs": list(dict.fromkeys([*existing.evidence_refs, *incoming.evidence_refs])),
+                "start_ms": existing.start_ms if existing.start_ms is not None else incoming.start_ms,
+                "end_ms": existing.end_ms if existing.end_ms is not None else incoming.end_ms,
+                "timing_inferred": existing.timing_inferred or incoming.timing_inferred,
+                "page_index": existing_page_index if existing_page_index is not None else incoming_page_index,
+                "bbox_norm": existing.bbox_norm or incoming.bbox_norm,
+                "loop": existing.loop or incoming.loop,
+                "muted": existing.muted and incoming.muted,
+                "label": GeminiStoryAgent._richer_optional_text(existing.label, incoming.label),
+                "quote_text": GeminiStoryAgent._richer_optional_text(existing.quote_text, incoming.quote_text),
+                "visual_context": GeminiStoryAgent._richer_optional_text(existing.visual_context, incoming.visual_context),
+            }
+        )
+
+    @staticmethod
+    def _merge_source_media_list(
+        source_media: list[SourceMediaRefSchema],
+    ) -> list[SourceMediaRefSchema]:
+        merged: list[SourceMediaRefSchema] = []
+        for item in source_media:
+            media_key = GeminiStoryAgent._source_media_merge_key(item)
+            existing_index = next(
+                (
+                    index
+                    for index, existing in enumerate(merged)
+                    if GeminiStoryAgent._source_media_merge_key(existing) == media_key
+                ),
+                None,
+            )
+            if existing_index is None:
+                merged.append(item)
+                continue
+            merged[existing_index] = GeminiStoryAgent._merge_source_media_item(
+                merged[existing_index],
+                item,
+            )
+        return merged
+
+    @staticmethod
     def _evidence_text_blob(evidence: EvidenceRefSchema) -> str:
         return " ".join(
             part.strip()
@@ -1472,7 +1595,7 @@ class GeminiStoryAgent:
         evidence: EvidenceRefSchema,
         asset: SourceAssetSchema | None = None,
     ) -> bool:
-        if evidence.modality != "pdf_page":
+        if GeminiStoryAgent._effective_evidence_media_modality(evidence, asset) != "pdf_page":
             return False
         page_index = GeminiStoryAgent._evidence_page_index(evidence, asset)
         text_blob = GeminiStoryAgent._evidence_text_blob(evidence)
@@ -1512,7 +1635,10 @@ class GeminiStoryAgent:
                 asset_lookup.get(evidence.asset_id),
             )
             for evidence in evidence_items
-            if evidence.modality in {"audio", "image", "pdf_page"}
+            if GeminiStoryAgent._effective_evidence_media_modality(
+                evidence,
+                asset_lookup.get(evidence.asset_id),
+            ) in {"audio", "image", "pdf_page", "video"}
         )
 
         filtered_items = [
@@ -1529,17 +1655,20 @@ class GeminiStoryAgent:
 
         def score(evidence: EvidenceRefSchema) -> float:
             asset = asset_lookup.get(evidence.asset_id)
+            effective_modality = GeminiStoryAgent._effective_evidence_media_modality(evidence, asset)
             page_key = GeminiStoryAgent._evidence_page_key(evidence, asset)
             page_index = GeminiStoryAgent._evidence_page_index(evidence, asset)
             is_frontmatter = GeminiStoryAgent._is_frontmatter_pdf_evidence(evidence, asset)
             score_value = float(evidence.confidence or 0.5) * 10.0
 
-            if evidence.modality == "audio":
+            if effective_modality == "audio":
                 score_value += 16.0
-            elif evidence.modality == "image":
+            elif effective_modality == "image":
                 score_value += 18.0
-            elif evidence.modality == "pdf_page":
+            elif effective_modality == "pdf_page":
                 score_value += 14.0
+            elif effective_modality == "video":
+                score_value += 12.0
             if evidence.bbox_norm:
                 score_value += 22.0
             if evidence.quote_text or evidence.transcript_text:
@@ -1580,7 +1709,7 @@ class GeminiStoryAgent:
         source_manifest: SourceManifestSchema | dict[str, Any] | None,
     ) -> tuple[ScriptPack, dict[str, list[str]], list[str]]:
         asset_lookup = GeminiStoryAgent._source_asset_lookup(source_manifest)
-        evidence_by_claim, _, evidence_ids = GeminiStoryAgent._structured_evidence_refs(
+        evidence_by_claim, evidence_by_id, evidence_ids = GeminiStoryAgent._structured_evidence_refs(
             content_signal,
             source_manifest,
         )
@@ -1595,18 +1724,10 @@ class GeminiStoryAgent:
 
         for scene_index, scene in enumerate(enriched.scenes):
             evidence_refs = list(scene.evidence_refs)
-            source_media = list(scene.source_media)
-            media_keys = {
-                (
-                    item.asset_id,
-                    tuple(item.claim_refs),
-                    tuple(item.evidence_refs),
-                    item.start_ms,
-                    item.end_ms,
-                    item.page_index,
-                    tuple(item.bbox_norm or []),
-                )
-                for item in source_media
+            source_media = GeminiStoryAgent._merge_source_media_list(list(scene.source_media))
+            media_index_by_key = {
+                GeminiStoryAgent._source_media_merge_key(item): index
+                for index, item in enumerate(source_media)
             }
             allow_frontmatter = GeminiStoryAgent._scene_is_opener_or_hook(scene, scene_index) and not abstract_scene_claimed
             scene_uses_frontmatter = False
@@ -1639,27 +1760,25 @@ class GeminiStoryAgent:
                     media_ref = GeminiStoryAgent._media_ref_for_evidence(
                         claim_ref=claim_ref,
                         evidence=evidence,
+                        asset=asset_lookup.get(evidence.asset_id),
                     )
                     if media_ref is None:
                         if evidence.evidence_id not in evidence_refs:
                             evidence_refs.append(evidence.evidence_id)
                         continue
 
-                    media_key = (
-                        media_ref.asset_id,
-                        tuple(media_ref.claim_refs),
-                        tuple(media_ref.evidence_refs),
-                        media_ref.start_ms,
-                        media_ref.end_ms,
-                        media_ref.page_index,
-                        tuple(media_ref.bbox_norm or []),
-                    )
-                    if media_key in media_keys:
-                        continue
+                    media_key = GeminiStoryAgent._source_media_merge_key(media_ref)
+                    existing_index = media_index_by_key.get(media_key)
                     if evidence.evidence_id not in evidence_refs:
                         evidence_refs.append(evidence.evidence_id)
-                    source_media.append(media_ref)
-                    media_keys.add(media_key)
+                    if existing_index is None:
+                        source_media.append(media_ref)
+                        media_index_by_key[media_key] = len(source_media) - 1
+                    else:
+                        source_media[existing_index] = GeminiStoryAgent._merge_source_media_item(
+                            source_media[existing_index],
+                            media_ref,
+                        )
                     if is_page_like:
                         claim_page_like_selected = True
                     if evidence.modality == "audio":
@@ -1674,14 +1793,46 @@ class GeminiStoryAgent:
                 if len(source_media) >= 3:
                     break
 
+            if len(source_media) < 3:
+                fallback_claim_ref = next((claim for claim in scene.claim_refs if claim), "evidence")
+                for evidence_ref in scene.evidence_refs[:6]:
+                    evidence = evidence_by_id.get(evidence_ref)
+                    if evidence is None or evidence.asset_id not in asset_lookup:
+                        continue
+
+                    media_ref = GeminiStoryAgent._media_ref_for_evidence(
+                        claim_ref=fallback_claim_ref,
+                        evidence=evidence,
+                        asset=asset_lookup.get(evidence.asset_id),
+                    )
+                    if media_ref is None:
+                        continue
+
+                    media_key = GeminiStoryAgent._source_media_merge_key(media_ref)
+                    existing_index = media_index_by_key.get(media_key)
+                    if existing_index is None:
+                        source_media.append(media_ref)
+                        media_index_by_key[media_key] = len(source_media) - 1
+                    else:
+                        source_media[existing_index] = GeminiStoryAgent._merge_source_media_item(
+                            source_media[existing_index],
+                            media_ref,
+                        )
+                    if len(source_media) >= 3:
+                        break
+
             scene.evidence_refs = evidence_refs[:8]
-            scene.source_media = source_media[:3]
+            scene.source_media = GeminiStoryAgent._merge_source_media_list(source_media)[:3]
             if scene.source_media and scene.render_strategy == "generated":
                 scene.render_strategy = "hybrid"
 
             for module in scene.modules:
                 module_evidence_refs = list(module.evidence_refs)
-                module_source_media = list(module.source_media)
+                module_source_media = GeminiStoryAgent._merge_source_media_list(list(module.source_media))
+                module_media_index_by_key = {
+                    GeminiStoryAgent._source_media_merge_key(item): index
+                    for index, item in enumerate(module_source_media)
+                }
                 for claim_ref in module.claim_refs[:3]:
                     for evidence in evidence_by_claim.get(claim_ref, [])[:2]:
                         if evidence.evidence_id not in module_evidence_refs:
@@ -1689,11 +1840,21 @@ class GeminiStoryAgent:
                         media_ref = GeminiStoryAgent._media_ref_for_evidence(
                             claim_ref=claim_ref,
                             evidence=evidence,
+                            asset=asset_lookup.get(evidence.asset_id),
                         )
                         if media_ref is not None and evidence.asset_id in asset_lookup:
-                            module_source_media.append(media_ref)
+                            media_key = GeminiStoryAgent._source_media_merge_key(media_ref)
+                            existing_index = module_media_index_by_key.get(media_key)
+                            if existing_index is None:
+                                module_source_media.append(media_ref)
+                                module_media_index_by_key[media_key] = len(module_source_media) - 1
+                            else:
+                                module_source_media[existing_index] = GeminiStoryAgent._merge_source_media_item(
+                                    module_source_media[existing_index],
+                                    media_ref,
+                                )
                 module.evidence_refs = module_evidence_refs[:6]
-                module.source_media = module_source_media[:2]
+                module.source_media = GeminiStoryAgent._merge_source_media_list(module_source_media)[:2]
 
             for evidence_id in scene.evidence_refs:
                 evidence_usage_counts[evidence_id] = evidence_usage_counts.get(evidence_id, 0) + 1
@@ -1775,6 +1936,27 @@ class GeminiStoryAgent:
                     payload.update(proof_locator)
 
         return payloads
+
+    @staticmethod
+    def _build_source_media_warning_payload(
+        *,
+        scene_id: str,
+        source_media: list[SourceMediaRefSchema],
+    ) -> dict[str, Any] | None:
+        if not source_media:
+            return None
+
+        asset_ids = sorted({media.asset_id for media in source_media if media.asset_id})
+        expected_count = len(source_media)
+        return {
+            "scene_id": scene_id,
+            "message": (
+                "Source proof was planned for this scene, but no resolvable proof links were produced. "
+                "Check the uploaded asset manifest and generated media URLs."
+            ),
+            "asset_ids": asset_ids,
+            "expected_count": expected_count,
+        }
 
     @staticmethod
     def _planner_source_text(
@@ -3722,6 +3904,12 @@ class GeminiStoryAgent:
         events: list[dict[str, str]] = []
         scene_id = scene.scene_id
         scene_trace_id = str(scene_trace_payload.get("scene_trace_id", ""))
+        resolved_source_media_payloads = self._resolve_source_media_payloads(
+            request=request,
+            scene_id=scene_id,
+            source_media=scene.source_media,
+            source_manifest=source_manifest,
+        )
 
         events.append(
             build_sse_event(
@@ -3732,20 +3920,31 @@ class GeminiStoryAgent:
                     "claim_refs": [claim_ref for claim_ref in scene.claim_refs if claim_ref],
                     "evidence_refs": [evidence_ref for evidence_ref in scene.evidence_refs if evidence_ref],
                     "render_strategy": scene.render_strategy,
-                    "source_media": [item.model_dump() for item in scene.source_media],
+                    "source_media": resolved_source_media_payloads,
                     "trace": scene_trace_payload,
                 },
             )
         )
 
-        for source_media_payload in self._resolve_source_media_payloads(
-            request=request,
-            scene_id=scene_id,
-            source_media=scene.source_media,
-            source_manifest=source_manifest,
-        ):
+        for source_media_payload in resolved_source_media_payloads:
             source_media_payload["trace"] = scene_trace_payload
             events.append(build_sse_event("source_media_ready", source_media_payload))
+        if scene.source_media and not resolved_source_media_payloads:
+            warning_payload = self._build_source_media_warning_payload(
+                scene_id=scene_id,
+                source_media=scene.source_media,
+            )
+            if warning_payload is not None:
+                warning_payload["trace"] = scene_trace_payload
+                print(
+                    "[source_media_warning]",
+                    {
+                        "scene_id": scene_id,
+                        "asset_ids": warning_payload["asset_ids"],
+                        "expected_count": warning_payload["expected_count"],
+                    },
+                )
+                events.append(build_sse_event("source_media_warning", warning_payload))
 
         retries_used = 0
         qa_result: dict[str, Any] = {
@@ -3931,7 +4130,11 @@ class GeminiStoryAgent:
             extraction_mode = "single_pass"
             uploaded_asset_count = 0
             uploaded_assets = UploadedSourceAssets(parts=(), file_names=(), count=0)
-            if source_asset_count:
+            manifest_text_preview, _ = best_effort_manifest_text(source_manifest)
+            if source_asset_count and self._should_upload_source_assets_for_extraction(
+                source_manifest,
+                has_embedded_manifest_text=bool(manifest_text_preview.strip()),
+            ):
                 upload_started_at = time.perf_counter()
                 uploaded_assets = await self._upload_source_asset_parts(
                     source_manifest=source_manifest,
@@ -4159,18 +4362,10 @@ class GeminiStoryAgent:
 
         for block_index, block in enumerate(enriched.blocks):
             evidence_refs = list(block.evidence_refs)
-            source_media = list(block.source_media)
-            media_keys = {
-                (
-                    item.asset_id,
-                    tuple(item.claim_refs),
-                    tuple(item.evidence_refs),
-                    item.start_ms,
-                    item.end_ms,
-                    item.page_index,
-                    tuple(item.bbox_norm or []),
-                )
-                for item in source_media
+            source_media = GeminiStoryAgent._merge_source_media_list(list(block.source_media))
+            media_index_by_key = {
+                GeminiStoryAgent._source_media_merge_key(item): index
+                for index, item in enumerate(source_media)
             }
             allow_frontmatter = block_index == 0 and not abstract_block_claimed
             block_uses_frontmatter = False
@@ -4197,24 +4392,21 @@ class GeminiStoryAgent:
                     media_ref = GeminiStoryAgent._media_ref_for_evidence(
                         claim_ref=claim_ref,
                         evidence=evidence,
+                        asset=asset_lookup.get(evidence.asset_id),
                     )
                     if media_ref is None or evidence.asset_id not in asset_lookup:
                         continue
 
-                    media_key = (
-                        media_ref.asset_id,
-                        tuple(media_ref.claim_refs),
-                        tuple(media_ref.evidence_refs),
-                        media_ref.start_ms,
-                        media_ref.end_ms,
-                        media_ref.page_index,
-                        tuple(media_ref.bbox_norm or []),
-                    )
-                    if media_key in media_keys:
-                        continue
-
-                    source_media.append(media_ref)
-                    media_keys.add(media_key)
+                    media_key = GeminiStoryAgent._source_media_merge_key(media_ref)
+                    existing_index = media_index_by_key.get(media_key)
+                    if existing_index is None:
+                        source_media.append(media_ref)
+                        media_index_by_key[media_key] = len(source_media) - 1
+                    else:
+                        source_media[existing_index] = GeminiStoryAgent._merge_source_media_item(
+                            source_media[existing_index],
+                            media_ref,
+                        )
                     if GeminiStoryAgent._is_frontmatter_pdf_evidence(
                         evidence,
                         asset_lookup.get(evidence.asset_id),
@@ -4226,7 +4418,7 @@ class GeminiStoryAgent:
                     break
 
             block.evidence_refs = evidence_refs[:6]
-            block.source_media = source_media[:2]
+            block.source_media = GeminiStoryAgent._merge_source_media_list(source_media)[:2]
             for evidence_id in block.evidence_refs:
                 evidence_usage_counts[evidence_id] = evidence_usage_counts.get(evidence_id, 0) + 1
             for media in block.source_media:
@@ -4619,8 +4811,6 @@ class GeminiStoryAgent:
         for index, block in enumerate(visualized.blocks):
             if block.block_id not in targeted_block_ids:
                 continue
-            if block.source_media and block.block_id not in forced_block_ids:
-                continue
             tasks.append(
                 asyncio.create_task(
                     self._generate_quick_block_image(
@@ -4845,6 +5035,35 @@ class GeminiStoryAgent:
         return {
             "status": "success",
             "artifact": artifact.model_copy(update={"reel": reel}).model_dump(),
+        }
+
+    async def generate_quick_video(self, payload: QuickVideoRequest, *, request: Request) -> dict[str, Any]:
+        artifact = QuickArtifactSchema.model_validate(payload.artifact)
+        if not artifact.blocks:
+            return {"status": "error", "message": "Provide a quick artifact before generating a video."}
+
+        content_signal = payload.content_signal if isinstance(payload.content_signal, dict) else {}
+        working_artifact = artifact
+        if working_artifact.reel is None or not working_artifact.reel.segments:
+            reel = self._build_quick_reel_from_artifact(
+                artifact=working_artifact,
+                content_signal=content_signal,
+                source_manifest=payload.source_manifest,
+            )
+            working_artifact = working_artifact.model_copy(update={"reel": reel})
+
+        try:
+            video = build_quick_video(
+                request=request,
+                artifact=working_artifact,
+                source_manifest=payload.source_manifest,
+            )
+        except Exception as exc:
+            return {"status": "error", "message": str(exc) or "Quick MP4 generation failed."}
+
+        return {
+            "status": "success",
+            "artifact": working_artifact.model_copy(update={"video": video}).model_dump(),
         }
 
     async def regenerate_quick_block(self, payload: QuickBlockOverrideRequest, *, request: Request) -> dict[str, Any]:
@@ -5529,6 +5748,12 @@ class GeminiStoryAgent:
                 first_title = str(first_spec["title"])
                 first_claim_refs = list(first_spec["claim_refs"])
                 first_evidence_refs = list(first_spec["evidence_refs"])
+                first_scene_source_media_payloads = self._resolve_source_media_payloads(
+                    request=request,
+                    scene_id=first_scene_id,
+                    source_media=first_scene.source_media,
+                    source_manifest=payload.source_manifest,
+                )
 
                 yield build_sse_event(
                     "scene_start",
@@ -5538,19 +5763,30 @@ class GeminiStoryAgent:
                         "claim_refs": first_claim_refs,
                         "evidence_refs": first_evidence_refs,
                         "render_strategy": first_scene.render_strategy,
-                        "source_media": [item.model_dump() for item in first_scene.source_media],
+                        "source_media": first_scene_source_media_payloads,
                         "trace": first_scene_trace_payload,
                     },
                 )
 
-                for source_media_payload in self._resolve_source_media_payloads(
-                    request=request,
-                    scene_id=first_scene_id,
-                    source_media=first_scene.source_media,
-                    source_manifest=payload.source_manifest,
-                ):
+                for source_media_payload in first_scene_source_media_payloads:
                     source_media_payload["trace"] = first_scene_trace_payload
                     yield build_sse_event("source_media_ready", source_media_payload)
+                if first_scene.source_media and not first_scene_source_media_payloads:
+                    warning_payload = self._build_source_media_warning_payload(
+                        scene_id=first_scene_id,
+                        source_media=first_scene.source_media,
+                    )
+                    if warning_payload is not None:
+                        warning_payload["trace"] = first_scene_trace_payload
+                        print(
+                            "[source_media_warning]",
+                            {
+                                "scene_id": first_scene_id,
+                                "asset_ids": warning_payload["asset_ids"],
+                                "expected_count": warning_payload["expected_count"],
+                            },
+                        )
+                        yield build_sse_event("source_media_warning", warning_payload)
 
                 first_retries_used = 0
                 first_qa_result: dict[str, Any] = {
