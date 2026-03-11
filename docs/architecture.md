@@ -1,5 +1,7 @@
 # ExplainFlow Architecture
 
+`README.md` is the overview. This document is the detailed engineering view: the staged workflow, core contracts, reasoning layers, and runtime surfaces that make ExplainFlow work.
+
 ExplainFlow is a workflow-driven artifact generation system. It turns a locked source signal into a script pack, streams scene generation with QA gates, and now supports a first multimodal traceability slice for audio timestamps and image/PDF proof regions.
 
 The system is intentionally not a generic notebook. Its core differentiators are:
@@ -17,49 +19,13 @@ ExplainFlow currently exposes two product surfaces:
 - **Quick**
   - lightweight artifact generation with derived Proof Reel and MP4 views
 
-## System Shape
+## Reading Guide
 
-### Frontend
+If you are new to the repo, read this document in this order:
 
-- `web/src/app/advanced/page.tsx`
-  Advanced Studio workflow UI, SSE client, planner QA notes, and proof viewer dialog.
-- `web/src/components/SceneCard.tsx`
-  Per-scene card with claim badges, regeneration controls, and source-proof entry points.
-- `web/src/components/FinalBundle.tsx`
-  Final bundle review and zip export.
-
-### Backend
-
-- `api/app/routes/generate_stream.py`
-  Extraction, advanced script-pack generation, advanced streaming, and scene regeneration routes.
-- `api/app/routes/workflow.py`
-  Checkpointed workflow orchestration routes and workflow agent chat.
-- `api/app/routes/assets.py`
-  Source-asset upload, final-bundle export, and high-fidelity image upscaling endpoints.
-- `api/app/routes/sessions.py`
-  Final bundle retrieval by `run_id`.
-
-### Services
-
-- `api/app/services/gemini_story_agent.py`
-  Signal extraction, Gemini Files upload for multimodal extraction, artifact-aware planning, planner QA, scene generation, and SSE emission.
-- `api/app/services/agent_coordinator.py`
-  Workflow state machine, checkpoint invalidation rules, and request reconstruction.
-- `api/app/services/interleaved_parser.py`
-  Scene QA and incremental text parsing.
-- `api/app/services/image_pipeline.py`
-  Asset saving, thumbnail composition, proof-region cropping, and upscale helpers.
-- `api/app/services/final_bundle_export.py`
-  Zip assembly for final bundle export.
-- `api/app/services/source_ingest.py`
-  Local source-asset ingest and manifest construction for uploaded image/audio/PDF files.
-
-### Schemas
-
-- `api/app/schemas/requests.py`
-  Request/response models, script-pack scene schema, planner QA summary, multimodal source models.
-- `api/app/schemas/events.py`
-  Trace envelope, checkpoint events, scene trace updates, and SSE helpers.
+1. `End-to-End Flow` for the full staged lifecycle.
+2. `Workflow Checkpoints`, `Planning Layers`, and `Scene Generation and QA` for the architectural choices that make the workflow inspectable and repairable.
+3. `Codebase Shape` and `API Surface` last, as the implementation appendix.
 
 ## End-to-End Flow
 
@@ -113,7 +79,7 @@ sequenceDiagram
     API-->>W: final_bundle_ready
 ```
 
-## Core Contracts
+## Data Contracts
 
 ### Input
 
@@ -218,7 +184,7 @@ That checkpoint improves the system in practice:
 
 So the Script Pack gate is not bureaucracy. It is the boundary that makes staged recovery, proof-aware streaming, and consistent interleaved generation feasible.
 
-## Artifact-Aware Planning
+## Planning Layers
 
 The planner resolves one artifact policy before scene budgeting and enrichment routing.
 
@@ -390,7 +356,7 @@ The stream now surfaces:
 - `scene_retry_reset`
 - planner QA notes at script-pack time
 
-## Multimodal Traceability: First Slice
+## Multimodal Traceability
 
 The new multimodal layer does not replace the planner. It enriches the planned scene graph after planning and before streaming.
 
@@ -484,6 +450,50 @@ The first slice currently favors `hybrid` rendering:
 
 For image/PDF proof regions, the backend can emit a cropped proof asset instead of the full original page.
 
+## Codebase Shape
+
+### Frontend
+
+- `web/src/app/advanced/page.tsx`
+  Advanced Studio workflow UI, SSE client, planner QA notes, and proof viewer dialog.
+- `web/src/components/SceneCard.tsx`
+  Per-scene card with claim badges, regeneration controls, and source-proof entry points.
+- `web/src/components/FinalBundle.tsx`
+  Final bundle review and zip export.
+
+### Backend
+
+- `api/app/routes/generate_stream.py`
+  Extraction, advanced script-pack generation, advanced streaming, and scene regeneration routes.
+- `api/app/routes/workflow.py`
+  Checkpointed workflow orchestration routes and workflow agent chat.
+- `api/app/routes/assets.py`
+  Source-asset upload, final-bundle export, and high-fidelity image upscaling endpoints.
+- `api/app/routes/sessions.py`
+  Final bundle retrieval by `run_id`.
+
+### Services
+
+- `api/app/services/gemini_story_agent.py`
+  Signal extraction, Gemini Files upload for multimodal extraction, artifact-aware planning, planner QA, scene generation, and SSE emission.
+- `api/app/services/agent_coordinator.py`
+  Workflow state machine, checkpoint invalidation rules, and request reconstruction.
+- `api/app/services/interleaved_parser.py`
+  Scene QA and incremental text parsing.
+- `api/app/services/image_pipeline.py`
+  Asset saving, thumbnail composition, proof-region cropping, and upscale helpers.
+- `api/app/services/final_bundle_export.py`
+  Zip assembly for final bundle export.
+- `api/app/services/source_ingest.py`
+  Local source-asset ingest and manifest construction for uploaded image/audio/PDF files.
+
+### Schemas
+
+- `api/app/schemas/requests.py`
+  Request/response models, script-pack scene schema, planner QA summary, multimodal source models.
+- `api/app/schemas/events.py`
+  Trace envelope, checkpoint events, scene trace updates, and SSE helpers.
+
 ## API Surface
 
 ### Core Generation
@@ -527,7 +537,7 @@ The Advanced Studio scene card now supports:
 
 This is the first visible multimodal UX wedge: claims can now open exact backing proof instead of behaving as passive labels.
 
-## Current Differentiation
+## What This Architecture Buys You
 
 ExplainFlow is strongest when it behaves like a director-controlled artifact engine rather than a notebook.
 
@@ -541,7 +551,7 @@ The architecture supports that through:
 - checkpoint-preserving fidelity upgrades
 - multimodal proof linking without abandoning the existing JSON planner/runtime spine
 
-## Near-Term Next Steps
+## Next Technical Steps
 
 The next incremental multimodal steps should be:
 

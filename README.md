@@ -92,7 +92,7 @@ flowchart TD
     subgraph SIG["2. Extracted Signal"]
         TH["Thesis + Concepts"]
         KC["Key Claims"]
-        EV["Evidence Snippets<br/>page_index / start_ms / bbox_norm"]
+        EV["Evidence Snippets<br/>text recovery / timestamps / visual evidence anchors"]
     end
 
     subgraph PLAN["3. Script Pack Blueprint"]
@@ -253,15 +253,15 @@ This agent sits inside a larger harness that also performs:
 
 ---
 
-## Architecture (Agentic Studio v3)
+## Architecture Summary
 
 - **Frontend**: Next.js Studio UI with `AgentActivityPanel` for 100% transparency of agent decisions.
 - **Backend**: FastAPI with `AgentCoordinator` service layer and SSE streaming.
 - **Orchestration**:
-    - **Planner**: Gemini 3.1 Pro (Logic & Extraction)
-    - **Director**: Gemini 3 Pro Image (Multimodal Generation)
-    - **Co-Director**: Gemini 3.1 Pro (Conversational Control)
-- **Infrastructure**: Cloud Run (300s timeouts) + Cloud Storage.
+  - **Planner**: Gemini 3.1 Pro for extraction, planning, salience, forward-pull, and planner QA
+  - **Director**: Gemini 3 Pro Image for interleaved multimodal scene generation
+  - **Workflow Agent**: Gemini 3.1 Pro for checkpoint-aware co-direction, explanation, and recovery
+- **Infrastructure**: Cloud Run + Cloud Storage.
 
 For detailed sequence diagrams and workflow rationale, see:
 - `/docs/architecture.md`
@@ -271,9 +271,9 @@ For detailed sequence diagrams and workflow rationale, see:
 
 ## TODO / Roadmap
 
-- [ ] **Optional HD Upscale Pass**: Use `imagen-4.0-upscale-preview` for final-bundle quality.
-- [ ] **Multimodal Ingestion**: Support PDF logic extraction from charts and diagrams.
-- [ ] **Full Video Compositor**: Automated `.mp4` stitching of visuals and audio.
+- [x] **High-Fidelity Upscale Pass**: Final bundles can upscale the current scene images without regenerating the script.
+- [x] **Multimodal Ingestion**: ExplainFlow supports multimodal PDF extraction, page-linked proof, and source-backed ingestion for the current hackathon scope.
+- [ ] **Advanced Video Composition**: Go beyond the current Quick MP4 v0 into higher-fidelity composition and richer playback controls.
 - [ ] **Credit Protection**: Gated access PIN for public demos.
 
-Built for the **Gemini API Developer Competition**.
+Built for the **Gemini Live Agent Challenge**.

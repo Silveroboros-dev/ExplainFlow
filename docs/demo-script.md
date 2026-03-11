@@ -15,6 +15,7 @@ Show a clear story in 4 minutes:
 Do not try to explain every subsystem in the video. Instead, make sure the narration lands these product-level ideas:
 
 - ExplainFlow is **not** a one-shot generator.
+- ExplainFlow uses an **agent harness**, not just one prompt and one response.
 - The `Script Pack` is a checkpointed production manifest, not just intermediate JSON.
 - Scenes are **proof-linked** back to source claims and evidence.
 - The workflow agent is state-aware and can help the user recover or continue instead of restarting.
@@ -54,6 +55,7 @@ If the recording is running long, cut detail before you cut these points.
 - "In the Advanced Studio, we don't just generate; we plan. After extracting the core claims, we generate a Script Pack."
 - "This is our production manifest. It includes continuity references and strict 'acceptance checks' for every scene, ensuring the story remains coherent from start to finish."
 - "This checkpoint is important: instead of streaming immediately from the extracted signal, we stop here so the system can validate pacing, coverage, and proof before expensive generation begins."
+- "That self-checking behavior is part of our agent harness: the system checks the plan before generation, not only after something goes wrong."
 
 ### 1:15 - 2:30 | Multimodal Interleaving & Auto QA
 
@@ -68,6 +70,7 @@ If the recording is running long, cut detail before you cut these points.
 - "But watch the badges. Every scene passes through an 'Auto QA Gate'. The system scores its own output against our acceptance checks."
 - "If the director detects narrative drift or technical errors, it automatically triggers a 'Correction Retry' to fix the scene in real-time."
 - "And this is not just pretty generation: each scene keeps claim refs, evidence refs, and linked source proof so the user can inspect where the story came from."
+- "So the agent harness is active at both levels: first it self-checks the plan, then it self-checks each scene as the stream runs."
 
 ### 2:30 - 2:55 | Proof-Linked Review
 
@@ -140,4 +143,4 @@ Alternative live version:
 
 Shorter fallback version:
 
-> "ExplainFlow is not a one-shot generator. It is a controllable production pipeline: extract, plan, validate, stream, and repair. That gives us better source grounding, better regeneration, and better live-demo resilience than static notebook-style tools."
+> "ExplainFlow is not a one-shot generator. It uses an agent harness to extract, plan, self-check, stream, and repair. That gives us better source grounding, better regeneration, and better live-demo resilience than static notebook-style tools."
