@@ -29,6 +29,8 @@ If you are new to the repo, read this document in this order:
 
 ## End-to-End Flow
 
+This sequence describes the checkpointed Advanced Studio path. Quick follows a lighter derived flow (`artifact -> Proof Reel -> MP4`) and does not reuse every workflow checkpoint.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -41,8 +43,10 @@ sequenceDiagram
     rect rgb(240, 248, 255)
         note right of U: "PHASE 1: Source Ingestion and Extraction"
         U->>W: Paste source text or upload assets
-        W->>API: POST /source-assets/upload
-        API-->>W: source_manifest asset records
+        opt uploaded assets provided
+            W->>API: POST /source-assets/upload
+            API-->>W: source_manifest asset records
+        end
         W->>WF: POST /workflow/start
         W->>API: POST /extract-signal
         API->>LLM: Signal extraction (prompt + uploaded Gemini Files)
@@ -102,73 +106,84 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     subgraph INTAKE["1. Source Intake"]
-        A["source_manifest.assets[]"]
-        B["Raw uploads"]
-        A -->|"uri, modality"| B
+        A["input_text / source_text"]
+        B["source_manifest.assets[]"]
+        C["normalized_source_text + source_text_origin"]
+        D["Text, uploads, or transcript-backed video context"]
+        A --> D
+        B -->|"uri, modality, transcript/ocr metadata"| D
+        C --> D
     end
 
     subgraph SIGNAL["2. Extracted Signal"]
-        C["content_signal"]
-        D["thesis"]
-        E["key_claims[]"]
-        F["evidence_snippets[]\nbbox_norm / start_ms / page_index"]
-        B -->|"Gemini 3.1 Pro"| C
-        C --> D
-        C --> E
+        E["content_signal"]
+        F["thesis"]
+        G["key_claims[]"]
+        H["evidence_snippets[]\nbbox_norm / start_ms / page_index"]
+        D -->|"Gemini 3.1 Pro"| E
         E --> F
+        E --> G
+        G --> H
     end
 
     subgraph PACK["3. Script Pack"]
-        G["ScriptPackScene"]
-        H["claim_refs[]"]
-        I["evidence_refs[]"]
-        J["source_media[]"]
-        K["render_strategy"]
-        C -->|"Planner + QA"| G
-        G --> H
-        G --> I
-        G --> J
-        G --> K
+        I["ScriptPackScene"]
+        J["claim_refs[]"]
+        K["evidence_refs[]"]
+        L["source_media[]"]
+        M["render_strategy"]
+        E -->|"Planner + QA"| I
+        I --> J
+        I --> K
+        I --> L
+        I --> M
     end
 
     subgraph STREAM["4. SSE Stream Events"]
-        L["SSE client"]
-        M["scene_start"]
-        N["story_text_delta"]
-        O["source_media_ready"]
-        P["qa_status"]
-        G -->|"AgentCoordinator"| L
-        L -.-> M
-        L -.-> N
-        L -.-> O
-        L -.-> P
+        N["SSE client"]
+        O["scene_start"]
+        P["story_text_delta"]
+        Q["source_media_ready"]
+        R["qa_status"]
+        I -->|"AgentCoordinator"| N
+        N -.-> O
+        N -.-> P
+        N -.-> Q
+        N -.-> R
     end
 
-    style C fill:#f9f2f4,stroke:#d9534f
-    style G fill:#d9edf7,stroke:#5bc0de
-    style L fill:#dff0d8,stroke:#5cb85c
+    style E fill:#f9f2f4,stroke:#d9534f
+    style I fill:#d9edf7,stroke:#5bc0de
+    style N fill:#dff0d8,stroke:#5cb85c
 ```
 
 ### Input
 
-The system remains backward-compatible with text-only input:
+The extraction layer now supports three intake shapes:
 
-- `source_text: str`
+- text-first input
+  - `input_text` or `source_text`
+- asset-backed input
+  - `source_manifest.assets[]`
+- transcript-backed source video input
+  - transcript in `source_text`
+  - source identity in `source_manifest.assets[]`
+  - normalization and provenance in `normalized_source_text` and `source_text_origin`
 
-The first multimodal slice adds:
+Each `source_manifest.assets[]` item can carry:
 
-- `source_manifest.assets[]`
-  Each asset has:
-  - `asset_id`
-  - `modality`
-  - `uri`
-  - optional transcript/OCR/page metadata
+- `asset_id`
+- `modality`
+- `uri`
+- optional transcript, OCR, duration, page, and metadata fields
 
-Advanced Studio can now begin extraction from:
+In practice, that means ExplainFlow can begin extraction from:
 
-- text only
+- text-only
 - uploaded assets only
 - text plus uploaded assets
+- uploaded video plus transcript/captions
+- YouTube URL plus transcript/captions in Quick, represented internally as transcript-backed video context rather than a dedicated `youtube_url` request field
 
 ### Extracted Signal
 
