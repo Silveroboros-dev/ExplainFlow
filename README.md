@@ -8,6 +8,7 @@ ExplainFlow represents a pivot from simple "generation" to **"Directed Productio
 
 ### Key Capabilities (Architecture v3)
 - **Agentic Coordination**: A persistent `AgentCoordinator` manages production "Gates" (Signal, Profile, Script) using a state-aware `workflow_id`.
+- **Agent Harness**: ExplainFlow uses a staged agent harness, not a single prompt. The harness manages checkpoints, self-checks the plan before generation, validates scenes during streaming, and preserves proof-aware recovery paths.
 - **Conversational Co-Direction**: Interact with the studio via the `WorkflowChatAgent` to adjust styles, personas, or narrative focus through natural language.
 - **Self-Healing Production**: An **Auto QA Gate** scores every scene. If quality or alignment fails, the director automatically triggers a **Correction Retry** to fix the scene in real-time.
 - **Visual Chaining**: Advanced multimodal continuity that passes visual anchor terms between scenes to prevent narrative drift.
@@ -33,6 +34,111 @@ ExplainFlow represents a pivot from simple "generation" to **"Directed Productio
 - deterministic Proof Reel derived from those blocks
 - MP4 export derived from the Proof Reel
 - lighter-weight demo path that reuses the same grounding model without the full staged studio flow
+
+## How ExplainFlow Works
+
+ExplainFlow is designed as a transparent production pipeline rather than a black-box generator.
+
+At a high level:
+
+1. ingest multimodal source material
+2. extract a grounded signal
+3. plan and lock a script before rendering
+4. stream scenes with self-checks and retries
+5. keep proof linked to the generated output
+
+### Director Workflow
+
+```mermaid
+sequenceDiagram
+    participant U as "Director (User)"
+    participant A as "Workflow Chat Agent"
+    participant E as "Signal Extractor"
+    participant P as "Script Planner + QA"
+    participant S as "SSE Scene Engine"
+
+    U->>E: Upload PDF, text, or source media
+    Note over E: Extract thesis, claims, beats, and evidence
+    E-->>U: CP1 Signal Ready
+
+    U->>A: Lock profile and request a storyboard
+    A->>P: Trigger script-pack planning
+    Note over P: Runs salience, forward-pull, QA, repair/replan
+    P-->>U: CP4 Script Locked
+
+    Note over U: User can inspect or redirect the plan here
+
+    U->>S: Generate stream
+    loop Per scene
+        S->>S: Generate text, image, audio
+        S->>S: Scene-level QA gate
+        S-->>U: Stream scene + proof badges
+    end
+
+    U->>S: Open proof link
+    S-->>U: Source-backed PDF, crop, or clip proof
+```
+
+### Data Anatomy
+
+```mermaid
+flowchart TD
+    subgraph RAW["1. Raw Multimodal Source"]
+        T["Text / Transcript"]
+        V["Video / Audio"]
+        P["PDF / Images"]
+    end
+
+    subgraph SIG["2. Extracted Signal"]
+        TH["Thesis + Concepts"]
+        KC["Key Claims"]
+        EV["Evidence Snippets<br/>page_index / start_ms / bbox_norm"]
+    end
+
+    subgraph PLAN["3. Script Pack Blueprint"]
+        SP["Script Pack"]
+        S1["Scene 1: Hook"]
+        S2["Scene 2: Proof"]
+        S3["Scene 3: Takeaway"]
+    end
+
+    subgraph UI["4. Rendered UI"]
+        CARD["Scene Card / Quick Block"]
+        TEXT["Narrative Text + Claim Badges"]
+        VIS["Generated Visual + Source Media"]
+        PROOF["View Source Proof"]
+    end
+
+    T --> TH
+    T --> KC
+    V --> EV
+    P --> EV
+    KC --> SP
+    EV --> SP
+    TH --> SP
+    SP --> S1
+    SP --> S2
+    SP --> S3
+    S2 --> CARD
+    CARD --> TEXT
+    CARD --> VIS
+    CARD --> PROOF
+```
+
+### Why Not A Black Box
+
+Most AI generators go directly from source to final output.
+ExplainFlow does not.
+
+It exposes the lifecycle in the middle:
+
+- the extracted signal can be reviewed
+- the script pack is locked before rendering
+- the planner self-checks and repairs weak plans
+- each scene can be retried during the stream
+- proof remains attached to the output
+
+That is the core product difference: ExplainFlow is optimized for controllability, recovery, and traceability, not just generation speed.
 
 ---
 
@@ -137,6 +243,13 @@ It can:
 - return the workflow to the right checkpoint instead of forcing a full restart
 
 That design makes the studio easier to steer and recover, especially when generation takes time or a network interruption happens.
+
+This agent sits inside a larger harness that also performs:
+
+- planner self-checks at script-pack stage
+- deterministic repair and constrained replan
+- scene-level QA and retry during streaming
+- proof-resolution validation before evidence is shown to the user
 
 ---
 
