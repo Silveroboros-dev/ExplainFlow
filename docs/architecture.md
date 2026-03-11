@@ -10,6 +10,13 @@ The system is intentionally not a generic notebook. Its core differentiators are
 - scene-level repair and regeneration
 - proof-linked source media in the Advanced Studio
 
+ExplainFlow currently exposes two product surfaces:
+
+- **Advanced Studio**
+  - staged workflow, planner review, proof-linked scene generation
+- **Quick**
+  - lightweight artifact generation with derived Proof Reel and MP4 views
+
 ## System Shape
 
 ### Frontend
@@ -182,6 +189,35 @@ Key properties of the workflow layer:
 
 `AgentCoordinator` now also persists `source_manifest` so script-pack generation and stream generation can reconstruct the same multimodal source context later.
 
+### Why `CP4_SCRIPT_LOCKED` Exists
+
+The Script Pack checkpoint is the architectural hinge of ExplainFlow.
+
+ExplainFlow could stream directly from:
+
+- extracted signal
+- locked artifact/render profile
+
+But that would make the system faster only on the happy path. It would also make it much weaker operationally.
+
+Before scene rendering starts, the Script Pack checkpoint gives the system one stable place to validate:
+
+- scene count and pacing budget
+- claim coverage across the full story
+- per-scene acceptance checks
+- artifact/layout intent
+- proof affordances such as `claim_refs`, `evidence_refs`, and `source_media`
+- planner QA and repair/replan decisions
+
+That checkpoint improves the system in practice:
+
+- **Recovery**: if the network drops or the browser refreshes, the workflow can resume from a locked plan instead of rerunning extraction.
+- **Control**: the user can inspect or redirect the plan before paying for scene text, image, and audio generation.
+- **Quality**: planner repair happens once at the plan level instead of trying to patch scene drift after rendering has already begun.
+- **Traceability**: proof metadata can be attached to planned scenes before the stream, so evidence viewing is part of the generation flow rather than an afterthought.
+
+So the Script Pack gate is not bureaucracy. It is the boundary that makes staged recovery, proof-aware streaming, and consistent interleaved generation feasible.
+
 ## Artifact-Aware Planning
 
 The planner resolves one artifact policy before scene budgeting and enrichment routing.
@@ -208,6 +244,35 @@ Planner execution currently includes:
 - deterministic repair
 - one constrained replan if hard issues survive repair
 - planner QA summary emission
+
+## Quick: Derived Layers, Not Replanning
+
+Quick is intentionally separate from the staged Advanced path.
+
+Its current flow is:
+
+1. build a four-block artifact
+2. deterministically derive a Proof Reel from those blocks
+3. optionally derive an MP4 from the Proof Reel
+
+This matters because Quick is optimized for:
+
+- lower latency
+- deterministic overrides
+- fast demoability
+- reuse of the same proof model without a second heavy planning pass
+
+The derived layers currently behave like this:
+
+- **Artifact**
+  - HTML-first explanation blocks with claim refs, evidence refs, and optional source media
+- **Proof Reel**
+  - one ordered segment per Quick block
+  - chooses a cited source clip when available, otherwise the generated block image
+- **MP4**
+  - composes the Proof Reel into a hackathon-grade video with voiceover, Ken Burns motion, and optional local proof intercuts
+
+Quick intentionally avoids the full checkpointed workflow unless a future product version justifies that extra complexity.
 
 ## Scene Generation and QA
 
@@ -250,6 +315,8 @@ Implemented now:
 - scene-level `source_media`
 - clickable proof viewer in Advanced Studio
 - new `source_media_ready` SSE event
+- Quick Proof Reel derived from artifact blocks
+- Quick MP4 export derived from Proof Reel segments
 
 Not implemented yet:
 

@@ -11,12 +11,28 @@ ExplainFlow represents a pivot from simple "generation" to **"Directed Productio
 - **Conversational Co-Direction**: Interact with the studio via the `WorkflowChatAgent` to adjust styles, personas, or narrative focus through natural language.
 - **Self-Healing Production**: An **Auto QA Gate** scores every scene. If quality or alignment fails, the director automatically triggers a **Correction Retry** to fix the scene in real-time.
 - **Visual Chaining**: Advanced multimodal continuity that passes visual anchor terms between scenes to prevent narrative drift.
+- **Proof-Linked Generation**: ExplainFlow carries claim refs, evidence refs, and source-proof media from extraction through scene review and proof playback.
+- **Quick Derived Views**: Quick now supports the original artifact view, a deterministic Proof Reel, and a hackathon-grade MP4 export layer.
 - **Production-Grade Export**: Package your validated explainer into a professional ZIP bundle containing the script, high-res images, and synchronized audio.
 
 ## Pipeline Evolution
 
 - **Legacy (v1/v2):** Linear extraction -> planning -> interleaved generation with basic QA.
 - **Current (v3):** State-aware **Agentic Studio** with conversational control, checkpoint gates, and coordinated multi-agent logic.
+
+## Current Product Surfaces
+
+### Advanced Studio
+- checkpointed workflow from source intake to stream generation
+- script-pack review before scene rendering
+- scene-level regeneration, QA notes, and proof-linked evidence viewing
+- uploaded source assets for PDF/image/audio/video-backed grounding
+
+### Quick
+- fast four-block artifact generation
+- deterministic Proof Reel derived from those blocks
+- MP4 export derived from the Proof Reel
+- lighter-weight demo path that reuses the same grounding model without the full staged studio flow
 
 ---
 
@@ -61,8 +77,36 @@ A multi-stage intake process to define:
 ### 3. Script Pack Compilation
 The planner compiles a production manifest before generation, ensuring every scene has clear goals and "Acceptance Checks."
 
+### Why Script Pack Is A Checkpoint
+ExplainFlow intentionally does **not** stream scenes immediately after signal extraction and render profiling.
+
+Instead, it stops at a `Script Pack` checkpoint to validate:
+
+- scene count and pacing budget
+- claim coverage across the planned narrative
+- acceptance checks per scene
+- render strategy before expensive generation starts
+- proof attachment opportunities (`claim_refs`, `evidence_refs`, `source_media`)
+
+This improves the system in three ways:
+
+- **Recoverability**: network failures or user interruptions can resume from a locked plan instead of repeating extraction.
+- **Quality**: the planner can repair or replan before scene generation fans out into text, images, and audio.
+- **Traceability**: proof metadata is attached to the planned scenes before rendering, so the UI can surface grounded source links instead of retrofitting them later.
+
+The simpler alternative would be to stream directly from `signal + render profile`, but that makes regeneration, checkpoint recovery, and proof-aware scene review much less reliable.
+
 ### 4. Live Multimodal Streaming
 The "Nano Banana" orchestration loop delivers narration text interleaved with high-fidelity visuals from `gemini-3-pro-image-preview`.
+
+### 5. Quick Derived Layers
+Quick is intentionally layered:
+
+1. `artifact` first
+2. `Proof Reel` second
+3. `MP4` third
+
+Each layer reuses the previous one instead of re-planning from scratch. That keeps Quick latency low while still preserving claim refs, evidence refs, source-proof selection, and exportability.
 
 ---
 
@@ -76,7 +120,9 @@ The "Nano Banana" orchestration loop delivers narration text interleaved with hi
     - **Co-Director**: Gemini 3.1 Pro (Conversational Control)
 - **Infrastructure**: Cloud Run (300s timeouts) + Cloud Storage.
 
-For detailed sequence diagrams, see: `/docs/architecture.md`
+For detailed sequence diagrams and workflow rationale, see:
+- `/docs/architecture.md`
+- `/docs/signal-extraction-research.md`
 
 ---
 
