@@ -245,6 +245,66 @@ Planner execution currently includes:
 - one constrained replan if hard issues survive repair
 - planner QA summary emission
 
+### Why Salience Exists
+
+Signal extraction is good at recovering what the source says.
+Salience is there to decide what matters most for explanation.
+
+The salience pass highlights:
+
+- central ideas rather than side details
+- stakes and consequences rather than flat facts
+- surprise or contrast that deserves scene emphasis
+- causal leverage: what changes the rest of the story if removed
+- transformation: what moves the audience from old frame to new frame
+
+Without that pass, the planner tends to overvalue whatever is merely explicit or repeated.
+With it, ExplainFlow can budget scenes around the claims that carry the most explanatory weight.
+
+### Why Forward-Pull Exists
+
+Forward-pull is the retention layer.
+
+It uses a simple narrative lens:
+
+- **Bait**
+  - what creates initial curiosity
+- **Hook**
+  - what makes the viewer stay for the next beat
+- **Threat**
+  - what raises tension, risk, or unresolved stakes
+- **Reward**
+  - what payoff or clarity the viewer gets for continuing
+- **Payload**
+  - what durable insight should land by the end
+
+This is not meant to turn ExplainFlow into clickbait.
+It exists because strong explainers are not only correct; they pull the audience forward scene by scene.
+
+In practice, this layer helps:
+
+- choose a stronger opener
+- avoid dead middle scenes
+- place proof after curiosity instead of before it
+- preserve a sense of payoff across the storyboard
+
+### Why Planner QA, Repair, And Replan Exist
+
+The planner is allowed to be ambitious, but not sloppy.
+
+Before scene generation begins, ExplainFlow checks the plan for:
+
+- missing claim coverage
+- weak scene progression
+- bad artifact/layout fit
+- missing acceptance checks
+- proof or traceability gaps
+
+If the issues are mechanical, ExplainFlow repairs them deterministically.
+If hard issues survive, it triggers one constrained replan rather than wasting a full generation run on a weak plan.
+
+This is cheaper and more reliable than trying to fix every problem later at the scene level.
+
 ## Quick: Derived Layers, Not Replanning
 
 Quick is intentionally separate from the staged Advanced path.
@@ -273,6 +333,39 @@ The derived layers currently behave like this:
   - composes the Proof Reel into a hackathon-grade video with voiceover, Ken Burns motion, and optional local proof intercuts
 
 Quick intentionally avoids the full checkpointed workflow unless a future product version justifies that extra complexity.
+
+## Workflow Chat Agent: Co-Director, Not Sidebar Chat
+
+ExplainFlow includes a workflow chat agent because the staged system is powerful but easy to misuse without state awareness.
+
+The chat agent has two jobs:
+
+1. explain the process
+- what stage the workflow is in
+- what each checkpoint means
+- why the user is blocked or what is ready next
+
+2. take safe state-aware actions
+- start extraction
+- confirm or lock the right stage
+- generate a script pack
+- launch stream generation
+- recover the user to the correct checkpoint after interruption
+
+This matters because a linear pipeline would force the user to remember hidden state.
+The workflow agent makes that state legible and actionable.
+
+Architecturally, this means the agent is not a toy conversational layer bolted on top of generation.
+It is a checkpoint-aware controller with tool access, constrained actions, and workflow context.
+
+That is also why ExplainFlow can answer questions like:
+
+- "What is the difference between signal and script pack?"
+- "What should I do next?"
+- "Why do I need to confirm signal?"
+- "Can I continue from here without regenerating everything?"
+
+without collapsing the workflow back into a one-shot black box.
 
 ## Scene Generation and QA
 

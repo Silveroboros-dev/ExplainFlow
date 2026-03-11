@@ -108,6 +108,36 @@ Quick is intentionally layered:
 
 Each layer reuses the previous one instead of re-planning from scratch. That keeps Quick latency low while still preserving claim refs, evidence refs, source-proof selection, and exportability.
 
+### 6. Why The Extra Reasoning Layers Exist
+ExplainFlow does not rely on a single planner prompt alone.
+
+Before or around script-pack planning, it can run:
+
+- **Salience analysis**
+  - identifies what is central, high-stakes, surprising, causally important, or genuinely transformative in the source
+- **Forward-pull analysis**
+  - models narrative momentum using bait, hook, threat, reward, and payload
+- **Planner QA / repair**
+  - checks the proposed plan before scene generation and either repairs it deterministically or triggers a constrained replan
+
+These layers exist because a technically correct extraction is not automatically a compelling explainer. ExplainFlow tries to preserve both:
+
+- factual grounding
+- viewer retention and scene sequencing
+
+### 7. Why The Workflow Uses An Agent
+The workflow chat agent is not just a help bot.
+
+It can:
+
+- explain the current workflow stage to the user
+- inspect workflow state and checkpoints
+- recommend the next safe action
+- trigger safe tool-backed actions such as extraction, lock, script-pack generation, or stream launch
+- return the workflow to the right checkpoint instead of forcing a full restart
+
+That design makes the studio easier to steer and recover, especially when generation takes time or a network interruption happens.
+
 ---
 
 ## Architecture (Agentic Studio v3)
