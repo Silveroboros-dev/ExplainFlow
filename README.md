@@ -1,6 +1,10 @@
 # ExplainFlow: AI Production Studio
 
-ExplainFlow is an agent-coordinated AI Production Studio that transforms complex documents and prompts into high-fidelity, interleaved visual explainer streams.
+*Built for the Gemini Live Agent Challenge.*
+
+**ExplainFlow is an agent-coordinated AI Production Studio that transforms complex documents, PDFs, and media into high-fidelity, interactive visual explainer streams.**
+
+Unlike standard AI generators that act as opaque black boxes, ExplainFlow uses a checkpoint-driven agentic workflow. It allows users to pause, co-direct, QA, and verify source-proof backing for generated claims before final rendering.
 
 ## Product Vision: The Explainer Director
 
@@ -34,6 +38,18 @@ ExplainFlow represents a pivot from simple "generation" to **"Directed Productio
 - deterministic Proof Reel derived from those blocks
 - MP4 export derived from the Proof Reel
 - lighter-weight demo path that reuses the same grounding model without the full staged studio flow
+
+## ⚖️ The Differentiator: Why Not A Black Box?
+
+Most AI generators go directly from source to final output. **ExplainFlow does not.** It exposes the lifecycle in the middle:
+
+1. The extracted signal can be reviewed.
+2. The script pack is locked before rendering.
+3. The planner self-checks and repairs weak plans automatically.
+4. Each scene can be interrupted or retried during the stream.
+5. **Proof remains attached to the output.**
+
+This is optimized for **controllability, recovery, and traceability**, not just blind generation speed.
 
 ## How ExplainFlow Works
 
@@ -124,23 +140,6 @@ flowchart TD
     CARD --> VIS
     CARD --> PROOF
 ```
-
-### Why Not A Black Box
-
-Most AI generators go directly from source to final output.
-ExplainFlow does not.
-
-It exposes the lifecycle in the middle:
-
-- the extracted signal can be reviewed
-- the script pack is locked before rendering
-- the planner self-checks and repairs weak plans
-- each scene can be retried during the stream
-- proof remains attached to the output
-
-That is the core product difference: ExplainFlow is optimized for controllability, recovery, and traceability, not just generation speed.
-
----
 
 ## How to Run Locally
 
