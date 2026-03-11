@@ -1,8 +1,9 @@
 "use client";
 
 import Image from 'next/image';
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import AgentActivityPanel, { AgentNote, AgentNoteType } from '@/components/AgentActivityPanel';
+import ProofPlaylistPlayer, { type ProofPlaylistSegment } from '@/components/ProofPlaylistPlayer';
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -180,6 +181,8 @@ type QuickReel = {
   summary: string;
   segments: QuickReelSegment[];
 };
+
+type PlaylistPresentationMode = 'auto' | 'source' | 'image';
 
 type QuickVideoSegment = {
   segment_id: string;
@@ -367,6 +370,33 @@ const quickVideoFilename = (videoUrl: string, artifactTitle?: string | null) => 
   return `${normalizedTitle || 'quick-proof-reel'}.mp4`;
 };
 
+const estimatePlaylistSlideDurationMs = (text: string) => {
+  const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
+  const estimatedMs = Math.round((wordCount / 200) * 60000) + 2000;
+  return Math.max(4000, Math.min(12000, estimatedMs || 4000));
+};
+
+const estimateClipDurationMs = (startMs?: number | null, endMs?: number | null) => {
+  if (
+    typeof startMs === 'number'
+    && typeof endMs === 'number'
+    && Number.isFinite(startMs)
+    && Number.isFinite(endMs)
+    && endMs > startMs
+  ) {
+    return endMs - startMs;
+  }
+  return 6000;
+};
+
+const buildYouTubePlaylistEmbedUrl = (videoId: string, startMs?: number | null, endMs?: number | null) => {
+  const embedUrl = new URL(buildYouTubeEmbedUrl(videoId, startMs, endMs));
+  embedUrl.searchParams.set('autoplay', '1');
+  embedUrl.searchParams.set('mute', '1');
+  embedUrl.searchParams.set('playsinline', '1');
+  return embedUrl.toString();
+};
+
 const asYouTubeQuickSourceAsset = (rawUrl: string): UploadedQuickSourceAsset | null => {
   const videoId = extractYouTubeVideoId(rawUrl);
   if (!videoId) {
@@ -453,6 +483,10 @@ export default function QuickGenerate() {
   const [isRenderingVideo, setIsRenderingVideo] = useState(false);
   const [isDownloadingVideo, setIsDownloadingVideo] = useState(false);
   const [videoError, setVideoError] = useState('');
+  const [selectedPlaylistSegmentIds, setSelectedPlaylistSegmentIds] = useState<string[]>([]);
+  const [playlistPresentationOverrides, setPlaylistPresentationOverrides] = useState<Record<string, PlaylistPresentationMode>>({});
+  const [unmuteLocalSourceClips, setUnmuteLocalSourceClips] = useState(false);
+  const [isPlaylistOpen, setIsPlaylistOpen] = useState(false);
   const [indexedSignal, setIndexedSignal] = useState<Record<string, unknown> | null>(null);
   const [indexedNormalizedSourceText, setIndexedNormalizedSourceText] = useState('');
   const [indexedSourceTextOrigin, setIndexedSourceTextOrigin] = useState<string | null>(null);
@@ -967,6 +1001,172 @@ export default function QuickGenerate() {
   const heroSourceMediaUrl = heroSourceMedia ? resolveSourceMediaUrl(heroSourceMedia) : null;
   const activeReel = artifact?.reel ?? null;
   const activeVideo = artifact?.video ?? null;
+
+  useEffect(() => {
+    if (!activeReel) {
+      setSelectedPlaylistSegmentIds([]);
+      setPlaylistPresentationOverrides({});
+      setUnmuteLocalSourceClips(false);
+      setIsPlaylistOpen(false);
+      return;
+    }
+    setSelectedPlaylistSegmentIds(activeReel.segments.map((segment) => segment.segment_id));
+    setPlaylistPresentationOverrides({});
+    setUnmuteLocalSourceClips(false);
+    setIsPlaylistOpen(false);
+  }, [activeReel?.reel_id]);
+
+  useEffect(() => {
+    if (activeSourceAsset?.provider !== 'upload') {
+      setUnmuteLocalSourceClips(false);
+    }
+  }, [activeSourceAsset?.provider]);
+
+  const hasPlayableSourceForSegment = (segment: QuickReelSegment) => {
+    if (segment.primary_media?.modality !== 'video' || !activeSourceAsset) {
+      return false;
+    }
+    if (activeSourceAsset.provider === 'youtube') {
+      return Boolean(extractYouTubeVideoId(activeSourceAsset.uri));
+    }
+    return true;
+  };
+
+  const hasGeneratedFrameForSegment = (segment: QuickReelSegment) => Boolean(segment.fallback_image_url?.trim());
+
+  const buildPlaylistSegments = (segment: QuickReelSegment): ProofPlaylistSegment[] => {
+    const preferredMode = playlistPresentationOverrides[segment.segment_id] ?? 'auto';
+    const rangeLabel = formatTimeRangeLabel(segment.start_ms, segment.end_ms);
+    const sourceLabel = segment.primary_media?.label ?? segment.primary_media?.visual_context ?? segment.primary_media?.quote_text ?? null;
+    const imageUrl = segment.fallback_image_url?.trim() || null;
+    const hasPlayableSource = hasPlayableSourceForSegment(segment);
+    const hasGeneratedFrame = Boolean(imageUrl);
+
+    const buildImageSegment = (): ProofPlaylistSegment[] => (
+      imageUrl
+        ? [{
+            segment_id: segment.segment_id,
+            title: segment.title,
+            caption_text: segment.caption_text,
+            claim_refs: segment.claim_refs,
+            kind: 'image',
+            render_label: segment.render_mode === 'generated_image' ? 'slide' : 'generated frame',
+            range_label: rangeLabel,
+            duration_ms: estimatePlaylistSlideDurationMs(segment.caption_text),
+            image_url: imageUrl,
+          }]
+        : []
+    );
+
+    if (preferredMode === 'image' && hasGeneratedFrame) {
+      return buildImageSegment();
+    }
+
+    if (segment.primary_media?.modality === 'video' && activeSourceAsset && hasPlayableSource) {
+      if (activeSourceAsset.provider === 'youtube') {
+        const videoId = extractYouTubeVideoId(activeSourceAsset.uri);
+        if (!videoId) {
+          return buildImageSegment();
+        }
+        const youtubeSegment: ProofPlaylistSegment = {
+          segment_id: segment.segment_id,
+          title: segment.title,
+          caption_text: segment.caption_text,
+          claim_refs: segment.claim_refs,
+          kind: 'youtube',
+          render_label: 'source proof',
+          source_label: sourceLabel,
+          range_label: rangeLabel,
+          duration_ms: estimateClipDurationMs(segment.start_ms, segment.end_ms),
+          youtube_embed_url: buildYouTubePlaylistEmbedUrl(videoId, segment.start_ms, segment.end_ms),
+          start_ms: segment.start_ms,
+          end_ms: segment.end_ms,
+        };
+        if (preferredMode === 'source') {
+          return [youtubeSegment];
+        }
+        if (segment.render_mode === 'hybrid' && imageUrl) {
+          return [
+            youtubeSegment,
+            ...buildImageSegment(),
+          ];
+        }
+        return [youtubeSegment];
+      }
+
+      const videoSegment: ProofPlaylistSegment = {
+        segment_id: segment.segment_id,
+        title: segment.title,
+        caption_text: segment.caption_text,
+        claim_refs: segment.claim_refs,
+        kind: 'video',
+        render_label: 'source proof',
+        source_label: sourceLabel,
+        range_label: rangeLabel,
+        duration_ms: estimateClipDurationMs(segment.start_ms, segment.end_ms),
+        video_src: activeSourceAsset.uri,
+        start_ms: segment.start_ms,
+        end_ms: segment.end_ms,
+      };
+      if (preferredMode === 'source') {
+        return [videoSegment];
+      }
+      if (segment.render_mode === 'hybrid' && imageUrl) {
+        return [
+          videoSegment,
+          ...buildImageSegment(),
+        ];
+      }
+      return [videoSegment];
+    }
+
+    if (preferredMode === 'source' && !hasPlayableSource) {
+      return buildImageSegment();
+    }
+
+    return buildImageSegment();
+  };
+
+  const selectedPlaylistSegments = activeReel
+    ? activeReel.segments.filter((segment) => selectedPlaylistSegmentIds.includes(segment.segment_id))
+    : [];
+  const playablePlaylistSegments = selectedPlaylistSegments
+    .flatMap((segment) => buildPlaylistSegments(segment));
+
+  const togglePlaylistSegment = (segmentId: string) => {
+    setSelectedPlaylistSegmentIds((prev) => (
+      prev.includes(segmentId)
+        ? prev.filter((candidate) => candidate !== segmentId)
+        : [...prev, segmentId]
+    ));
+  };
+
+  const setPlaylistPresentationMode = (segmentId: string, mode: PlaylistPresentationMode) => {
+    setPlaylistPresentationOverrides((prev) => {
+      if (mode === 'auto') {
+        if (!(segmentId in prev)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[segmentId];
+        return next;
+      }
+      return {
+        ...prev,
+        [segmentId]: mode,
+      };
+    });
+  };
+
+  const handleOpenPlaylist = () => {
+    if (!playablePlaylistSegments.length) {
+      toast.error('Select at least one playable proof-reel segment.', {
+        description: 'Source clips and generated frames can be queued into the Quick playlist.',
+      });
+      return;
+    }
+    setIsPlaylistOpen(true);
+  };
 
   const handleGenerateQuickVideo = async () => {
     const reelArtifact = await ensureQuickReel();
@@ -1799,26 +1999,56 @@ export default function QuickGenerate() {
                                   {formatMilliseconds(activeVideo.duration_ms)}
                                 </Badge>
                               ) : null}
+                              <Badge variant="outline" className="rounded-full border-slate-300 text-slate-600">
+                                Selected {selectedPlaylistSegments.length}/{activeReel.segments.length}
+                              </Badge>
+                              <label className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium ${
+                                activeSourceAsset?.provider === 'upload'
+                                  ? 'border-slate-300 bg-slate-50 text-slate-700'
+                                  : 'border-slate-200 bg-slate-100 text-slate-400'
+                              }`}>
+                                <input
+                                  type="checkbox"
+                                  className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500"
+                                  checked={unmuteLocalSourceClips}
+                                  onChange={(event) => setUnmuteLocalSourceClips(event.target.checked)}
+                                  disabled={activeSourceAsset?.provider !== 'upload'}
+                                />
+                                Unmute Local Source Clips
+                              </label>
                             </div>
-                            <Button
-                              type="button"
-                              size="sm"
-                              className="gap-2 rounded-full"
-                              onClick={() => void handleGenerateQuickVideo()}
-                              disabled={isBuildingReel || isRenderingVideo}
-                            >
-                              {isRenderingVideo ? (
-                                <>
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                  Rendering MP4...
-                                </>
-                              ) : (
-                                <>
-                                  <PlayCircle className="h-4 w-4" />
-                                  Generate MP4
-                                </>
-                              )}
-                            </Button>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="gap-2 rounded-full"
+                                onClick={handleOpenPlaylist}
+                                disabled={isBuildingReel || !playablePlaylistSegments.length}
+                              >
+                                <PlayCircle className="h-4 w-4" />
+                                Play Source Reel ({playablePlaylistSegments.length} items)
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                className="gap-2 rounded-full"
+                                onClick={() => void handleGenerateQuickVideo()}
+                                disabled={isBuildingReel || isRenderingVideo}
+                              >
+                                {isRenderingVideo ? (
+                                  <>
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    Rendering MP4...
+                                  </>
+                                ) : (
+                                  <>
+                                    <Clapperboard className="h-4 w-4" />
+                                    Generate MP4
+                                  </>
+                                )}
+                              </Button>
+                            </div>
                           </div>
                           <div>
                             <h3 className="text-2xl font-semibold text-slate-950">{activeReel.title}</h3>
@@ -1900,6 +2130,41 @@ export default function QuickGenerate() {
                                     </div>
                                     <h3 className="text-xl font-semibold text-slate-950">{segment.title}</h3>
                                   </div>
+                                  <label className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
+                                    <input
+                                      type="checkbox"
+                                      className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500"
+                                      checked={selectedPlaylistSegmentIds.includes(segment.segment_id)}
+                                      onChange={() => togglePlaylistSegment(segment.segment_id)}
+                                    />
+                                    Include in Playlist
+                                  </label>
+                                  <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1">
+                                    {([
+                                      { value: 'auto', label: 'Auto', disabled: false },
+                                      { value: 'source', label: 'Source', disabled: !hasPlayableSourceForSegment(segment) },
+                                      { value: 'image', label: 'Image', disabled: !hasGeneratedFrameForSegment(segment) },
+                                    ] satisfies Array<{ value: PlaylistPresentationMode; label: string; disabled: boolean }>).map((option) => {
+                                      const activeMode = playlistPresentationOverrides[segment.segment_id] ?? 'auto';
+                                      return (
+                                        <button
+                                          key={option.value}
+                                          type="button"
+                                          disabled={option.disabled}
+                                          onClick={() => setPlaylistPresentationMode(segment.segment_id, option.value)}
+                                          className={`rounded-full px-3 py-2 text-xs font-semibold transition-colors ${
+                                            activeMode === option.value
+                                              ? 'bg-slate-900 text-white'
+                                              : option.disabled
+                                                ? 'cursor-not-allowed text-slate-300'
+                                                : 'text-slate-600 hover:bg-white hover:text-slate-950'
+                                          }`}
+                                        >
+                                          {option.label}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
 
                                 {(segment.render_mode === 'source_clip' || segment.render_mode === 'hybrid') && segment.primary_media ? (
@@ -1975,6 +2240,14 @@ export default function QuickGenerate() {
             </>
           )}
         </div>
+
+        <ProofPlaylistPlayer
+          open={isPlaylistOpen}
+          onOpenChange={setIsPlaylistOpen}
+          title={activeReel?.title || artifact?.title || 'Quick Proof Playlist'}
+          segments={playablePlaylistSegments}
+          unmuteLocalSourceClips={unmuteLocalSourceClips}
+        />
 
         <Dialog open={Boolean(activeOverrideBlockId)} onOpenChange={(open) => {
           if (!open) {
