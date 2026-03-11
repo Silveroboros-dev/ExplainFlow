@@ -71,3 +71,36 @@ Any refactor that makes outputs prettier but weakens traceability is a regressio
 - Prefer shared frontend API base configuration over inline localhost URLs.
 - Keep repo-facing docs aligned with the actual shipped architecture.
 
+## 8. Fork / Main Merge Rule
+
+This repo uses two different remotes:
+
+- `fork` = personal working repo (`ExplainFlow-local`)
+- `origin` = canonical repo (`ExplainFlow`)
+
+Default rule:
+- Do normal feature work on `codex/*` branches and push to `fork`.
+- Do not assume a push to `fork` updates `origin/main`.
+
+Before saying a change is “on main”, verify:
+- `git fetch origin`
+- `git log --oneline origin/main -n 1`
+
+### Safe merge / cherry-pick procedure
+
+When a commit from a fork branch must be applied to `origin/main`:
+
+1. Do **not** switch the shared working tree to `main`.
+2. Do **not** touch `.obsidian/workspace.json`.
+3. Do **not** use `git reset --hard`, `git clean -fdx`, or `rm` to solve branch-switch issues.
+4. Use a separate detached worktree from `origin/main`.
+
+Recommended pattern:
+
+```bash
+git worktree add --detach /tmp/explainflow-main-merge origin/main
+cd /tmp/explainflow-main-merge
+git cherry-pick <commit-sha>
+git push origin HEAD:main
+```
+
