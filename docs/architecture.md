@@ -31,55 +31,123 @@ If you are new to the repo, read this document in this order:
 
 ```mermaid
 sequenceDiagram
+    autonumber
     participant U as User
-    participant W as Advanced Studio
+    participant W as "Advanced Studio (UI)"
     participant WF as AgentCoordinator
     participant API as GeminiStoryAgent
-    participant LLM as Gemini
+    participant LLM as "Gemini 3.1 Pro / 3 Pro Image"
 
-    U->>W: Paste source text or upload source assets
-    W->>API: POST /source-assets/upload
-    API-->>W: source_manifest asset records
-    W->>WF: POST /workflow/start
-    W->>API: POST /extract-signal
-    API->>LLM: Signal extraction (prompt + uploaded Gemini Files)
-    LLM-->>API: content_signal
-    API-->>W: content_signal
-    W->>WF: POST /workflow/{id}/extract-signal
-    W->>WF: lock artifacts + render profile
-    W->>WF: POST /workflow/{id}/generate-script-pack
-    WF->>API: build ScriptPackRequest
-    API->>LLM: salience pass + forward-pull pass + planner
-    LLM-->>API: outline
-    API->>API: compile script_pack + repair/replan + multimodal enrichment
-    API-->>W: script_pack_ready
-    W->>WF: POST /workflow/{id}/generate-stream
-    WF->>API: build AdvancedStreamRequest
-    API-->>W: scene_queue_ready
-    loop Scene by scene
-        API-->>W: scene_start
-        API-->>W: source_media_ready (0..N proof assets)
-        API->>LLM: generate scene text + image
-        LLM-->>API: text chunks + inline image
-        API-->>W: story_text_delta / diagram_ready
-        API->>API: optional audio generation
-        API-->>W: audio_ready
-        API->>API: scene QA
-        API-->>W: qa_status
-        alt first attempt fails hard QA
-            API-->>W: qa_retry + scene_retry_reset
-            API->>LLM: constrained rerender
-            LLM-->>API: updated text + image
-            API-->>W: story_text_delta / diagram_ready / audio_ready
-            API->>API: scene QA
-            API-->>W: qa_status
-        end
-        API-->>W: scene_done
+    rect rgb(240, 248, 255)
+        note right of U: "PHASE 1: Source Ingestion and Extraction"
+        U->>W: Paste source text or upload assets
+        W->>API: POST /source-assets/upload
+        API-->>W: source_manifest asset records
+        W->>WF: POST /workflow/start
+        W->>API: POST /extract-signal
+        API->>LLM: Signal extraction (prompt + uploaded Gemini Files)
+        LLM-->>API: content_signal
+        API-->>W: content_signal
+        W->>WF: POST /workflow/{id}/extract-signal
+        note over WF: "CP1_SIGNAL_READY"
     end
+
+    rect rgb(245, 255, 250)
+        note right of U: "PHASE 2: Artifact-Aware Planning and QA"
+        W->>WF: lock artifacts + render profile
+        note over WF: "CP2_ARTIFACTS_LOCKED and CP3_RENDER_LOCKED"
+        W->>WF: POST /workflow/{id}/generate-script-pack
+        WF->>API: build ScriptPackRequest
+        API->>LLM: salience pass + forward-pull pass + planner
+        LLM-->>API: outline
+        API->>API: compile script_pack + repair/replan + multimodal enrichment
+        API-->>W: script_pack_ready
+        note over WF: "CP4_SCRIPT_LOCKED"
+    end
+
+    rect rgb(255, 250, 240)
+        note right of U: "PHASE 3: Live Multimodal Streaming and QA"
+        W->>WF: POST /workflow/{id}/generate-stream
+        WF->>API: build AdvancedStreamRequest
+        API-->>W: scene_queue_ready
+        loop Scene by scene
+            API-->>W: scene_start
+            API-->>W: source_media_ready (0..N proof assets)
+            API->>LLM: generate scene text + image
+            LLM-->>API: text chunks + inline image bytes
+            API-->>W: story_text_delta / diagram_ready
+            API->>API: optional audio generation
+            API-->>W: audio_ready
+            API->>API: scene QA evaluation
+            API-->>W: qa_status
+            alt first attempt fails hard QA
+                API-->>W: qa_retry + scene_retry_reset
+                note over API,LLM: "Auto-correction loop"
+                API->>LLM: constrained rerender
+                LLM-->>API: updated text + image
+                API-->>W: story_text_delta / diagram_ready / audio_ready
+                API->>API: scene QA
+                API-->>W: qa_status
+            end
+            API-->>W: scene_done
+        end
+    end
+
     API-->>W: final_bundle_ready
+    note over WF: "CP6_BUNDLE_FINALIZED"
 ```
 
 ## Data Contracts
+
+```mermaid
+flowchart LR
+    subgraph INTAKE["1. Source Intake"]
+        A["source_manifest.assets[]"]
+        B["Raw uploads"]
+        A -->|"uri, modality"| B
+    end
+
+    subgraph SIGNAL["2. Extracted Signal"]
+        C["content_signal"]
+        D["thesis"]
+        E["key_claims[]"]
+        F["evidence_snippets[]\nbbox_norm / start_ms / page_index"]
+        B -->|"Gemini 3.1 Pro"| C
+        C --> D
+        C --> E
+        E --> F
+    end
+
+    subgraph PACK["3. Script Pack"]
+        G["ScriptPackScene"]
+        H["claim_refs[]"]
+        I["evidence_refs[]"]
+        J["source_media[]"]
+        K["render_strategy"]
+        C -->|"Planner + QA"| G
+        G --> H
+        G --> I
+        G --> J
+        G --> K
+    end
+
+    subgraph STREAM["4. SSE Stream Events"]
+        L["SSE client"]
+        M["scene_start"]
+        N["story_text_delta"]
+        O["source_media_ready"]
+        P["qa_status"]
+        G -->|"AgentCoordinator"| L
+        L -.-> M
+        L -.-> N
+        L -.-> O
+        L -.-> P
+    end
+
+    style C fill:#f9f2f4,stroke:#d9534f
+    style G fill:#d9edf7,stroke:#5bc0de
+    style L fill:#dff0d8,stroke:#5cb85c
+```
 
 ### Input
 
@@ -559,3 +627,10 @@ The next incremental multimodal steps should be:
 2. stronger audio timestamp extraction and speaker-aware evidence refs
 3. source-media-first scene rendering for selected artifacts
 4. video proof clips after the evidence pipeline is stable
+
+## Optional Documentation Polish
+
+If there is time for final doc cleanup, the highest-value follow-ups are:
+
+1. convert `API Surface` into a compact markdown table with route, method, and purpose
+2. do one selective pass to wrap true schema keys and event names in backticks more consistently
