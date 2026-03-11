@@ -1,94 +1,651 @@
 # ExplainFlow Architecture
 
-## Overview
+`README.md` is the overview. This document is the detailed engineering view: the staged workflow, core contracts, reasoning layers, and runtime surfaces that make ExplainFlow work.
 
-ExplainFlow is an agent-coordinated AI Production Studio designed to transform complex documents into high-fidelity, interleaved visual explainer streams. It represents an evolution from linear generation to a **state-aware, multi-agent orchestration model**.
+ExplainFlow is a workflow-driven artifact generation system. It turns a locked source signal into a script pack, streams scene generation with QA gates, and now supports a first multimodal traceability slice for audio timestamps and image/PDF proof regions.
 
-This document tracks the progression from structured planning to the current agentic studio:
-- **Architecture v2 (Legacy Snapshot)**: Structured planning with Script Pack compilation and per-scene self-correction.
-- **Architecture v3 (Current State)**: State-aware studio managed by an `AgentCoordinator` and co-directed by a conversational `WorkflowChatAgent`.
+The system is intentionally not a generic notebook. Its core differentiators are:
 
----
+- checkpointed director workflow
+- artifact-aware planning
+- claim-grounded traceability
+- scene-level repair and regeneration
+- proof-linked source media in the Advanced Studio
 
-## Architecture v3: The Agent-Coordinated Studio
+ExplainFlow currently exposes two product surfaces:
 
-The core shift in v3 is from a "pipeline" (where data flows one way) to a "studio" (where state is persistent and interactive).
+- **Advanced Studio**
+  - staged workflow, planner review, proof-linked scene generation
+- **Quick**
+  - lightweight artifact generation with derived Proof Reel and MP4 views
 
-### 1. Central Coordination (`AgentCoordinator`)
-The `AgentCoordinator` is the source of truth for the system. It manages global state across concurrent sessions using a `workflow_id`.
-- **Checkpoint Gates**: It enforces a strict sequence of "Production Gates":
-    - **CP1 (Signal Ready)**: The document has been parsed into core claims.
-    - **CP2/3 (Profile Locked)**: The audience persona and visual art direction are confirmed.
-    - **CP4 (Script Locked)**: The narrative storyboard is approved for "filming."
-- **Atomic State**: It prevents race conditions between the asynchronous generation loop (streaming to SSE) and the synchronous user interactions (Chat/Regeneration).
+## Reading Guide
 
-### 2. Conversational Co-Direction (`WorkflowChatAgent`)
-Users interact with the studio through a conversational agent that acts as a co-director.
-- **Intent-to-Action Mapping**: The agent doesn't just "talk"—it interprets user messages into system directives (`open_panel`, `extract_signal`, `generate_stream`).
-- **Contextual Awareness**: It has deep access to the current `render_profile` and `content_signal`, allowing it to answer questions like "Why did you choose this persona?" or "Adjust the style to be more futuristic."
+If you are new to the repo, read this document in this order:
 
-### 3. The Multimodal "Visual Chain"
-To ensure **Artistic Continuity** across scenes without a massive context window, ExplainFlow uses a "Visual Chaining" technique:
-- **Anchor Term Extraction**: The system extracts unique visual keywords from the *previous* scene's output.
-- **Continuity Injection**: These anchor terms are injected as strict art-direction constraints into the *next* scene's multimodal prompt.
-- **Result**: A consistent visual language (palette, character style, lighting) that persists through the entire story.
+1. `End-to-End Flow` for the full staged lifecycle.
+2. `Workflow Checkpoints`, `Planning Layers`, and `Scene Generation and QA` for the architectural choices that make the workflow inspectable and repairable.
+3. `Codebase Shape` and `API Surface` last, as the implementation appendix.
 
-### 4. Self-Healing QA Gate
-Every generated artifact (text, image, audio) passes through a backend **QA Gate** before reaching the user:
-- **Scoring Logic**: Artifacts are scored on **Alignment** (did it follow the prompt?) and **Quality** (is it gibberish?).
-- **Correction Retries**: A `FAIL` status triggers an automatic **Correction Pass**. The system generates a specific "Fix It" prompt that tells Gemini exactly what was wrong (e.g., "The image was missing the requested diagram labels") and requests a replacement.
+## End-to-End Flow
 
----
-
-## Architecture v2: Pipeline with Script Pack (Legacy Comparison)
-
-The previous version established the foundational "Script Pack" manifest which persists in the current model as the primary execution engine.
-
-### v2 Request Flow
+This sequence describes the checkpointed Advanced Studio path. Quick follows a lighter derived flow (`artifact -> Proof Reel -> MP4`) and does not reuse every workflow checkpoint.
 
 ```mermaid
 sequenceDiagram
+    autonumber
     participant U as User
-    participant W as Web UI
-    participant API as FastAPI
-    participant G31 as Gemini 3.1 Pro
-    participant G3I as Gemini 3 Pro Image
+    participant W as "Advanced Studio (UI)"
+    participant WF as AgentCoordinator
+    participant API as GeminiStoryAgent
+    participant LLM as "Gemini 3.1 Pro / 3 Pro Image"
 
-    U->>W: Submit document + Profile (Persona, Taste Bar)
-    W->>API: POST /extract-signal
-    API->>G31: Extract Signal (Low Temp)
-    G31-->>API: content_signal (JSON)
-    W->>API: POST /generate-stream-advanced
-    API->>G31: Generate Scene Plan
-    G31-->>API: scene_plan
-    loop For each Scene
-        API->>G3I: Generate Scene N (Interleaved)
-        G3I-->>API: Narration Text + Image Bytes
-        API-->>W: SSE Event (text_delta, image_ready)
-        API->>API: gTTS (Audio Generation)
-        API-->>W: SSE Event (audio_ready)
+    rect rgb(240, 248, 255)
+        note right of U: "PHASE 1: Source Ingestion and Extraction"
+        U->>W: Paste source text or upload assets
+        opt uploaded assets provided
+            W->>API: POST /source-assets/upload
+            API-->>W: source_manifest asset records
+        end
+        W->>WF: POST /workflow/start
+        W->>API: POST /extract-signal
+        API->>LLM: Signal extraction (prompt + uploaded Gemini Files)
+        LLM-->>API: content_signal
+        API-->>W: content_signal
+        W->>WF: POST /workflow/{id}/extract-signal
+        note over WF: "CP1_SIGNAL_READY"
     end
+
+    rect rgb(245, 255, 250)
+        note right of U: "PHASE 2: Artifact-Aware Planning and QA"
+        W->>WF: lock artifacts + render profile
+        note over WF: "CP2_ARTIFACTS_LOCKED and CP3_RENDER_LOCKED"
+        W->>WF: POST /workflow/{id}/generate-script-pack
+        WF->>API: build ScriptPackRequest
+        API->>LLM: salience pass + forward-pull pass + planner
+        LLM-->>API: outline
+        API->>API: compile script_pack + repair/replan + multimodal enrichment
+        API-->>W: script_pack_ready
+        note over WF: "CP4_SCRIPT_LOCKED"
+    end
+
+    rect rgb(255, 250, 240)
+        note right of U: "PHASE 3: Live Multimodal Streaming and QA"
+        W->>WF: POST /workflow/{id}/generate-stream
+        WF->>API: build AdvancedStreamRequest
+        API-->>W: scene_queue_ready
+        loop Scene by scene
+            API-->>W: scene_start
+            API-->>W: source_media_ready (0..N proof assets)
+            API->>LLM: generate scene text + image
+            LLM-->>API: text chunks + inline image bytes
+            API-->>W: story_text_delta / diagram_ready
+            API->>API: optional audio generation
+            API-->>W: audio_ready
+            API->>API: scene QA evaluation
+            API-->>W: qa_status
+            alt first attempt fails hard QA
+                API-->>W: qa_retry + scene_retry_reset
+                note over API,LLM: "Auto-correction loop"
+                API->>LLM: constrained rerender
+                LLM-->>API: updated text + image
+                API-->>W: story_text_delta / diagram_ready / audio_ready
+                API->>API: scene QA
+                API-->>W: qa_status
+            end
+            API-->>W: scene_done
+        end
+    end
+
     API-->>W: final_bundle_ready
+    note over WF: "CP6_BUNDLE_FINALIZED"
 ```
 
----
+## Data Contracts
 
-## Technical Specifications
+```mermaid
+flowchart LR
+    subgraph INTAKE["1. Source Intake"]
+        A["input_text / source_text"]
+        B["source_manifest.assets[]"]
+        C["normalized_source_text + source_text_origin"]
+        D["Text, uploads, or transcript-backed video context"]
+        A --> D
+        B -->|"uri, modality, transcript/ocr metadata"| D
+        C --> D
+    end
 
-### API Surface (v3)
-- `POST /api/workflow/start`: Initializes a new persistent production session.
-- `POST /api/workflow/{id}/lock-render`: Freezes the art direction and audience persona.
-- `POST /api/workflow/agent/chat`: Conversational interface for production control.
-- `POST /api/final-bundle/export`: Aggregates all validated assets into a single production ZIP.
+    subgraph SIGNAL["2. Extracted Signal"]
+        E["content_signal"]
+        F["thesis"]
+        G["key_claims[]"]
+        H["evidence_snippets[]\nbbox_norm / start_ms / page_index"]
+        D -->|"Gemini 3.1 Pro"| E
+        E --> F
+        E --> G
+        G --> H
+    end
 
-### Event-Driven Transparency (SSE)
-ExplainFlow uses a rich SSE event vocabulary to ensure the user is never left in the dark:
-- `script_pack_ready`: The director has finished the plan.
-- `qa_status`: Live scoring results for the current scene.
-- `qa_retry`: Notification that the director is "re-shooting" a scene due to quality failure.
-- `claim_traceability`: Real-time logging of document grounding.
+    subgraph PACK["3. Script Pack"]
+        I["ScriptPackScene"]
+        J["claim_refs[]"]
+        K["evidence_refs[]"]
+        L["source_media[]"]
+        M["render_strategy"]
+        E -->|"Planner + QA"| I
+        I --> J
+        I --> K
+        I --> L
+        I --> M
+    end
 
-### Infrastructure Profile
-- **Hosting**: Google Cloud Run (us-central1).
-- **Timeout**: 300s (Critical for the "thinking" latency of `gemini-3-pro-image-preview`).
-- **Memory**: 2Gi RAM / 2 CPU (To support concurrent image parsing and gTTS encoding).
+    subgraph STREAM["4. SSE Stream Events"]
+        N["SSE client"]
+        O["scene_start"]
+        P["story_text_delta"]
+        Q["source_media_ready"]
+        R["qa_status"]
+        I -->|"AgentCoordinator"| N
+        N -.-> O
+        N -.-> P
+        N -.-> Q
+        N -.-> R
+    end
+
+    style E fill:#f9f2f4,stroke:#d9534f
+    style I fill:#d9edf7,stroke:#5bc0de
+    style N fill:#dff0d8,stroke:#5cb85c
+```
+
+### Input
+
+The extraction layer now supports three intake shapes:
+
+- text-first input
+  - `input_text` or `source_text`
+- asset-backed input
+  - `source_manifest.assets[]`
+- transcript-backed source video input
+  - transcript in `source_text`
+  - source identity in `source_manifest.assets[]`
+  - normalization and provenance in `normalized_source_text` and `source_text_origin`
+
+Each `source_manifest.assets[]` item can carry:
+
+- `asset_id`
+- `modality`
+- `uri`
+- optional transcript, OCR, duration, page, and metadata fields
+
+In practice, that means ExplainFlow can begin extraction from:
+
+- text-only
+- uploaded assets only
+- text plus uploaded assets
+- uploaded video plus transcript/captions
+- YouTube URL plus transcript/captions in Quick, represented internally as transcript-backed video context rather than a dedicated `youtube_url` request field
+
+### Extracted Signal
+
+`content_signal` remains the planner backbone. Important fields:
+
+- `thesis`
+- `key_claims`
+- `concepts`
+- `visual_candidates`
+- `narrative_beats`
+
+For multimodal inputs, each `key_claim` can now carry structured `evidence_snippets[]`, which are normalized into evidence refs with:
+
+- `evidence_id`
+- `asset_id`
+- `modality`
+- `start_ms` / `end_ms`
+- `page_index`
+- `bbox_norm`
+- `quote_text` / `transcript_text`
+- `visual_context`
+
+### Script Pack
+
+`ScriptPack` and `ScriptPackScene` are still the shared planner contract. Important scene fields now include:
+
+- `claim_refs`
+- `evidence_refs`
+- `source_media[]`
+- `render_strategy`
+- artifact-specific fields such as `scene_mode`, `layout_template`, `focal_subject`, `modules`, `visual_hierarchy`
+
+ExplainFlow still uses JSON contracts throughout. Multimodal traceability is represented as structured fields, not XML tags.
+
+## Workflow Checkpoints
+
+The coordinator uses six named checkpoints:
+
+- `CP1_SIGNAL_READY`
+- `CP2_ARTIFACTS_LOCKED`
+- `CP3_RENDER_LOCKED`
+- `CP4_SCRIPT_LOCKED`
+- `CP5_STREAM_COMPLETE`
+- `CP6_BUNDLE_FINALIZED`
+
+Key properties of the workflow layer:
+
+- source changes invalidate downstream checkpoints
+- artifact and render changes invalidate only the necessary later checkpoints
+- fidelity-only final-bundle upgrades preserve the locked script pack
+- workflow chat can answer questions without forcing checkpoint regressions
+
+`AgentCoordinator` now also persists `source_manifest` so script-pack generation and stream generation can reconstruct the same multimodal source context later.
+
+### Why `CP4_SCRIPT_LOCKED` Exists
+
+The Script Pack checkpoint is the architectural hinge of ExplainFlow.
+
+ExplainFlow could stream directly from:
+
+- extracted signal
+- locked artifact/render profile
+
+But that would make the system faster only on the happy path. It would also make it much weaker operationally.
+
+Before scene rendering starts, the Script Pack checkpoint gives the system one stable place to validate:
+
+- scene count and pacing budget
+- claim coverage across the full story
+- per-scene acceptance checks
+- artifact/layout intent
+- proof affordances such as `claim_refs`, `evidence_refs`, and `source_media`
+- planner QA and repair/replan decisions
+
+That checkpoint improves the system in practice:
+
+- **Recovery**: if the network drops or the browser refreshes, the workflow can resume from a locked plan instead of rerunning extraction.
+- **Control**: the user can inspect or redirect the plan before paying for scene text, image, and audio generation.
+- **Quality**: planner repair happens once at the plan level instead of trying to patch scene drift after rendering has already begun.
+- **Traceability**: proof metadata can be attached to planned scenes before the stream, so evidence viewing is part of the generation flow rather than an afterthought.
+
+So the Script Pack gate is not bureaucracy. It is the boundary that makes staged recovery, proof-aware streaming, and consistent interleaved generation feasible.
+
+## Planning Layers
+
+The planner resolves one artifact policy before scene budgeting and enrichment routing.
+
+| Artifact Type | Planning Mode | Default Scene Count | Salience Pass | Forward-Pull Pass |
+| --- | --- | ---: | --- | --- |
+| `storyboard_grid` | `sequential` | `4` | `FULL` | `FULL` |
+| `comparison_one_pager` | `static` | `1` | `FULL` | `LITE` |
+| `slide_thumbnail` | `static` | `1` | `LITE` | `FULL` |
+| `technical_infographic` | `static` | `1` | `FULL` | `OFF` |
+| `process_diagram` | `static` | `1` | `FULL` | `OFF` |
+
+Important semantic note:
+
+- the legacy artifact key `comparison_one_pager` now behaves as a generic modular one-pager board, not a strict left-right comparison layout
+
+Planner execution currently includes:
+
+- artifact policy resolution
+- scene budget derivation
+- optional salience pass
+- optional forward-pull pass
+- outline generation
+- deterministic repair
+- one constrained replan if hard issues survive repair
+- planner QA summary emission
+
+### Why Salience Exists
+
+Signal extraction is good at recovering what the source says.
+Salience is there to decide what matters most for explanation.
+
+The salience pass highlights:
+
+- central ideas rather than side details
+- stakes and consequences rather than flat facts
+- surprise or contrast that deserves scene emphasis
+- causal leverage: what changes the rest of the story if removed
+- transformation: what moves the audience from old frame to new frame
+
+Without that pass, the planner tends to overvalue whatever is merely explicit or repeated.
+With it, ExplainFlow can budget scenes around the claims that carry the most explanatory weight.
+
+### Why Forward-Pull Exists
+
+Forward-pull is the retention layer.
+
+It uses a simple narrative lens:
+
+- **Bait**
+  - what creates initial curiosity
+- **Hook**
+  - what makes the viewer stay for the next beat
+- **Threat**
+  - what raises tension, risk, or unresolved stakes
+- **Reward**
+  - what payoff or clarity the viewer gets for continuing
+- **Payload**
+  - what durable insight should land by the end
+
+This is not meant to turn ExplainFlow into clickbait.
+It exists because strong explainers are not only correct; they pull the audience forward scene by scene.
+
+In practice, this layer helps:
+
+- choose a stronger opener
+- avoid dead middle scenes
+- place proof after curiosity instead of before it
+- preserve a sense of payoff across the storyboard
+
+### Why Planner QA, Repair, And Replan Exist
+
+The planner is allowed to be ambitious, but not sloppy.
+
+Before scene generation begins, ExplainFlow checks the plan for:
+
+- missing claim coverage
+- weak scene progression
+- bad artifact/layout fit
+- missing acceptance checks
+- proof or traceability gaps
+
+If the issues are mechanical, ExplainFlow repairs them deterministically.
+If hard issues survive, it triggers one constrained replan rather than wasting a full generation run on a weak plan.
+
+This is cheaper and more reliable than trying to fix every problem later at the scene level.
+
+## Quick: Derived Layers, Not Replanning
+
+Quick is intentionally separate from the staged Advanced path.
+
+Its current flow is:
+
+1. build a four-block artifact
+2. deterministically derive a Proof Reel from those blocks
+3. optionally derive an MP4 from the Proof Reel
+
+This matters because Quick is optimized for:
+
+- lower latency
+- deterministic overrides
+- fast demoability
+- reuse of the same proof model without a second heavy planning pass
+
+The derived layers currently behave like this:
+
+- **Artifact**
+  - HTML-first explanation blocks with claim refs, evidence refs, and optional source media
+- **Proof Reel**
+  - one ordered segment per Quick block
+  - chooses a cited source clip when available, otherwise the generated block image
+- **MP4**
+  - composes the Proof Reel into a hackathon-grade video with voiceover, Ken Burns motion, and optional local proof intercuts
+
+Quick intentionally avoids the full checkpointed workflow unless a future product version justifies that extra complexity.
+
+## Workflow Chat Agent: Co-Director, Not Sidebar Chat
+
+ExplainFlow includes a workflow chat agent because the staged system is powerful but easy to misuse without state awareness.
+
+The chat agent has two jobs:
+
+1. explain the process
+- what stage the workflow is in
+- what each checkpoint means
+- why the user is blocked or what is ready next
+
+2. take safe state-aware actions
+- start extraction
+- confirm or lock the right stage
+- generate a script pack
+- launch stream generation
+- recover the user to the correct checkpoint after interruption
+
+This matters because a linear pipeline would force the user to remember hidden state.
+The workflow agent makes that state legible and actionable.
+
+Architecturally, this means the agent is not a toy conversational layer bolted on top of generation.
+It is a checkpoint-aware controller with tool access, constrained actions, and workflow context.
+
+That is also why ExplainFlow can answer questions like:
+
+- "What is the difference between signal and script pack?"
+- "What should I do next?"
+- "Why do I need to confirm signal?"
+- "Can I continue from here without regenerating everything?"
+
+without collapsing the workflow back into a one-shot black box.
+
+## Scene Generation and QA
+
+Scene generation is still interleaved:
+
+- narration text streams incrementally
+- image output arrives via inline image bytes
+- audio is generated after text when the artifact type uses voiceover
+
+QA runs before scene finalization and scores:
+
+- narration length by artifact/layout
+- focus adherence
+- `must_include`
+- `must_avoid`
+- continuity hints
+
+The stream now surfaces:
+
+- `qa_status`
+- `qa_retry`
+- `scene_retry_reset`
+- planner QA notes at script-pack time
+
+## Multimodal Traceability
+
+The new multimodal layer does not replace the planner. It enriches the planned scene graph after planning and before streaming.
+
+### Current Scope
+
+Implemented now:
+
+- `POST /source-assets/upload` for image, audio, and PDF assets
+- Advanced Studio asset picker and manifest wiring
+- Gemini Files upload during extraction for local uploaded assets
+- audio proof clips via `start_ms` / `end_ms`
+- image/PDF proof crops via `bbox_norm`
+- source-manifest persistence through workflow state
+- scene-level `evidence_refs`
+- scene-level `source_media`
+- clickable proof viewer in Advanced Studio
+- new `source_media_ready` SSE event
+- Quick Proof Reel derived from artifact blocks
+- Quick MP4 export derived from Proof Reel segments
+
+Not implemented yet:
+
+- real video clip extraction/compositing
+- automatic OCR/transcript segmentation beyond Gemini’s own file understanding
+- source-media-first render strategies that skip generated visuals entirely
+- proof-linked MP4 export
+
+### Enrichment Rules
+
+After a script pack is generated, `GeminiStoryAgent` deterministically enriches scenes:
+
+- maps `claim_refs` to structured evidence
+- adds `evidence_refs`
+- adds `source_media` entries when the referenced asset exists in `source_manifest`
+- upgrades `render_strategy` from `generated` to `hybrid` when proof media is attached
+
+The first slice currently favors `hybrid` rendering:
+
+- generated scene visuals still exist
+- proof media is surfaced alongside them
+- the proof viewer lets the user inspect the exact backing evidence
+- extraction uploads local source assets to Gemini Files transiently, while ExplainFlow keeps its own local copy for proof playback and exports
+
+## SSE Event Contract
+
+### Core Stream Events
+
+- `script_pack_ready`
+  Returns the compiled script pack and optional `planner_qa_summary`.
+- `scene_queue_ready`
+  Returns queued scene metadata including `claim_refs`, `evidence_refs`, `render_strategy`, and `source_media_count`.
+- `scene_start`
+  Returns the active scene, its trace payload, `claim_refs`, `evidence_refs`, `render_strategy`, and raw `source_media` refs.
+- `story_text_delta`
+  Incremental narration text.
+- `diagram_ready`
+  Generated scene visual URL.
+- `audio_ready`
+  Generated voiceover URL.
+- `qa_status`
+  QA verdict with score, reasons, attempt, and word count.
+- `qa_retry`
+  Signals a retry after the first hard QA failure.
+- `scene_retry_reset`
+  Client reset marker before replaying a retried scene.
+- `scene_done`
+  Terminal per-scene event.
+- `final_bundle_ready`
+  Run completion with bundle URL and claim/evidence traceability.
+- `error`
+  Fatal stream error.
+
+### Multimodal Proof Event
+
+- `source_media_ready`
+  Returns a resolved proof asset for the scene:
+  - `asset_id`
+  - `modality`
+  - `usage`
+  - `url`
+  - `original_url`
+  - `start_ms` / `end_ms`
+  - `page_index`
+  - `bbox_norm`
+  - `claim_refs`
+  - `evidence_refs`
+  - `label`
+  - `quote_text`
+  - `visual_context`
+  - `speaker`
+
+For image/PDF proof regions, the backend can emit a cropped proof asset instead of the full original page.
+
+## Codebase Shape
+
+### Frontend
+
+- `web/src/app/advanced/page.tsx`
+  Advanced Studio workflow UI, SSE client, planner QA notes, and proof viewer dialog.
+- `web/src/components/SceneCard.tsx`
+  Per-scene card with claim badges, regeneration controls, and source-proof entry points.
+- `web/src/components/FinalBundle.tsx`
+  Final bundle review and zip export.
+
+### Backend
+
+- `api/app/routes/generate_stream.py`
+  Extraction, advanced script-pack generation, advanced streaming, and scene regeneration routes.
+- `api/app/routes/workflow.py`
+  Checkpointed workflow orchestration routes and workflow agent chat.
+- `api/app/routes/assets.py`
+  Source-asset upload, final-bundle export, and high-fidelity image upscaling endpoints.
+- `api/app/routes/sessions.py`
+  Final bundle retrieval by `run_id`.
+
+### Services
+
+- `api/app/services/gemini_story_agent.py`
+  Signal extraction, Gemini Files upload for multimodal extraction, artifact-aware planning, planner QA, scene generation, and SSE emission.
+- `api/app/services/agent_coordinator.py`
+  Workflow state machine, checkpoint invalidation rules, and request reconstruction.
+- `api/app/services/interleaved_parser.py`
+  Scene QA and incremental text parsing.
+- `api/app/services/image_pipeline.py`
+  Asset saving, thumbnail composition, proof-region cropping, and upscale helpers.
+- `api/app/services/final_bundle_export.py`
+  Zip assembly for final bundle export.
+- `api/app/services/source_ingest.py`
+  Local source-asset ingest and manifest construction for uploaded image/audio/PDF files.
+
+### Schemas
+
+- `api/app/schemas/requests.py`
+  Request/response models, script-pack scene schema, planner QA summary, multimodal source models.
+- `api/app/schemas/events.py`
+  Trace envelope, checkpoint events, scene trace updates, and SSE helpers.
+
+## API Surface
+
+### Core Generation
+
+- `POST /extract-signal`
+- `GET /generate-stream`
+- `POST /generate-stream-advanced`
+- `POST /generate-script-pack-advanced`
+- `POST /regenerate-scene`
+
+### Workflow
+
+- `POST /workflow/start`
+- `POST /workflow/{workflow_id}/extract-signal`
+- `GET /workflow/{workflow_id}`
+- `POST /workflow/{workflow_id}/lock-artifacts`
+- `POST /workflow/{workflow_id}/lock-render`
+- `POST /workflow/{workflow_id}/generate-script-pack`
+- `POST /workflow/{workflow_id}/generate-stream`
+- `POST /workflow/agent/chat`
+
+### Bundle / Assets
+
+- `POST /source-assets/upload`
+- `GET /final-bundle/{run_id}`
+- `POST /final-bundle/export`
+- `POST /final-bundle/upscale`
+
+## Frontend Rendering Model
+
+The Advanced Studio scene card now supports:
+
+- generated scene visuals
+- generated audio
+- proof-linked claim badges
+- explicit `View Source Proof` action
+- proof dialog for:
+  - audio playback with seek fragment
+  - image/PDF proof crops
+  - evidence metadata display
+
+This is the first visible multimodal UX wedge: claims can now open exact backing proof instead of behaving as passive labels.
+
+## What This Architecture Buys You
+
+ExplainFlow is strongest when it behaves like a director-controlled artifact engine rather than a notebook.
+
+The architecture supports that through:
+
+- locked signal before planning
+- artifact-aware prompt routing
+- deterministic planner repair
+- planner QA surfaced to the user
+- scene-level regeneration
+- checkpoint-preserving fidelity upgrades
+- multimodal proof linking without abandoning the existing JSON planner/runtime spine
+
+## Next Technical Steps
+
+The next incremental multimodal steps should be:
+
+1. stronger PDF page-level evidence extraction and rasterization
+2. stronger audio timestamp extraction and speaker-aware evidence refs
+3. source-media-first scene rendering for selected artifacts
+4. video proof clips after the evidence pipeline is stable
+
+## Optional Documentation Polish
+
+If there is time for final doc cleanup, the highest-value follow-ups are:
+
+1. convert `API Surface` into a compact markdown table with route, method, and purpose
+2. do one selective pass to wrap true schema keys and event names in backticks more consistently
