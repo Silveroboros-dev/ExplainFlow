@@ -7,7 +7,21 @@ Show a clear story in 4 minutes:
 2. Advanced Studio: Script Pack Compilation & Review.
 3. Live multimodal streaming (The "Nano Banana" Pattern).
 4. **Auto QA Gate & Correction Retries** (The "Self-Healing Director").
-5. Deployed GCP architecture proof.
+5. Proof-linked generation and checkpointed recovery.
+6. Deployed GCP architecture proof.
+
+## What Judges Should Hear Explicitly
+
+Do not try to explain every subsystem in the video. Instead, make sure the narration lands these product-level ideas:
+
+- ExplainFlow is **not** a one-shot generator.
+- ExplainFlow uses an **agent harness**, not just one prompt and one response.
+- The `Script Pack` is a checkpointed production manifest, not just intermediate JSON.
+- Scenes are **proof-linked** back to source claims and evidence.
+- The workflow agent is state-aware and can help the user recover or continue instead of restarting.
+- Quick is a fast derived path: `artifact -> Proof Reel -> MP4`.
+
+If the recording is running long, cut detail before you cut these points.
 
 ## Demo Setup (Before Recording)
 
@@ -40,6 +54,8 @@ Show a clear story in 4 minutes:
 **Say**
 - "In the Advanced Studio, we don't just generate; we plan. After extracting the core claims, we generate a Script Pack."
 - "This is our production manifest. It includes continuity references and strict 'acceptance checks' for every scene, ensuring the story remains coherent from start to finish."
+- "This checkpoint is important: instead of streaming immediately from the extracted signal, we stop here so the system can validate pacing, coverage, and proof before expensive generation begins."
+- "That self-checking behavior is part of our agent harness: the system checks the plan before generation, not only after something goes wrong."
 
 ### 1:15 - 2:30 | Multimodal Interleaving & Auto QA
 
@@ -53,8 +69,20 @@ Show a clear story in 4 minutes:
 - "Notice the interleaving. Our 'Nano Banana' orchestration emits narration followed immediately by high-fidelity image bytes."
 - "But watch the badges. Every scene passes through an 'Auto QA Gate'. The system scores its own output against our acceptance checks."
 - "If the director detects narrative drift or technical errors, it automatically triggers a 'Correction Retry' to fix the scene in real-time."
+- "And this is not just pretty generation: each scene keeps claim refs, evidence refs, and linked source proof so the user can inspect where the story came from."
+- "So the agent harness is active at both levels: first it self-checks the plan, then it self-checks each scene as the stream runs."
 
-### 2:30 - 3:15 | Directed Iteration (Regenerate)
+### 2:30 - 2:55 | Proof-Linked Review
+
+**On screen**
+- Open one scene's proof link.
+- Show the source proof view or the PDF source opening in a new tab.
+
+**Say**
+- "This is one of the most important product decisions in ExplainFlow: every scene can stay grounded."
+- "We carry proof from extraction into planning and then into the final scene cards, so the user can inspect the exact source support instead of trusting a black box."
+
+### 2:55 - 3:20 | Directed Iteration (Regenerate)
 
 **On screen**
 - Select one generated scene and click `Regenerate`.
@@ -63,7 +91,7 @@ Show a clear story in 4 minutes:
 **Say**
 - "Even with Auto QA, we keep the human in the loop. I can use directed iteration to refine specific scenes while the rest of the production remains locked and stable."
 
-### 3:15 - 3:45 | Architecture & GCP Proof
+### 3:20 - 3:45 | Architecture & GCP Proof
 
 **On screen**
 - Show the Architecture diagram (Mermaid).
@@ -71,6 +99,7 @@ Show a clear story in 4 minutes:
 
 **Say**
 - "This self-healing pipeline runs on FastAPI and Google Cloud Run. We've optimized the request timeouts to 300 seconds to handle the deep 'thinking' time required for high-tier multimodal generation."
+- "The important architecture idea is that the workflow is staged, recoverable, and controllable. Users are not forced to rerun the whole pipeline every time something changes."
 
 ### 3:45 - 4:00 | Close
 
@@ -79,6 +108,21 @@ Show a clear story in 4 minutes:
 
 **Say**
 - "ExplainFlow turns AI into a repeatable, controllable production studio. It’s not just a storyteller; it’s a director. Thank you."
+
+## Optional Quick Swap-In (30-40 Seconds)
+
+If Quick is more stable or more visually impressive in the live build, replace the Directed Iteration section with this:
+
+**On screen**
+- Open `/quick`
+- generate a Quick artifact
+- switch to `Proof Reel`
+- show `Generate MP4`
+
+**Say**
+- "We also built a fast path called Quick."
+- "Instead of running the full staged studio, Quick derives three layers from the same grounded blocks: an artifact, a Proof Reel, and then an MP4."
+- "That gives us a much faster publish path while preserving source-aware structure."
 
 ## Recommended Inputs for Demo
 
@@ -99,4 +143,4 @@ Alternative live version:
 
 Shorter fallback version:
 
-> "ExplainFlow is not a one-shot generator. It is a controllable production pipeline: extract, plan, validate, stream, and repair. That gives us better source grounding, better regeneration, and better live-demo resilience than static notebook-style tools."
+> "ExplainFlow is not a one-shot generator. It uses an agent harness to extract, plan, self-check, stream, and repair. That gives us better source grounding, better regeneration, and better live-demo resilience than static notebook-style tools."
