@@ -55,6 +55,20 @@ class FakeDirectScriptPackAgent:
         }
 
 
+class FakeQuickVisualHydrationAgent:
+    async def hydrate_quick_artifact_visuals(self, payload, request):  # noqa: ANN001
+        assert payload.topic == "Quick hydration"
+        artifact = payload.artifact if isinstance(payload.artifact, dict) else payload.artifact.model_dump()
+        assert artifact["artifact_id"] == "artifact-1"
+        return {
+            "status": "success",
+            "artifact": {
+                **artifact,
+                "hero_image_url": "http://127.0.0.1:8000/static/assets/quick_hero.png",
+            },
+        }
+
+
 class FakeWorkflowScriptPackAgent:
     async def generate_script_pack_advanced(self, payload):  # noqa: ANN001
         assert payload.source_text == "Input text"
@@ -100,6 +114,38 @@ def test_generate_quick_artifact_route_returns_http_400_for_input_error() -> Non
     payload = response.json()
     assert payload["status"] == "error"
     assert "Provide a topic" in payload["message"]
+
+
+def test_hydrate_quick_artifact_visuals_route_returns_updated_artifact() -> None:
+    original_agent = generate_stream_route.agent
+    generate_stream_route.agent = FakeQuickVisualHydrationAgent()
+
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/api/hydrate-quick-artifact-visuals",
+            json={
+                "topic": "Quick hydration",
+                "audience": "Operators",
+                "visual_mode": "diagram",
+                "artifact": {
+                    "artifact_id": "artifact-1",
+                    "title": "Quick artifact",
+                    "subtitle": "Text first",
+                    "summary": "Summary",
+                    "visual_style": "diagram",
+                    "hero_direction": "Hero",
+                    "blocks": [],
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "success"
+        assert payload["artifact"]["hero_image_url"] == "http://127.0.0.1:8000/static/assets/quick_hero.png"
+    finally:
+        generate_stream_route.agent = original_agent
 
 
 def test_generate_script_pack_advanced_route_builds_request_from_body() -> None:

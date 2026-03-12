@@ -14,6 +14,7 @@ from app.schemas.events import build_sse_event
 from app.schemas.requests import (
     QuickArtifactOverrideRequest,
     QuickArtifactRequest,
+    QuickArtifactVisualsRequest,
     QuickBlockOverrideRequest,
     QuickReelRequest,
     QuickVideoRequest,
@@ -181,6 +182,12 @@ async def generate_script_pack_advanced(request: Request):
 @router.post("/generate-quick-artifact")
 async def generate_quick_artifact(payload: QuickArtifactRequest, request: Request):
     result = await agent.generate_quick_artifact(payload, request=request)
+    return service_response(result, error_fallback=500)
+
+
+@router.post("/hydrate-quick-artifact-visuals")
+async def hydrate_quick_artifact_visuals(payload: QuickArtifactVisualsRequest, request: Request):
+    result = await agent.hydrate_quick_artifact_visuals(payload, request=request)
     return service_response(result, error_fallback=500)
 
 

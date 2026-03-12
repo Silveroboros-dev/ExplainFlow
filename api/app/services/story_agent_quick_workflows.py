@@ -23,6 +23,7 @@ from app.schemas.requests import (
     QuickArtifactOverrideRequest,
     QuickArtifactRequest,
     QuickArtifactSchema,
+    QuickArtifactVisualsRequest,
     QuickBlockOverrideRequest,
     QuickReelRequest,
     QuickVideoRequest,
@@ -124,6 +125,34 @@ async def generate_quick_artifact_response(
     payload: QuickArtifactRequest,
     request: Request,
 ) -> dict[str, Any]:
+    normalized = await build_quick_artifact_base(
+        agent,
+        payload=payload,
+    )
+    if isinstance(normalized, dict):
+        return normalized
+    if payload.defer_visuals:
+        return {"status": "success", "artifact": normalized.model_dump()}
+
+    visualized = await hydrate_quick_artifact_visuals(
+        agent,
+        request=request,
+        topic=payload.topic,
+        audience=payload.audience,
+        tone=payload.tone,
+        visual_mode=payload.visual_mode,
+        artifact=normalized,
+        source_manifest=payload.source_manifest,
+        content_signal=payload.content_signal,
+    )
+    return {"status": "success", "artifact": visualized.model_dump()}
+
+
+async def build_quick_artifact_base(
+    agent: Any,
+    *,
+    payload: QuickArtifactRequest,
+) -> QuickArtifactSchema | dict[str, Any]:
     ctx = resolve_quick_request_context(
         topic=payload.topic,
         audience=payload.audience,
@@ -179,30 +208,85 @@ async def generate_quick_artifact_response(
         content_signal=content_signal,
         source_manifest=payload.source_manifest,
     )
-    normalized = await agent._populate_quick_block_visuals(
+    return normalized
+
+
+async def hydrate_quick_artifact_visuals(
+    agent: Any,
+    *,
+    request: Request,
+    topic: str,
+    audience: str,
+    tone: str,
+    visual_mode: str,
+    artifact: QuickArtifactSchema,
+    source_manifest: Any,
+    content_signal: dict[str, Any] | None = None,
+) -> QuickArtifactSchema:
+    ctx = resolve_quick_request_context(
+        topic=topic,
+        audience=audience,
+        tone=tone,
+        visual_mode=visual_mode,
+    )
+    enriched_artifact = agent._enrich_quick_artifact_with_source_media(
+        artifact=artifact,
+        content_signal=content_signal,
+        source_manifest=source_manifest,
+    )
+    missing_block_ids = {
+        block.block_id
+        for block in enriched_artifact.blocks
+        if not (block.image_url or "").strip()
+    }
+
+    visualized = await agent._populate_quick_block_visuals(
         request=request,
         topic=ctx.topic,
         audience=ctx.audience,
         tone=ctx.tone,
         visual_mode=ctx.visual_mode,
-        artifact=normalized,
+        artifact=enriched_artifact,
         content_signal=content_signal,
+        only_block_ids=missing_block_ids or None,
     )
-    try:
-        hero_image_url = await agent._generate_quick_hero_image(
-            request=request,
-            topic=ctx.topic,
-            audience=ctx.audience,
-            tone=ctx.tone,
-            visual_mode=ctx.visual_mode,
-            artifact=normalized,
-            content_signal=content_signal,
-        )
-    except Exception:
-        hero_image_url = ""
-    if hero_image_url:
-        normalized = normalized.model_copy(update={"hero_image_url": hero_image_url})
-    return {"status": "success", "artifact": normalized.model_dump()}
+    if not (visualized.hero_image_url or "").strip():
+        try:
+            hero_image_url = await agent._generate_quick_hero_image(
+                request=request,
+                topic=ctx.topic,
+                audience=ctx.audience,
+                tone=ctx.tone,
+                visual_mode=ctx.visual_mode,
+                artifact=visualized,
+                content_signal=content_signal,
+            )
+        except Exception:
+            hero_image_url = ""
+        if hero_image_url:
+            visualized = visualized.model_copy(update={"hero_image_url": hero_image_url})
+    return visualized
+
+
+async def hydrate_quick_artifact_visuals_response(
+    agent: Any,
+    *,
+    payload: QuickArtifactVisualsRequest,
+    request: Request,
+) -> dict[str, Any]:
+    artifact = QuickArtifactSchema.model_validate(payload.artifact)
+    visualized = await hydrate_quick_artifact_visuals(
+        agent,
+        request=request,
+        topic=payload.topic,
+        audience=payload.audience,
+        tone=payload.tone,
+        visual_mode=payload.visual_mode,
+        artifact=artifact,
+        source_manifest=payload.source_manifest,
+        content_signal=payload.content_signal,
+    )
+    return {"status": "success", "artifact": visualized.model_dump()}
 
 
 async def generate_quick_reel_response(

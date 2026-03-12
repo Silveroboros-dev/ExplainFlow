@@ -76,6 +76,39 @@ const formatChangeSummary = (changedFields: string[]) => {
   return `${changedFields.slice(0, -1).join(', ')}, and ${changedFields[changedFields.length - 1]}`;
 };
 
+const quickIndexingCopy = (
+  asset: UploadedQuickSourceAsset,
+  hasTranscript: boolean,
+) => {
+  if (asset.provider === 'youtube') {
+    return {
+      startStatus: 'Indexing YouTube transcript...',
+      startNote: 'Transcript-backed YouTube indexing started.',
+      completeNote: 'YouTube indexing complete. Building artifact from transcript-backed signal.',
+      reuseStatus: 'Reusing indexed YouTube signal...',
+      reuseNote: 'Reusing previously indexed YouTube signal for a faster quick artifact pass.',
+    };
+  }
+
+  if (hasTranscript) {
+    return {
+      startStatus: 'Indexing source video with transcript...',
+      startNote: 'Transcript-backed video indexing started.',
+      completeNote: 'Video indexing complete. Building artifact from transcript-backed signal.',
+      reuseStatus: 'Reusing indexed transcript-backed video signal...',
+      reuseNote: 'Reusing previously indexed transcript-backed video signal for a faster quick artifact pass.',
+    };
+  }
+
+  return {
+    startStatus: 'Indexing source video...',
+    startNote: 'Source-backed video indexing started.',
+    completeNote: 'Video indexing complete. Building artifact from source-backed signal.',
+    reuseStatus: 'Reusing indexed source-backed video signal...',
+    reuseNote: 'Reusing previously indexed source-backed video signal for a faster quick artifact pass.',
+  };
+};
+
 const buildMediaFragmentUrl = (url: string, startMs?: number | null, endMs?: number | null) => {
   const startSeconds = typeof startMs === 'number' && startMs >= 0 ? Math.floor(startMs / 1000) : null;
   const endSeconds = typeof endMs === 'number' && endMs > 0 ? Math.floor(endMs / 1000) : null;
@@ -252,6 +285,7 @@ export default function QuickGenerate() {
   const [uploadedVideoAsset, setUploadedVideoAsset] = useState<UploadedQuickSourceAsset | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isUploadingSource, setIsUploadingSource] = useState(false);
+  const [isHydratingArtifactVisuals, setIsHydratingArtifactVisuals] = useState(false);
   const [generationStatus, setGenerationStatus] = useState('');
   const [generationError, setGenerationError] = useState('');
   const [isListening, setIsListening] = useState(false);
@@ -282,6 +316,9 @@ export default function QuickGenerate() {
 
   const recognitionRef = React.useRef<BrowserSpeechRecognition | null>(null);
   const sourceFileInputRef = useRef<HTMLInputElement | null>(null);
+  const artifactRef = useRef<QuickArtifact | null>(null);
+  const activeQuickViewRef = useRef<'artifact' | 'reel'>('artifact');
+  const artifactVisualPassRef = useRef(0);
   const youtubeSourceAsset = asYouTubeQuickSourceAsset(sourceVideoUrl);
   const activeSourceAsset = youtubeSourceAsset ?? uploadedVideoAsset;
 
@@ -298,10 +335,19 @@ export default function QuickGenerate() {
 
   React.useEffect(() => {
     return () => {
+      artifactVisualPassRef.current += 1;
       recognitionRef.current?.stop();
       recognitionRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    artifactRef.current = artifact;
+  }, [artifact]);
+
+  useEffect(() => {
+    activeQuickViewRef.current = activeQuickView;
+  }, [activeQuickView]);
 
   const buildQuickSourceManifest = () => (
     activeSourceAsset
@@ -325,6 +371,99 @@ export default function QuickGenerate() {
         }
       : undefined
   );
+
+  const artifactNeedsVisualHydration = (artifactDraft: QuickArtifact) => (
+    !artifactDraft.hero_image_url?.trim()
+    || artifactDraft.blocks.some((block) => !block.image_url?.trim())
+  );
+
+  const invalidateQuickArtifactHydration = () => {
+    artifactVisualPassRef.current += 1;
+    setIsHydratingArtifactVisuals(false);
+  };
+
+  const hydrateQuickArtifactVisuals = async ({
+    artifactDraft,
+    contentSignalDraft,
+    sourceManifestDraft,
+    pendingStatus,
+    completeStatus,
+  }: {
+    artifactDraft: QuickArtifact;
+    contentSignalDraft: Record<string, unknown> | null;
+    sourceManifestDraft?: ReturnType<typeof buildQuickSourceManifest>;
+    pendingStatus: string;
+    completeStatus: string;
+  }) => {
+    if (!artifactNeedsVisualHydration(artifactDraft)) {
+      return artifactDraft;
+    }
+
+    const passId = artifactVisualPassRef.current + 1;
+    artifactVisualPassRef.current = passId;
+    setIsHydratingArtifactVisuals(true);
+    setGenerationStatus((prev) => (
+      !prev || prev === completeStatus || prev.startsWith('Quick artifact ready')
+        ? pendingStatus
+        : prev
+    ));
+    pushAgentNote("info", "Visuals", "Rendering Quick artifact visuals in the background.");
+
+    try {
+      const response = await fetch(`${API_BASE}/api/hydrate-quick-artifact-visuals`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topic,
+          audience: audience === 'Other' ? customAudience : audience,
+          tone,
+          visual_mode: visualMode,
+          artifact: artifactDraft,
+          source_manifest: sourceManifestDraft,
+          content_signal: contentSignalDraft ?? {},
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || data.status !== 'success' || !data.artifact) {
+        throw new Error(data.detail || data.message || 'Quick artifact visual hydration failed.');
+      }
+
+      if (artifactVisualPassRef.current !== passId) {
+        return artifactRef.current;
+      }
+
+      const hydratedArtifact = data.artifact as QuickArtifact;
+      const currentArtifact = artifactRef.current;
+      if (!currentArtifact || currentArtifact.artifact_id !== hydratedArtifact.artifact_id) {
+        return currentArtifact;
+      }
+
+      const mergedArtifact: QuickArtifact = {
+        ...hydratedArtifact,
+        reel: currentArtifact.reel ?? hydratedArtifact.reel,
+        video: currentArtifact.video ?? hydratedArtifact.video,
+      };
+      artifactRef.current = mergedArtifact;
+      setArtifact(mergedArtifact);
+      setGenerationStatus((prev) => (prev === pendingStatus ? completeStatus : prev));
+      pushAgentNote("checkpoint", "Visuals", "Quick artifact visuals finished rendering.");
+      if (activeQuickViewRef.current === 'reel') {
+        void ensureQuickReel(mergedArtifact);
+      }
+      return mergedArtifact;
+    } catch (error) {
+      if (artifactVisualPassRef.current === passId) {
+        const message = error instanceof Error ? error.message : 'Quick artifact visual hydration failed.';
+        setGenerationStatus((prev) => (prev === pendingStatus ? completeStatus : prev));
+        pushAgentNote("error", "Visuals", message);
+      }
+      return artifactRef.current;
+    } finally {
+      if (artifactVisualPassRef.current === passId) {
+        setIsHydratingArtifactVisuals(false);
+      }
+    }
+  };
 
   const ensureQuickReel = async (artifactDraft?: QuickArtifact | null) => {
     const baseArtifact = artifactDraft ?? artifact;
@@ -481,7 +620,7 @@ export default function QuickGenerate() {
       setUploadedVideoAsset(uploadedAsset);
       clearIndexedSource();
       setGenerationStatus('Source video ready.');
-      pushAgentNote("checkpoint", "Source", "Video source uploaded. Ready for transcript-first indexing.");
+      pushAgentNote("checkpoint", "Source", "Video source uploaded. Ready for Quick indexing.");
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Video upload failed.';
       setGenerationError(message);
@@ -520,6 +659,7 @@ export default function QuickGenerate() {
       recognitionRef.current.stop();
     }
 
+    invalidateQuickArtifactHydration();
     setIsGenerating(true);
     setGenerationError('');
     setGenerationStatus('Building quick artifact...');
@@ -535,6 +675,9 @@ export default function QuickGenerate() {
       let nextContentSignal = indexedSignal;
       let nextNormalizedSourceText = indexedNormalizedSourceText;
       let nextSourceTextOrigin = indexedSourceTextOrigin;
+      const indexingCopy = activeSourceAsset
+        ? quickIndexingCopy(activeSourceAsset, Boolean(sourceTranscript.trim()))
+        : null;
 
       if (sourceVideoUrl.trim() && !youtubeSourceAsset) {
         throw new Error('Enter a valid YouTube URL before generating a Quick artifact.');
@@ -553,10 +696,8 @@ export default function QuickGenerate() {
           }
           throw new Error('Videos longer than 2 minutes require transcript or captions in Quick.');
         }
-        setGenerationStatus(activeSourceAsset.provider === 'youtube' ? 'Indexing YouTube transcript...' : 'Indexing source video...');
-        pushAgentNote("info", "Source", activeSourceAsset.provider === 'youtube'
-          ? 'Transcript-first YouTube indexing started.'
-          : 'Transcript-first video indexing started.');
+        setGenerationStatus(indexingCopy?.startStatus ?? 'Indexing source...');
+        pushAgentNote("info", "Source", indexingCopy?.startNote ?? 'Source indexing started.');
         const startIndexResponse = await fetch(`${API_BASE}/api/quick-source-index/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -578,10 +719,10 @@ export default function QuickGenerate() {
         setIndexedNormalizedSourceText(nextNormalizedSourceText);
         setIndexedSourceTextOrigin(nextSourceTextOrigin);
         setGenerationStatus('Building grounded quick artifact...');
-        pushAgentNote("checkpoint", "Source", `${activeSourceAsset.provider === 'youtube' ? 'YouTube' : 'Video'} indexing complete. Building artifact from transcript-backed signal.`);
+        pushAgentNote("checkpoint", "Source", indexingCopy?.completeNote ?? 'Source indexing complete. Building artifact from grounded signal.');
       } else if (activeSourceAsset && nextContentSignal) {
-        setGenerationStatus(activeSourceAsset.provider === 'youtube' ? 'Reusing indexed YouTube signal...' : 'Reusing indexed video signal...');
-        pushAgentNote("info", "Source", `Reusing previously indexed ${activeSourceAsset.provider === 'youtube' ? 'YouTube' : 'video'} signal for a faster quick artifact pass.`);
+        setGenerationStatus(indexingCopy?.reuseStatus ?? 'Reusing indexed source signal...');
+        pushAgentNote("info", "Source", indexingCopy?.reuseNote ?? 'Reusing previously indexed source signal for a faster quick artifact pass.');
       }
 
       const response = await fetch(`${API_BASE}/api/generate-quick-artifact`, {
@@ -597,17 +738,26 @@ export default function QuickGenerate() {
           normalized_source_text: nextNormalizedSourceText,
           source_text_origin: nextSourceTextOrigin,
           content_signal: nextContentSignal ?? {},
+          defer_visuals: true,
         }),
       });
       const data = await response.json();
       if (!response.ok || data.status !== 'success' || !data.artifact) {
         throw new Error(data.message || 'Quick artifact generation failed.');
       }
-      setArtifact(data.artifact as QuickArtifact);
+      const nextArtifact = data.artifact as QuickArtifact;
+      setArtifact(nextArtifact);
       setReelError('');
       setVideoError('');
-      setGenerationStatus('Quick artifact ready.');
+      setGenerationStatus('Quick artifact ready. Rendering visuals...');
       pushAgentNote("checkpoint", "Session", "Quick artifact ready. Blocks can now be directed individually.");
+      void hydrateQuickArtifactVisuals({
+        artifactDraft: nextArtifact,
+        contentSignalDraft: nextContentSignal,
+        sourceManifestDraft: sourceManifest,
+        pendingStatus: 'Quick artifact ready. Rendering visuals...',
+        completeStatus: 'Quick artifact ready.',
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Quick artifact generation failed.';
       setGenerationError(message);
@@ -620,6 +770,7 @@ export default function QuickGenerate() {
 
   const handleOverrideBlock = async () => {
     if (!artifact || !activeOverrideBlockId || !overrideInstruction.trim()) return;
+    invalidateQuickArtifactHydration();
     setIsApplyingOverride(true);
     setGenerationError('');
     setOverrideError('');
@@ -675,6 +826,13 @@ export default function QuickGenerate() {
       }
       setGenerationStatus('Block updated.');
       pushAgentNote("checkpoint", activeOverrideBlockId, "Block override applied.");
+      void hydrateQuickArtifactVisuals({
+        artifactDraft: nextArtifact,
+        contentSignalDraft: indexedSignal,
+        sourceManifestDraft: buildQuickSourceManifest(),
+        pendingStatus: 'Block updated. Rendering visuals...',
+        completeStatus: 'Block updated.',
+      });
       toast.success('Block updated.', {
         description: `Changed ${formatChangeSummary(changedFields)}.`,
       });
@@ -696,6 +854,7 @@ export default function QuickGenerate() {
 
   const handleGlobalOverride = async () => {
     if (!artifact || !globalOverrideInstruction.trim()) return;
+    invalidateQuickArtifactHydration();
     setIsApplyingGlobalOverride(true);
     setGenerationError('');
     setGlobalOverrideError('');
@@ -735,6 +894,13 @@ export default function QuickGenerate() {
       }
       setGenerationStatus('Artifact updated.');
       pushAgentNote("checkpoint", "Artifact", "Global override applied.");
+      void hydrateQuickArtifactVisuals({
+        artifactDraft: nextArtifact,
+        contentSignalDraft: indexedSignal,
+        sourceManifestDraft: buildQuickSourceManifest(),
+        pendingStatus: 'Artifact updated. Rendering visuals...',
+        completeStatus: 'Artifact updated.',
+      });
       toast.success('Artifact updated.', {
         description: 'Quick artifact and proof reel state were refreshed.',
       });
@@ -1106,9 +1272,17 @@ export default function QuickGenerate() {
           {artifact && (
             <>
               <div className="flex flex-wrap items-center justify-between gap-4">
-                <h2 className="text-2xl font-bold tracking-tight text-slate-100">
-                  {activeQuickView === 'artifact' ? 'Quick Artifact' : 'Proof Reel'}
-                </h2>
+                <div className="flex flex-wrap items-center gap-3">
+                  <h2 className="text-2xl font-bold tracking-tight text-slate-100">
+                    {activeQuickView === 'artifact' ? 'Quick Artifact' : 'Proof Reel'}
+                  </h2>
+                  {isHydratingArtifactVisuals ? (
+                    <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-slate-200">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Rendering Visuals
+                    </span>
+                  ) : null}
+                </div>
                 <div className="inline-flex rounded-full border border-white/15 bg-white/10 p-1">
                   <button
                     type="button"

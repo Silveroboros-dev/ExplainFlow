@@ -91,7 +91,7 @@ def should_upload_source_assets_for_extraction(
     uploadable_assets = [
         asset
         for asset in manifest.assets[:6]
-        if asset.modality in {"audio", "image", "pdf_page"}
+        if asset.modality in {"audio", "image", "pdf_page", "video"}
         and asset_path_from_reference(asset.uri) is not None
     ]
     if not uploadable_assets:

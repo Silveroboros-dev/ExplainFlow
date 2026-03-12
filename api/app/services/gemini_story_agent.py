@@ -30,6 +30,7 @@ from app.schemas.requests import (
     QuickArtifactOverrideRequest,
     QuickArtifactRequest,
     QuickArtifactSchema,
+    QuickArtifactVisualsRequest,
     QuickBlockOverrideRequest,
     QuickReelRequest,
     QuickReelSchema,
@@ -159,6 +160,7 @@ from app.services.story_agent_quick_runtime import (
 )
 from app.services.story_agent_quick_workflows import (
     generate_quick_artifact_response,
+    hydrate_quick_artifact_visuals_response,
     generate_quick_reel_response,
     generate_quick_stream_events,
     generate_quick_video_response,
@@ -365,7 +367,7 @@ class GeminiStoryAgent:
         if manifest is None or not manifest.assets:
             return UploadedSourceAssets(parts=(), file_names=(), count=0)
 
-        modal_allowlist = allowed_modalities or {"audio", "image", "pdf_page"}
+        modal_allowlist = allowed_modalities or {"audio", "image", "pdf_page", "video"}
         upload_semaphore = asyncio.Semaphore(3)
 
         async def upload_asset(
@@ -393,6 +395,12 @@ class GeminiStoryAgent:
                 return index, None, None
 
             upload_name = getattr(uploaded, "name", None)
+            if isinstance(upload_name, str) and upload_name:
+                try:
+                    uploaded = await self._wait_for_uploaded_file_active(upload_name)
+                except Exception as exc:
+                    print(f"Source upload activation failed for {asset.asset_id}: {exc}")
+                    return index, None, upload_name
             upload_uri = getattr(uploaded, "uri", None)
             upload_mime = getattr(uploaded, "mime_type", None) or asset.mime_type
             if not isinstance(upload_uri, str) or not upload_uri:
@@ -421,6 +429,36 @@ class GeminiStoryAgent:
             file_names=tuple(uploaded_file_names),
             count=len(parts),
         )
+
+    async def _wait_for_uploaded_file_active(
+        self,
+        upload_name: str,
+        *,
+        timeout_seconds: float = 30.0,
+        poll_interval_seconds: float = 1.0,
+    ) -> Any:
+        started_at = time.perf_counter()
+        latest = await self.client.aio.files.get(name=upload_name)
+
+        def state_value(file_obj: Any) -> str:
+            state = getattr(file_obj, "state", None)
+            value = getattr(state, "value", state)
+            return str(value or "").strip().upper()
+
+        while True:
+            current_state = state_value(latest)
+            if current_state in {"", "ACTIVE"}:
+                return latest
+            if current_state == "FAILED":
+                error = getattr(latest, "error", None)
+                raise RuntimeError(
+                    f"Uploaded source asset {upload_name} failed to become active."
+                    + (f" {error}" if error else "")
+                )
+            if (time.perf_counter() - started_at) >= timeout_seconds:
+                raise TimeoutError(f"Uploaded source asset {upload_name} did not become ACTIVE within {timeout_seconds:.0f}s.")
+            await asyncio.sleep(poll_interval_seconds)
+            latest = await self.client.aio.files.get(name=upload_name)
 
     @staticmethod
     async def _save_image_and_get_url_async(
@@ -1401,7 +1439,11 @@ class GeminiStoryAgent:
                     phase_timings_ms["transcript_normalization"] = int((time.perf_counter() - normalization_started_at) * 1000)
 
                 if not normalized_source_text.strip():
-                    raise ValueError("Unable to recover normalized source text from the uploaded source.")
+                    if uploaded_asset_count > 0:
+                        extraction_mode = "multimodal_asset_only"
+                        source_text_origin = "uploaded_asset_only"
+                    else:
+                        raise ValueError("Unable to recover normalized source text from the uploaded source.")
 
                 if self._should_use_text_backed_fast_extraction(
                     normalized_source_text=normalized_source_text,
@@ -1437,7 +1479,8 @@ class GeminiStoryAgent:
                             structural_signal=structural_signal,
                             creative_signal=creative_signal,
                         )
-                        extraction_mode = "two_pass"
+                        if extraction_mode != "multimodal_asset_only":
+                            extraction_mode = "two_pass"
                     except Exception as exc:
                         print(f"Two-pass extraction fallback: {exc}")
                         fallback_started_at = time.perf_counter()
@@ -1707,6 +1750,13 @@ class GeminiStoryAgent:
 
     async def generate_quick_artifact(self, payload: QuickArtifactRequest, *, request: Request) -> dict[str, Any]:
         return await generate_quick_artifact_response(
+            self,
+            payload=payload,
+            request=request,
+        )
+
+    async def hydrate_quick_artifact_visuals(self, payload: QuickArtifactVisualsRequest, *, request: Request) -> dict[str, Any]:
+        return await hydrate_quick_artifact_visuals_response(
             self,
             payload=payload,
             request=request,

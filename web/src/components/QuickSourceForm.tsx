@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Clapperboard, Loader2, Mic, PlayCircle, Square, Upload } from "lucide-react";
+import { AlertTriangle, Clapperboard, Loader2, Mic, PlayCircle, Square, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -81,6 +81,11 @@ export default function QuickSourceForm({
   onRemoveYoutubeSource,
   onRemoveUploadedVideoAsset,
 }: QuickSourceFormProps) {
+  const showUploadedVideoWithoutTranscriptWarning = Boolean(
+    uploadedVideoAsset
+    && !sourceTranscript.trim(),
+  );
+
   return (
     <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
       <CardHeader>
@@ -217,6 +222,22 @@ export default function QuickSourceForm({
                   <p>Uploaded videos up to 10 minutes require transcript or captions.</p>
                   <p>YouTube URLs require transcript or subtitles and stay transcript-first.</p>
                 </div>
+                {showUploadedVideoWithoutTranscriptWarning ? (
+                  <div className="rounded-[20px] border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                    <div className="flex items-start gap-3">
+                      <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white text-amber-600">
+                        <AlertTriangle className="h-4.5 w-4.5" />
+                      </span>
+                      <div className="space-y-1">
+                        <p className="font-semibold">Transcript recommended for image generation</p>
+                        <p className="leading-6 text-amber-900/90">
+                          Local video without transcript can still produce a Quick artifact, but generated images may be sparse and the
+                          final delivery may lean on source-backed reels instead.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
                 {youtubeSourceAsset ? (
                   <div className="space-y-3 rounded-[20px] border border-slate-200 bg-slate-50 p-4">
                     <div className="flex items-start justify-between gap-3">

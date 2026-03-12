@@ -3,6 +3,7 @@
 import React from "react";
 import { Loader2 } from "lucide-react";
 
+import type { AgentNoteType } from "@/components/AgentActivityPanel";
 import FinalBundle from "@/components/FinalBundle";
 import SceneCard from "@/components/SceneCard";
 import { Button } from "@/components/ui/button";
@@ -44,6 +45,7 @@ type AdvancedGeneratedExplainerSectionProps = {
   isUpscalingBundle: boolean;
   regeneratingSceneId?: string | null;
   topic: string;
+  onActivity: (type: AgentNoteType, stage: string, message: string) => void;
   onEnableHighFidelity: () => void;
   onRegenerate: (sceneId: string, instruction: string) => Promise<void>;
   onOpenEvidence: (sceneId: string, claimRef?: string) => void;
@@ -60,6 +62,7 @@ export default function AdvancedGeneratedExplainerSection({
   isUpscalingBundle,
   regeneratingSceneId,
   topic,
+  onActivity,
   onEnableHighFidelity,
   onRegenerate,
   onOpenEvidence,
@@ -145,6 +148,7 @@ export default function AdvancedGeneratedExplainerSection({
             scenes={scenes}
             topic={topic}
             disabled={isGenerating || isUpscalingBundle || isRegeneratingScene}
+            onActivity={onActivity}
           />
         </>
       ) : null}

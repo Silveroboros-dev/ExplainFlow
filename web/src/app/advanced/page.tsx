@@ -1530,6 +1530,7 @@ export default function AdvancedStudio() {
           isUpscalingBundle={isUpscalingBundle}
           regeneratingSceneId={regeneratingSceneId}
           topic={extractedSignal?.thesis?.one_liner || 'Advanced Explainer'}
+          onActivity={pushAgentNote}
           onEnableHighFidelity={() => void handleEnableHighFidelity()}
           onRegenerate={handleRegenerate}
           onOpenEvidence={openEvidenceViewer}

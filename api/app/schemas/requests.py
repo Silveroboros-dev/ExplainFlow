@@ -165,6 +165,17 @@ class QuickArtifactRequest(BaseModel):
     normalized_source_text: str = ""
     source_text_origin: str | None = None
     content_signal: dict[str, Any] = Field(default_factory=dict)
+    defer_visuals: bool = False
+
+
+class QuickArtifactVisualsRequest(BaseModel):
+    topic: str
+    audience: str
+    tone: str = ""
+    visual_mode: str = "illustration"
+    artifact: QuickArtifactSchema | dict[str, Any]
+    source_manifest: SourceManifestSchema | None = None
+    content_signal: dict[str, Any] = Field(default_factory=dict)
 
 
 class QuickSourceIndexRequest(BaseModel):

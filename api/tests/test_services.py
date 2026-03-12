@@ -21,6 +21,7 @@ from app.schemas.requests import (
     QuickArtifactOverrideRequest,
     QuickArtifactRequest,
     QuickArtifactSchema,
+    QuickArtifactVisualsRequest,
     QuickBlockOverrideRequest,
     QuickReelRequest,
     QuickVideoRequest,
@@ -129,18 +130,32 @@ class CapturingStreamClient:
 
 
 class ExtractionFakeFiles:
-    def __init__(self) -> None:
+    def __init__(self, state_sequences: dict[str, list[str]] | None = None) -> None:
         self.upload_calls: list[tuple[str, str | None]] = []
         self.deleted_names: list[str] = []
+        self.state_sequences = {name: list(states) for name, states in (state_sequences or {}).items()}
+        self.last_uploaded: dict[str, SimpleNamespace] = {}
 
     async def upload(self, *, file, config=None):  # noqa: ANN001
         mime_type = getattr(config, "mime_type", None)
         self.upload_calls.append((str(file), mime_type))
-        return SimpleNamespace(
+        uploaded = SimpleNamespace(
             name=f"files/{len(self.upload_calls)}",
             uri=f"gs://demo/uploaded-{len(self.upload_calls)}",
             mime_type=mime_type or "application/octet-stream",
+            state="ACTIVE",
         )
+        self.last_uploaded[uploaded.name] = uploaded
+        return uploaded
+
+    async def get(self, *, name, config=None):  # noqa: ANN001
+        uploaded = self.last_uploaded.get(name)
+        if uploaded is None:
+            return SimpleNamespace(name=name, uri="", mime_type="application/octet-stream", state="ACTIVE")
+        sequence = self.state_sequences.get(name)
+        if sequence:
+            uploaded.state = sequence.pop(0)
+        return uploaded
 
     async def delete(self, *, name, config=None):  # noqa: ANN001
         self.deleted_names.append(name)
@@ -162,8 +177,8 @@ class ExtractionFakeModels:
 
 
 class ExtractionFakeClient:
-    def __init__(self, response_text: str | None = None, response_router=None) -> None:  # noqa: ANN001
-        self.files = ExtractionFakeFiles()
+    def __init__(self, response_text: str | None = None, response_router=None, state_sequences: dict[str, list[str]] | None = None) -> None:  # noqa: ANN001
+        self.files = ExtractionFakeFiles(state_sequences=state_sequences)
         self.models = ExtractionFakeModels(response_text=response_text, response_router=response_router)
         self.aio = SimpleNamespace(files=self.files, models=self.models)
 
@@ -423,6 +438,62 @@ def test_generate_quick_artifact_attaches_video_source_media_from_claims() -> No
     assert artifact.blocks[0].source_media[0].modality == "video"
 
 
+def test_generate_quick_artifact_can_defer_visual_hydration() -> None:
+    client = ExtractionFakeClient(
+        response_text=json.dumps(
+            {
+                "artifact_id": "artifact-deferred",
+                "title": "Deferred visuals brief",
+                "subtitle": "Text first",
+                "summary": "Show the artifact before rendering visuals.",
+                "visual_style": "diagram",
+                "hero_direction": "Simple cover.",
+                "blocks": [
+                    {
+                        "block_id": "hook",
+                        "label": "Hook",
+                        "title": "Open fast",
+                        "body": "Lead with the takeaway immediately.",
+                        "bullets": [],
+                        "visual_direction": "Bold title card.",
+                        "emphasis": "hook",
+                    }
+                ],
+            }
+        )
+    )
+    agent = GeminiStoryAgent()
+    agent.client = client
+
+    with patch.object(
+        GeminiStoryAgent,
+        "_populate_quick_block_visuals",
+        autospec=True,
+        side_effect=AssertionError("block visuals should be deferred"),
+    ), patch.object(
+        GeminiStoryAgent,
+        "_generate_quick_hero_image",
+        autospec=True,
+        side_effect=AssertionError("hero image should be deferred"),
+    ):
+        result = asyncio.run(
+            agent.generate_quick_artifact(
+                QuickArtifactRequest(
+                    topic="Deferred visuals",
+                    audience="Operators",
+                    tone="Clear",
+                    visual_mode="diagram",
+                    defer_visuals=True,
+                ),
+                request=SimpleNamespace(url=SimpleNamespace(scheme="http", netloc="127.0.0.1:8000")),
+            )
+        )
+
+    artifact = QuickArtifactSchema.model_validate(result["artifact"])
+    assert artifact.hero_image_url is None
+    assert artifact.blocks[0].image_url is None
+
+
 def test_generate_quick_artifact_overwrites_model_source_media_and_generates_hero_image() -> None:
     client = ExtractionFakeClient(
         response_router=lambda prompt, index: json.dumps(
@@ -549,6 +620,97 @@ def test_generate_quick_artifact_overwrites_model_source_media_and_generates_her
     assert all(item.asset_id != "hallucinated-video" for item in artifact.blocks[0].source_media)
     assert "bogus-evidence" not in artifact.blocks[0].evidence_refs
     assert artifact.blocks[0].source_media[0].asset_id == "video-1"
+
+
+def test_hydrate_quick_artifact_visuals_fills_missing_visuals_only() -> None:
+    agent = GeminiStoryAgent()
+
+    async def fake_populate(  # noqa: ANN001
+        self,
+        *,
+        request,
+        topic,
+        audience,
+        tone,
+        visual_mode,
+        artifact,
+        content_signal=None,
+        only_block_ids=None,
+        force_block_ids=None,
+    ):
+        assert only_block_ids == {"block-2"}
+        assert force_block_ids is None
+        return artifact.model_copy(
+            update={
+                "blocks": [
+                    artifact.blocks[0],
+                    artifact.blocks[1].model_copy(update={"image_url": "http://127.0.0.1:8000/static/assets/block-2.png"}),
+                ]
+            }
+        )
+
+    with patch.object(
+        GeminiStoryAgent,
+        "_populate_quick_block_visuals",
+        autospec=True,
+        side_effect=fake_populate,
+    ), patch.object(
+        GeminiStoryAgent,
+        "_generate_quick_hero_image",
+        autospec=True,
+        return_value="http://127.0.0.1:8000/static/assets/quick_hero.png",
+    ):
+        result = asyncio.run(
+            agent.hydrate_quick_artifact_visuals(
+                QuickArtifactVisualsRequest(
+                    topic="Deferred visuals",
+                    audience="Operators",
+                    tone="Clear",
+                    visual_mode="diagram",
+                    artifact={
+                        "artifact_id": "artifact-visuals",
+                        "title": "Deferred visuals brief",
+                        "subtitle": "Text first",
+                        "summary": "Show the artifact before rendering visuals.",
+                        "visual_style": "diagram",
+                        "hero_direction": "Simple cover.",
+                        "blocks": [
+                            {
+                                "block_id": "block-1",
+                                "label": "Hook",
+                                "title": "Opening",
+                                "body": "Keep the opener intact.",
+                                "bullets": [],
+                                "visual_direction": "Existing image.",
+                                "image_url": "http://127.0.0.1:8000/static/assets/block-1.png",
+                                "emphasis": "hook",
+                                "claim_refs": [],
+                                "evidence_refs": [],
+                                "source_media": [],
+                            },
+                            {
+                                "block_id": "block-2",
+                                "label": "Proof",
+                                "title": "Support",
+                                "body": "Hydrate this one later.",
+                                "bullets": [],
+                                "visual_direction": "Needs image.",
+                                "emphasis": "proof",
+                                "claim_refs": [],
+                                "evidence_refs": [],
+                                "source_media": [],
+                            },
+                        ],
+                    },
+                ),
+                request=SimpleNamespace(url=SimpleNamespace(scheme="http", netloc="127.0.0.1:8000")),
+            )
+        )
+
+    artifact = QuickArtifactSchema.model_validate(result["artifact"])
+    assert artifact.blocks[0].image_url == "http://127.0.0.1:8000/static/assets/block-1.png"
+    assert artifact.blocks[1].image_url == "http://127.0.0.1:8000/static/assets/block-2.png"
+    assert artifact.hero_image_url == "http://127.0.0.1:8000/static/assets/quick_hero.png"
 
 
 def test_generate_quick_reel_builds_ordered_segments_from_blocks() -> None:
@@ -2173,6 +2335,145 @@ def test_extract_signal_prefers_manifest_embedded_text_before_gemini_recovery() 
                 )
                 for item in agent.client.models.contents
             )
+        finally:
+            asset_path.unlink(missing_ok=True)
+
+    asyncio.run(run())
+
+
+def test_extract_signal_uploaded_video_falls_back_when_text_recovery_is_empty() -> None:
+    async def run() -> None:
+        asset_path = Path(__file__).resolve().parents[1] / "app" / "static" / "assets" / "unit_extract_video.mp4"
+        asset_path.write_bytes(b"fake-video")
+
+        try:
+            structural_payload = {
+                "version": "v1.0",
+                "source": {
+                    "source_id": "src-video-1",
+                    "source_type": "video",
+                    "language": "en",
+                    "input_length_tokens": 0,
+                },
+                "thesis": {
+                    "one_liner": "The uploaded clip itself is enough to ground the signal.",
+                    "expanded_summary": "The model should continue with asset-backed extraction even if recovery text is empty.",
+                },
+                "key_claims": [
+                    {
+                        "claim_id": "c1",
+                        "claim_text": "A visible chart supports the operator point.",
+                        "supporting_points": ["The uploaded clip contains the relevant spoken explanation."],
+                        "evidence_snippets": [
+                            {
+                                "evidence_id": "e1",
+                                "type": "video",
+                                "asset_id": "asset-video-1",
+                                "start_ms": 1000,
+                                "end_ms": 5000,
+                                "transcript_text": "This chart shows the main drop in power use.",
+                            }
+                        ],
+                        "confidence": 0.88,
+                    }
+                ],
+                "concepts": [],
+                "open_questions": [],
+                "signal_quality": {
+                    "coverage_score": 0.82,
+                    "ambiguity_score": 0.22,
+                    "hallucination_risk": 0.1,
+                },
+            }
+            creative_payload = {
+                "narrative_beats": [
+                    {"beat_id": "b1", "role": "hook", "message": "Open on the chart moment.", "claim_refs": ["c1"]},
+                    {"beat_id": "b2", "role": "proof", "message": "Use the spoken explanation as the support.", "claim_refs": ["c1"]},
+                ],
+                "visual_candidates": [
+                    {
+                        "candidate_id": "v1",
+                        "purpose": "Show the decisive on-screen moment.",
+                        "recommended_structure": "evidence_callout",
+                        "claim_refs": ["c1"],
+                    }
+                ],
+            }
+
+            def response_router(prompt: str, call_count: int) -> str:
+                if "recover clean reading-order source text" in prompt:
+                    return json.dumps({"normalized_source_text": "", "source_text_origin": ""})
+                if "structural truth layer" in prompt:
+                    return json.dumps(structural_payload)
+                if "creative structuring layer" in prompt:
+                    return json.dumps(creative_payload)
+                raise AssertionError(f"Unexpected extraction prompt: {prompt[:120]}")
+
+            agent = object.__new__(GeminiStoryAgent)
+            agent.client = ExtractionFakeClient(response_router=response_router)
+
+            result = await agent.extract_signal(
+                SignalExtractionRequest(
+                    input_text="",
+                    source_manifest={
+                        "assets": [
+                            {
+                                "asset_id": "asset-video-1",
+                                "modality": "video",
+                                "uri": str(asset_path),
+                                "mime_type": "video/mp4",
+                                "title": "unit_extract_video.mp4",
+                                "duration_ms": 90000,
+                            }
+                        ]
+                    },
+                )
+            )
+
+            assert result["status"] == "success"
+            assert result["normalized_source_text"] == ""
+            assert result["source_text_origin"] == "uploaded_asset_only"
+            assert result["content_signal"]["key_claims"][0]["claim_id"] == "c1"
+            assert result["trace"]["checkpoints"][-1]["details"]["uploaded_asset_count"] == 1
+            assert result["trace"]["checkpoints"][-1]["details"]["extraction_mode"] == "multimodal_asset_only"
+            assert len(agent.client.files.upload_calls) == 1
+            assert any(
+                isinstance(item, list) and any(isinstance(part, str) and "structural truth layer" in part for part in item)
+                for item in agent.client.models.contents
+            )
+        finally:
+            asset_path.unlink(missing_ok=True)
+
+    asyncio.run(run())
+
+
+def test_upload_source_asset_parts_waits_for_active_file_state() -> None:
+    async def run() -> None:
+        asset_path = Path(__file__).resolve().parents[1] / "app" / "static" / "assets" / "unit_wait_active_video.mp4"
+        asset_path.write_bytes(b"fake-video")
+
+        try:
+            agent = object.__new__(GeminiStoryAgent)
+            agent.client = ExtractionFakeClient(state_sequences={"files/1": ["PROCESSING", "ACTIVE"]})
+
+            uploaded = await agent._upload_source_asset_parts(
+                source_manifest={
+                    "assets": [
+                        {
+                            "asset_id": "asset-video-1",
+                            "modality": "video",
+                            "uri": str(asset_path),
+                            "mime_type": "video/mp4",
+                            "title": "unit_wait_active_video.mp4",
+                            "duration_ms": 90000,
+                        }
+                    ]
+                }
+            )
+
+            assert uploaded.count == 1
+            assert uploaded.file_names == ("files/1",)
+            assert len(uploaded.parts) == 1
         finally:
             asset_path.unlink(missing_ok=True)
 

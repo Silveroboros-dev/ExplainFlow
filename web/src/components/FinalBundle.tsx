@@ -5,6 +5,7 @@ import { Download, Film, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import type { AgentNoteType } from "@/components/AgentActivityPanel";
 
 type FinalBundleScene = {
   id: string;
@@ -20,6 +21,7 @@ interface FinalBundleProps {
   scenes: Record<string, FinalBundleScene>;
   topic: string;
   disabled?: boolean;
+  onActivity?: (type: AgentNoteType, stage: string, message: string) => void;
 }
 
 type RenderedVideo = {
@@ -73,7 +75,7 @@ const deriveOverlayText = (title?: string, narrationText?: string, suppliedOverl
   return firstSentence;
 };
 
-export default function FinalBundle({ scenes, topic, disabled = false }: FinalBundleProps) {
+export default function FinalBundle({ scenes, topic, disabled = false, onActivity }: FinalBundleProps) {
   const [isExporting, setIsExporting] = useState(false);
   const [exportError, setExportError] = useState("");
   const [isRenderingVideo, setIsRenderingVideo] = useState(false);
@@ -153,6 +155,7 @@ export default function FinalBundle({ scenes, topic, disabled = false }: FinalBu
   const handleRenderVideo = async () => {
     setIsRenderingVideo(true);
     setVideoError("");
+    onActivity?.("info", "Final Bundle", "Advanced MP4 export started from the current generated scenes.");
 
     try {
       const response = await fetch(`${apiUrl}/api/final-bundle/video`, {
@@ -183,8 +186,11 @@ export default function FinalBundle({ scenes, topic, disabled = false }: FinalBu
         videoUrl: result.video_url,
         durationMs: typeof result.duration_ms === "number" ? result.duration_ms : undefined,
       });
+      onActivity?.("checkpoint", "Final Bundle", "Advanced MP4 ready. Download the rendered studio export when ready.");
     } catch (error) {
-      setVideoError(error instanceof Error ? error.message : "Failed to export Advanced MP4.");
+      const message = error instanceof Error ? error.message : "Failed to export Advanced MP4.";
+      setVideoError(message);
+      onActivity?.("error", "Final Bundle", message);
     } finally {
       setIsRenderingVideo(false);
     }
