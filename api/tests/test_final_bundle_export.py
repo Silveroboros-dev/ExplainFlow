@@ -182,3 +182,68 @@ def test_quick_video_download_rejects_missing_asset() -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Quick MP4 asset not found."
+
+
+def test_final_bundle_video_export_returns_video_metadata() -> None:
+    client = TestClient(app)
+
+    with patch(
+        "app.routes.assets.build_advanced_video",
+        return_value=("http://testserver/static/assets/advanced_export.mp4", 12345),
+    ) as mocked:
+        response = client.post(
+            "/api/final-bundle/video",
+            json={
+                "topic": "Cell Energy",
+                "scenes": [
+                    {
+                        "scene_id": "scene-1",
+                        "title": "ATP Overview",
+                        "text": "Cells use ATP as an energy currency.",
+                        "image_url": "http://testserver/static/assets/scene-1.png",
+                        "audio_url": "http://testserver/static/assets/scene-1.mp3",
+                    }
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["video_url"] == "http://testserver/static/assets/advanced_export.mp4"
+    assert payload["duration_ms"] == 12345
+    mocked.assert_called_once()
+
+
+def test_final_bundle_video_download_returns_attachment() -> None:
+    video_name = "advanced_export_test.mp4"
+    video_path = ASSET_DIR / video_name
+    video_path.write_bytes(b"fake-mp4")
+
+    try:
+        client = TestClient(app)
+        response = client.get(
+            "/api/final-bundle/video/download",
+            params={
+                "video_url": f"http://testserver/static/assets/{video_name}",
+                "filename": "studio export final",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "video/mp4"
+        assert 'attachment; filename="studio-export-final.mp4"' in response.headers["content-disposition"]
+        assert response.content == b"fake-mp4"
+    finally:
+        video_path.unlink(missing_ok=True)
+
+
+def test_final_bundle_video_download_rejects_missing_asset() -> None:
+    client = TestClient(app)
+    response = client.get(
+        "/api/final-bundle/video/download",
+        params={"video_url": "http://testserver/static/assets/does-not-exist.mp4"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Advanced MP4 asset not found."

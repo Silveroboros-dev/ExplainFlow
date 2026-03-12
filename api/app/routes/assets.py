@@ -5,10 +5,11 @@ import re
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 
-from app.schemas.requests import FinalBundleExportRequest, FinalBundleUpscaleRequest
+from app.schemas.requests import AdvancedVideoExportRequest, FinalBundleExportRequest, FinalBundleUpscaleRequest
 from app.services import build_final_bundle_zip
 from app.services.image_pipeline import asset_path_from_reference, upscale_image_and_get_url
 from app.services.source_ingest import ingest_source_upload
+from app.services.video_pipeline import build_advanced_video
 
 router = APIRouter()
 
@@ -71,6 +72,44 @@ async def export_final_bundle(payload: FinalBundleExportRequest):
         BytesIO(archive_bytes),
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{archive_name}"'},
+    )
+
+
+@router.post("/final-bundle/video")
+async def export_final_bundle_video(payload: AdvancedVideoExportRequest, request: Request):
+    if not payload.scenes:
+        raise HTTPException(status_code=400, detail="At least one scene is required to export an Advanced MP4.")
+
+    try:
+        video_url, duration_ms = build_advanced_video(
+            request=request,
+            topic=payload.topic,
+            scenes=payload.scenes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return {
+        "status": "success",
+        "video_url": video_url,
+        "duration_ms": duration_ms,
+    }
+
+
+@router.get("/final-bundle/video/download")
+async def download_final_bundle_video(video_url: str, filename: str | None = None):
+    video_path = asset_path_from_reference(video_url)
+    if video_path is None or not video_path.exists() or video_path.suffix.lower() != ".mp4":
+        raise HTTPException(status_code=404, detail="Advanced MP4 asset not found.")
+
+    download_name = _safe_download_filename(filename, fallback=video_path.name)
+    return FileResponse(
+        path=video_path,
+        media_type="video/mp4",
+        filename=download_name,
+        headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
     )
 
 

@@ -3841,7 +3841,7 @@ export default function AdvancedStudio() {
             ))}
           </div>
 
-          {!isGenerating && Object.values(scenes).length > 0 && (
+          {Object.values(scenes).length > 0 && (
             <>
               {fidelityPreference !== 'high' ? (
                 <Card className="bg-white text-slate-900 border-slate-300 shadow-md">
@@ -3866,7 +3866,11 @@ export default function AdvancedStudio() {
                   High-fidelity mode is active for this bundle. Text/audio are preserved and scene images use the upscaled assets.
                 </div>
               )}
-              <FinalBundle scenes={scenes} topic={extractedSignal?.thesis?.one_liner || 'Advanced Explainer'} />
+              <FinalBundle
+                scenes={scenes}
+                topic={extractedSignal?.thesis?.one_liner || 'Advanced Explainer'}
+                disabled={isGenerating}
+              />
             </>
           )}
         </div>

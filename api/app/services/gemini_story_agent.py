@@ -65,6 +65,7 @@ from app.services.interleaved_parser import (
     extract_parts_from_chunk,
     extract_parts_from_response,
     normalized_scene_id,
+    scene_narration_word_budget,
 )
 from app.services.source_ingest import (
     best_effort_manifest_text,
@@ -522,6 +523,14 @@ class GeminiStoryAgent:
     @staticmethod
     def _quick_artifact_model() -> str:
         return os.getenv("EXPLAINFLOW_QUICK_ARTIFACT_MODEL", QUICK_ARTIFACT_MODEL_DEFAULT).strip() or QUICK_ARTIFACT_MODEL_DEFAULT
+
+    @staticmethod
+    def _should_use_text_backed_fast_extraction(
+        *,
+        normalized_source_text: str,
+        uploaded_asset_count: int,
+    ) -> bool:
+        return bool(str(normalized_source_text or "").strip()) and uploaded_asset_count == 0
 
     @staticmethod
     def _advanced_scene_concurrency() -> int:
@@ -3393,21 +3402,23 @@ class GeminiStoryAgent:
                     continuity_refs.append(f"Preserve the same composition language from scene-{idx - 1}.")
             continuity_refs.extend(extract_anchor_terms(title, limit=2))
 
+            min_words, max_words = scene_narration_word_budget(
+                scene_mode=scene_mode,
+                layout_template=scene.layout_template,
+                artifact_type=artifact_policy.artifact_type,
+            )
             acceptance_checks = [
-                "Narration is between 50 and 100 words.",
+                f"Narration is between {min_words} and {max_words} words.",
                 "Narration is plain spoken prose with no labels or markdown.",
                 "Visual and narration align with the stated scene focus.",
             ]
             if scene_mode == "static":
                 acceptance_checks.append("Treat this as a single composed canvas, not a cinematic beat sequence.")
             if artifact_policy.artifact_type == "comparison_one_pager":
-                acceptance_checks[0] = "Narration is between 60 and 90 words."
                 acceptance_checks.append("Keep the one-pager modular structure legible, dense, and publish-ready.")
             if artifact_policy.artifact_type == "slide_thumbnail":
-                acceptance_checks[0] = "Narration is between 18 and 40 words."
                 acceptance_checks.append("Ensure the image reads instantly and stays strong at small size.")
             if artifact_policy.artifact_type in {"technical_infographic", "process_diagram"}:
-                acceptance_checks[0] = "Narration is between 40 and 85 words."
                 acceptance_checks.append("Prioritize structural clarity over dramatic escalation.")
             if must_include:
                 acceptance_checks.append(
@@ -3795,6 +3806,11 @@ class GeminiStoryAgent:
             ) + "\n\n"
 
         if artifact_type == "comparison_one_pager":
+            min_words, max_words = scene_narration_word_budget(
+                scene_mode=scene_mode,
+                layout_template=layout_template,
+                artifact_type=artifact_type,
+            )
             scene_prompt = (
                 f"CONTEXT: We are building a one-pager about '{topic}' for a {audience} audience.\n"
                 f"TONE: {tone}\n"
@@ -3823,13 +3839,18 @@ class GeminiStoryAgent:
                 "TASK: Generate the content for THIS ONE-PAGER ONLY.\n"
                 "STRICT OUTPUT RULES:\n"
                 "1) Start immediately with the spoken support copy. NO labels like 'Narration:', NO scene numbers, NO markdown titles.\n"
-                "2) The text must be 60-90 words.\n"
+                f"2) The text must be {min_words}-{max_words} words.\n"
                 "3) The text must explain how to read the board and the main takeaway.\n"
                 "4) Immediately after the text, generate the corresponding high-quality inline image.\n"
                 "5) The image MUST be a single composed one-pager canvas that matches the visual direction.\n"
                 "6) DO NOT output any other text or conversational filler."
             )
         elif artifact_type == "slide_thumbnail":
+            min_words, max_words = scene_narration_word_budget(
+                scene_mode=scene_mode,
+                layout_template=layout_template,
+                artifact_type=artifact_type,
+            )
             scene_prompt = (
                 f"CONTEXT: We are building a thumbnail about '{topic}' for a {audience} audience.\n"
                 f"TONE: {tone}\n"
@@ -3864,13 +3885,18 @@ class GeminiStoryAgent:
                 "TASK: Generate the content for THIS THUMBNAIL ONLY.\n"
                 "STRICT OUTPUT RULES:\n"
                 "1) Start immediately with brief support copy. NO labels, NO markdown, NO scene numbers.\n"
-                "2) The text must be 18-40 words.\n"
+                f"2) The text must be {min_words}-{max_words} words.\n"
                 "3) The text must explain the hook and why the visual frame is compelling.\n"
                 "4) Immediately after the text, generate the corresponding high-quality inline image.\n"
                 "5) The image MUST be a single composed thumbnail frame that matches the visual direction.\n"
                 "6) DO NOT output any other text or conversational filler."
             )
         else:
+            min_words, max_words = scene_narration_word_budget(
+                scene_mode=scene_mode,
+                layout_template=layout_template,
+                artifact_type=artifact_type,
+            )
             scene_prompt = (
                 f"CONTEXT: We are building an explainer about '{topic}' for a {audience} audience.\n"
                 f"TONE: {tone}\n"
@@ -3894,10 +3920,11 @@ class GeminiStoryAgent:
                 "STRICT OUTPUT RULES:\n"
                 "1) Start immediately with the spoken narration text. NO labels like 'Narration:', "
                 "NO scene numbers, NO markdown titles.\n"
-                "2) The text must be 50-100 words.\n"
+                f"2) The text must be {min_words}-{max_words} words.\n"
                 "3) Immediately after the text, generate the corresponding high-quality inline image. "
                 "The image MUST accurately depict the specific scientific or historical details mentioned in the text.\n"
-                "4) DO NOT output any other text or conversational filler."
+                "4) Staying under the word cap is mandatory. Compress detail rather than exceeding the limit.\n"
+                "5) DO NOT output any other text or conversational filler."
             )
 
         current_scene_text = ""
@@ -4323,44 +4350,58 @@ class GeminiStoryAgent:
                     )
                     phase_timings_ms["transcript_normalization"] = int((time.perf_counter() - normalization_started_at) * 1000)
 
-                try:
-                    if not normalized_source_text.strip():
-                        raise ValueError("Unable to recover normalized source text from the uploaded source.")
+                if not normalized_source_text.strip():
+                    raise ValueError("Unable to recover normalized source text from the uploaded source.")
 
-                    structural_started_at = time.perf_counter()
-                    structural_signal = await self._extract_signal_structural(
-                        normalized_source_text=normalized_source_text,
-                        source_manifest=source_manifest,
-                        uploaded_assets=uploaded_assets,
-                    )
-                    phase_timings_ms["structural_extraction"] = int((time.perf_counter() - structural_started_at) * 1000)
-
-                    creative_started_at = time.perf_counter()
-                    creative_signal = await self._extract_signal_creative(
-                        normalized_source_text=normalized_source_text,
-                        structural_signal=structural_signal,
-                        source_manifest=source_manifest,
-                    )
-                    phase_timings_ms["creative_extraction"] = int((time.perf_counter() - creative_started_at) * 1000)
-                    signal_data = self._merge_signal_extraction_passes(
-                        structural_signal=structural_signal,
-                        creative_signal=creative_signal,
-                    )
-                    extraction_mode = "two_pass"
-                except Exception as exc:
-                    print(f"Two-pass extraction fallback: {exc}")
-                    fallback_started_at = time.perf_counter()
+                if self._should_use_text_backed_fast_extraction(
+                    normalized_source_text=normalized_source_text,
+                    uploaded_asset_count=uploaded_asset_count,
+                ):
+                    fast_started_at = time.perf_counter()
                     signal_data = await self._extract_signal_one_pass(
-                        input_text=normalized_source_text or payload.input_text,
+                        input_text=normalized_source_text,
                         source_manifest=source_manifest,
                         prompt_version=prompt_version,
                         uploaded_assets=uploaded_assets,
                     )
-                    phase_timings_ms["single_pass_fallback"] = int((time.perf_counter() - fallback_started_at) * 1000)
-                    extraction_mode = "single_pass_fallback"
-                    if not normalized_source_text.strip():
-                        normalized_source_text = str(payload.input_text or "").strip()
-                        source_text_origin = "pasted_text" if normalized_source_text else None
+                    phase_timings_ms["single_pass_fast"] = int((time.perf_counter() - fast_started_at) * 1000)
+                    extraction_mode = "single_pass_text_backed"
+                else:
+                    try:
+                        structural_started_at = time.perf_counter()
+                        structural_signal = await self._extract_signal_structural(
+                            normalized_source_text=normalized_source_text,
+                            source_manifest=source_manifest,
+                            uploaded_assets=uploaded_assets,
+                        )
+                        phase_timings_ms["structural_extraction"] = int((time.perf_counter() - structural_started_at) * 1000)
+
+                        creative_started_at = time.perf_counter()
+                        creative_signal = await self._extract_signal_creative(
+                            normalized_source_text=normalized_source_text,
+                            structural_signal=structural_signal,
+                            source_manifest=source_manifest,
+                        )
+                        phase_timings_ms["creative_extraction"] = int((time.perf_counter() - creative_started_at) * 1000)
+                        signal_data = self._merge_signal_extraction_passes(
+                            structural_signal=structural_signal,
+                            creative_signal=creative_signal,
+                        )
+                        extraction_mode = "two_pass"
+                    except Exception as exc:
+                        print(f"Two-pass extraction fallback: {exc}")
+                        fallback_started_at = time.perf_counter()
+                        signal_data = await self._extract_signal_one_pass(
+                            input_text=normalized_source_text or payload.input_text,
+                            source_manifest=source_manifest,
+                            prompt_version=prompt_version,
+                            uploaded_assets=uploaded_assets,
+                        )
+                        phase_timings_ms["single_pass_fallback"] = int((time.perf_counter() - fallback_started_at) * 1000)
+                        extraction_mode = "single_pass_fallback"
+                        if not normalized_source_text.strip():
+                            normalized_source_text = str(payload.input_text or "").strip()
+                            source_text_origin = "pasted_text" if normalized_source_text else None
             phase_timings_ms["total"] = sum(phase_timings_ms.values())
             add_checkpoint(
                 trace,

@@ -1,5 +1,6 @@
 from .requests import (
     AdvancedStreamRequest,
+    AdvancedVideoExportRequest,
     ArtifactName,
     CheckpointName,
     CheckpointRecord,
@@ -30,6 +31,7 @@ from .requests import (
 
 __all__ = [
     "AdvancedStreamRequest",
+    "AdvancedVideoExportRequest",
     "ArtifactName",
     "CheckpointName",
     "CheckpointRecord",

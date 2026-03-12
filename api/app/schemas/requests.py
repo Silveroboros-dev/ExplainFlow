@@ -380,11 +380,17 @@ class FinalBundleSceneAsset(BaseModel):
     scene_id: str
     title: str | None = None
     text: str = ""
+    overlay_text: str | None = None
     image_url: str | None = None
     audio_url: str | None = None
 
 
 class FinalBundleExportRequest(BaseModel):
+    topic: str = ""
+    scenes: list[FinalBundleSceneAsset] = Field(default_factory=list)
+
+
+class AdvancedVideoExportRequest(BaseModel):
     topic: str = ""
     scenes: list[FinalBundleSceneAsset] = Field(default_factory=list)
 

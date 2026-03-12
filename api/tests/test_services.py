@@ -1440,12 +1440,12 @@ def test_evaluate_scene_quality_pass_with_expected_content() -> None:
         visual_prompt="clean diagram",
         claim_refs=["c1"],
         continuity_refs=["previous barrier"],
-        acceptance_checks=["50-100 words"],
+        acceptance_checks=["25-50 words"],
     )
     text = (
-        "Quantum tunneling describes how particles transition through a barrier that would seem "
-        "impossible in classical physics. This scene connects the previous barrier setup to the "
-        "probability wave behavior and highlights why transition rates change with barrier width."
+        "Quantum tunneling lets particles cross a barrier that classical physics would forbid. "
+        "This scene ties the previous barrier setup to wave behavior and shows why thinner barriers "
+        "make transition probabilities rise."
     )
     result = evaluate_scene_quality(
         scene=scene,
@@ -1459,6 +1459,39 @@ def test_evaluate_scene_quality_pass_with_expected_content() -> None:
     assert result["status"] in {"PASS", "WARN"}
     assert result["scene_id"] == "scene-1"
     assert result["attempt"] == 1
+    assert 25 <= result["word_count"] <= 50
+
+
+def test_evaluate_scene_quality_fails_overlong_sequential_scene() -> None:
+    scene = ScriptPackScene(
+        scene_id="scene-2",
+        title="Overlong explanation",
+        scene_goal="Explain the mechanism clearly.",
+        narration_focus="Summarize the mechanism tightly.",
+        visual_prompt="A grounded explanatory visual.",
+        claim_refs=["c1"],
+        continuity_refs=[],
+        acceptance_checks=["25-50 words"],
+        scene_mode="sequential",
+    )
+    text = (
+        "This scene keeps talking well past the desired budget, explaining the mechanism in too many "
+        "clauses, repeating context, layering in extra examples, and generally behaving like a paragraph "
+        "that belongs in notes rather than a compact narrated explainer scene for export. It keeps adding "
+        "qualifiers, side comments, and redundant framing until the pacing feels slow and visibly overpacked."
+    )
+    result = evaluate_scene_quality(
+        scene=scene,
+        generated_text=text,
+        image_url="http://localhost/image.png",
+        must_include=[],
+        must_avoid=[],
+        continuity_hints=[],
+        attempt=1,
+    )
+
+    assert result["status"] == "FAIL"
+    assert any("target 25-50" in reason for reason in result["reasons"])
 
 
 def test_evaluate_scene_quality_allows_shorter_thumbnail_support_copy() -> None:
@@ -1823,9 +1856,17 @@ def test_extract_signal_prefers_manifest_embedded_text_before_gemini_recovery() 
                 ],
             }
 
+            one_pass_payload = {
+                **structural_payload,
+                "narrative_beats": creative_payload["narrative_beats"],
+                "visual_candidates": creative_payload["visual_candidates"],
+            }
+
             def response_router(prompt: str, call_count: int) -> str:
                 if "recover clean reading-order source text" in prompt:
                     raise AssertionError("Gemini source-text recovery should be skipped when manifest text exists.")
+                if "ONE RUN" in prompt:
+                    return json.dumps(one_pass_payload)
                 if "structural truth layer" in prompt:
                     return json.dumps(structural_payload)
                 if "creative structuring layer" in prompt:
@@ -1860,8 +1901,9 @@ def test_extract_signal_prefers_manifest_embedded_text_before_gemini_recovery() 
             assert result["source_text_origin"] == "asset_embedded_text"
             assert len(agent.client.files.upload_calls) == 0
             assert agent.client.files.deleted_names == []
-            assert len(agent.client.models.contents) == 2
+            assert len(agent.client.models.contents) == 1
             assert result["trace"]["checkpoints"][-1]["details"]["uploaded_asset_count"] == 0
+            assert result["trace"]["checkpoints"][-1]["details"]["extraction_mode"] == "single_pass_text_backed"
             assert all(
                 "recover clean reading-order source text" not in (
                     item[0] if isinstance(item, list) and item and isinstance(item[0], str) else str(item)
@@ -1870,6 +1912,82 @@ def test_extract_signal_prefers_manifest_embedded_text_before_gemini_recovery() 
             )
         finally:
             asset_path.unlink(missing_ok=True)
+
+    asyncio.run(run())
+
+
+def test_extract_signal_text_only_uses_single_pass_fast_path() -> None:
+    async def run() -> None:
+        one_pass_payload = {
+            "version": "v1.0",
+            "source": {
+                "source_id": "src-1",
+                "source_type": "text",
+                "language": "en",
+                "input_length_tokens": 24,
+            },
+            "thesis": {
+                "one_liner": "Scaling and data changed how software is built.",
+                "expanded_summary": "The excerpt argues that software development is being reshaped by model-centric tooling.",
+            },
+            "key_claims": [
+                {
+                    "claim_id": "c1",
+                    "claim_text": "Software is changing again because of model-centric tooling.",
+                    "supporting_points": ["The speaker frames the change as another platform shift."],
+                    "evidence_snippets": [
+                        {
+                            "evidence_id": "e1",
+                            "type": "text",
+                            "transcript_text": "software is changing again",
+                        }
+                    ],
+                    "confidence": 0.91,
+                }
+            ],
+            "concepts": [],
+            "narrative_beats": [
+                {"beat_id": "b1", "role": "hook", "message": "Software is changing again.", "claim_refs": ["c1"]},
+                {"beat_id": "b2", "role": "mechanism", "message": "Model-centric tooling is the driver.", "claim_refs": ["c1"]},
+                {"beat_id": "b3", "role": "takeaway", "message": "The workflow changes with the interface.", "claim_refs": ["c1"]},
+            ],
+            "visual_candidates": [
+                {
+                    "candidate_id": "v1",
+                    "purpose": "Show the shift in software workflow.",
+                    "recommended_structure": "comparison",
+                    "claim_refs": ["c1"],
+                }
+            ],
+            "open_questions": [],
+            "signal_quality": {
+                "coverage_score": 0.88,
+                "ambiguity_score": 0.18,
+                "hallucination_risk": 0.08,
+            },
+        }
+
+        def response_router(prompt: str, call_count: int) -> str:
+            if "ONE RUN" in prompt:
+                return json.dumps(one_pass_payload)
+            if "structural truth layer" in prompt or "creative structuring layer" in prompt:
+                raise AssertionError("Fast text-backed extraction should skip structural/creative split.")
+            raise AssertionError(f"Unexpected extraction prompt: {prompt[:120]}")
+
+        agent = object.__new__(GeminiStoryAgent)
+        agent.client = ExtractionFakeClient(response_router=response_router)
+
+        result = await agent.extract_signal(
+            SignalExtractionRequest(
+                input_text="Software is changing again because interfaces to models change what developers build.",
+            )
+        )
+
+        assert result["status"] == "success"
+        assert result["content_signal"]["key_claims"][0]["claim_id"] == "c1"
+        assert len(agent.client.models.contents) == 1
+        assert result["trace"]["checkpoints"][-1]["details"]["extraction_mode"] == "single_pass_text_backed"
+        assert result["trace"]["checkpoints"][-1]["details"]["uploaded_asset_count"] == 0
 
     asyncio.run(run())
 
@@ -2409,6 +2527,7 @@ def test_stream_scene_assets_grounds_storyboard_render_prompt_in_claims_and_evid
         prompt = agent.client.models.prompts[0].lower()
         assert "source claims:" in prompt
         assert "source evidence:" in prompt
+        assert "text must be 25-50 words" in prompt
         assert "specific nouns, measurements, environments, and interactions" in prompt
         assert "avoid generic corporate, cosmic, or metaphor-only imagery" in prompt
         assert "benchmark success can mask shallow reasoning" in prompt
