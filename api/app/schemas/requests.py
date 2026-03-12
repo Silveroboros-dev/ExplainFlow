@@ -357,6 +357,7 @@ class AdvancedStreamRequest(BaseModel):
     content_signal: dict[str, Any] = Field(default_factory=dict)
     render_profile: dict[str, Any] = Field(default_factory=dict)
     script_pack: dict[str, Any] | None = None
+    script_pack_source_media_enriched: bool = False
     artifact_scope: list[ArtifactName] = Field(default_factory=list)
 
 

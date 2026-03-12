@@ -1798,6 +1798,10 @@ class GeminiStoryAgent:
                 approved_script_pack = ScriptPack.model_validate(approved_script_pack_raw)
             except Exception:
                 approved_script_pack = None
+        approved_script_pack_enriched = bool(
+            approved_script_pack is not None
+            and payload.script_pack_source_media_enriched
+        )
 
         has_signal = bool(
             content_signal.get("thesis")
@@ -1873,11 +1877,18 @@ class GeminiStoryAgent:
                 )
                 planner_qa_payload = planner_qa_summary.model_dump()
 
-            script_pack, scene_evidence_map, evidence_ids = self._enrich_script_pack_with_source_media(
-                script_pack=script_pack,
-                content_signal=content_signal,
-                source_manifest=payload.source_manifest,
-            )
+            if approved_script_pack_enriched:
+                _, _, evidence_ids = self._structured_evidence_refs(content_signal, payload.source_manifest)
+                scene_evidence_map = {
+                    scene.scene_id: [evidence_ref for evidence_ref in scene.evidence_refs if evidence_ref]
+                    for scene in script_pack.scenes
+                }
+            else:
+                script_pack, scene_evidence_map, evidence_ids = self._enrich_script_pack_with_source_media(
+                    script_pack=script_pack,
+                    content_signal=content_signal,
+                    source_manifest=payload.source_manifest,
+                )
             
             if approved_script_pack is not None and approved_script_pack.scenes:
                 planner_qa_payload = None

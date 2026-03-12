@@ -520,6 +520,7 @@ class AgentCoordinator:
                 content_signal=deepcopy(state.content_signal or {}),
                 render_profile=deepcopy(state.render_profile),
                 script_pack=deepcopy(script_pack),
+                script_pack_source_media_enriched=script_pack_override is None and isinstance(state.script_pack, dict),
                 artifact_scope=deepcopy(state.artifact_scope),
             )
 

@@ -3392,6 +3392,143 @@ def test_generate_stream_advanced_events_emits_source_media_warning_when_links_c
     asyncio.run(run())
 
 
+def test_generate_stream_advanced_events_skips_reenrichment_for_locked_script_pack() -> None:
+    async def run() -> None:
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [],
+            "query_string": b"",
+            "client": ("testclient", 50000),
+            "server": ("testserver", 80),
+            "scheme": "http",
+        }
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        request = Request(scope, receive)
+        agent = object.__new__(GeminiStoryAgent)
+
+        async def fake_stream_scene_assets(**kwargs):  # noqa: ANN003
+            result_collector = kwargs["result_collector"]
+            text = "This locked scene streams from its saved proof-aware script pack."
+            result_collector["text"] = text
+            result_collector["image_url"] = ""
+            result_collector["audio_url"] = ""
+            result_collector["word_count"] = len(text.split())
+            if False:
+                yield {}
+
+        def fail_reenrichment(**_kwargs):  # noqa: ANN003
+            raise AssertionError("Locked workflow script packs should not be re-enriched before streaming.")
+
+        agent._stream_scene_assets = fake_stream_scene_assets  # type: ignore[method-assign]
+        agent._enrich_script_pack_with_source_media = fail_reenrichment  # type: ignore[method-assign]
+
+        events: list[dict[str, str]] = []
+        async for event in agent.generate_stream_advanced_events(
+            request=request,
+            payload=AdvancedStreamRequest.model_validate(
+                {
+                    "source_text": "",
+                    "source_manifest": {
+                        "assets": [
+                            {
+                                "asset_id": "asset-audio-1",
+                                "modality": "audio",
+                                "uri": "http://example.com/audio.mp3",
+                                "duration_ms": 120000,
+                            }
+                        ]
+                    },
+                    "content_signal": {
+                        "thesis": {"one_liner": "Locked script pack should keep its proof links."},
+                        "key_claims": [
+                            {
+                                "claim_id": "c1",
+                                "claim_text": "The locked scene already points to the source clip.",
+                                "evidence_snippets": [
+                                    {
+                                        "evidence_id": "e1",
+                                        "type": "audio",
+                                        "asset_id": "asset-audio-1",
+                                        "start_ms": 1200,
+                                        "end_ms": 4200,
+                                        "transcript_text": "This is the supporting source clip.",
+                                    }
+                                ],
+                            }
+                        ],
+                        "narrative_beats": [{"beat_id": "b1", "message": "Use the saved proof-aware scene."}],
+                    },
+                    "render_profile": {
+                        "artifact_type": "storyboard_grid",
+                        "density": "standard",
+                        "audience": {"persona": "Operators", "level": "intermediate"},
+                        "output_controls": {"target_duration_sec": 30},
+                    },
+                    "script_pack_source_media_enriched": True,
+                    "script_pack": {
+                        "plan_id": "plan-locked-proof",
+                        "plan_summary": "Locked proof-aware storyboard",
+                        "audience_descriptor": "Operators",
+                        "scene_count": 1,
+                        "artifact_type": "storyboard_grid",
+                        "planning_mode": "sequential",
+                        "script_shape": "sequential_storyboard",
+                        "scenes": [
+                            {
+                                "scene_id": "scene-1",
+                                "title": "Saved Proof",
+                                "scene_goal": "Use the previously locked proof clip.",
+                                "narration_focus": "Explain why the locked proof path stays attached.",
+                                "visual_prompt": "Grounded proof visual.",
+                                "claim_refs": ["c1"],
+                                "evidence_refs": ["e1"],
+                                "render_strategy": "hybrid",
+                                "source_media": [
+                                    {
+                                        "asset_id": "asset-audio-1",
+                                        "modality": "audio",
+                                        "usage": "proof_clip",
+                                        "claim_refs": ["c1"],
+                                        "evidence_refs": ["e1"],
+                                        "start_ms": 1200,
+                                        "end_ms": 4200,
+                                    }
+                                ],
+                                "continuity_refs": [],
+                                "acceptance_checks": [],
+                            }
+                        ],
+                    },
+                    "artifact_scope": ["storyboard", "voiceover"],
+                }
+            ),
+        ):
+            events.append(event)
+
+        parsed_events = [
+            (event["event"], json.loads(event["data"]))
+            for event in events
+        ]
+        queue_event = next(data for name, data in parsed_events if name == "scene_queue_ready")
+        scene_start_event = next(data for name, data in parsed_events if name == "scene_start")
+        proof_event = next(data for name, data in parsed_events if name == "source_media_ready")
+        final_bundle_event = next(data for name, data in parsed_events if name == "final_bundle_ready")
+
+        assert queue_event["scenes"][0]["source_media_count"] == 1
+        assert scene_start_event["evidence_refs"] == ["e1"]
+        assert scene_start_event["render_strategy"] == "hybrid"
+        assert proof_event["url"] == "http://example.com/audio.mp3"
+        assert final_bundle_event["claim_traceability"]["evidence_total"] == 1
+        assert final_bundle_event["claim_traceability"]["evidence_referenced"] == 1
+
+    asyncio.run(run())
+
+
 def test_enrich_script_pack_with_source_media_falls_back_to_scene_evidence_refs() -> None:
     script_pack = ScriptPack.model_validate(
         {

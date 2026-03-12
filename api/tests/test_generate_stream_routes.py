@@ -239,3 +239,72 @@ def test_workflow_scene_regeneration_route_uses_locked_workflow_context() -> Non
     finally:
         workflow_route.coordinator = original_coordinator
         workflow_route.agent = original_agent
+
+
+def test_build_stream_request_marks_stored_script_pack_as_already_enriched() -> None:
+    coordinator = AgentCoordinator()
+
+    async def run() -> None:
+        started = await coordinator.start_workflow("Input text")
+        workflow_id = started["workflow_id"]
+        await coordinator.record_signal_result(
+            workflow_id,
+            source_text="Input text",
+            result=_signal_success_result(),
+        )
+        await coordinator.lock_artifacts(workflow_id, ["story_cards"])
+        await coordinator.lock_render_profile(workflow_id, {"visual_mode": "diagram"})
+        await coordinator.record_script_pack_result(
+            workflow_id,
+            {
+                "status": "success",
+                "script_pack": {
+                    "plan_id": "plan-1",
+                    "plan_summary": "Summary",
+                    "audience_descriptor": "General audience (beginner)",
+                    "scene_count": 1,
+                    "artifact_type": "storyboard_grid",
+                    "scenes": [
+                        {
+                            "scene_id": "scene-1",
+                            "title": "Hook",
+                            "scene_goal": "Explain ATP.",
+                            "narration_focus": "Focus on ATP.",
+                            "visual_prompt": "Show ATP generation.",
+                            "claim_refs": ["c1"],
+                            "continuity_refs": [],
+                            "acceptance_checks": [],
+                        }
+                    ],
+                },
+            },
+        )
+
+        locked_request = await coordinator.build_stream_request(workflow_id)
+        override_request = await coordinator.build_stream_request(
+            workflow_id,
+            script_pack_override={
+                "plan_id": "plan-override",
+                "plan_summary": "Override",
+                "audience_descriptor": "General audience (beginner)",
+                "scene_count": 1,
+                "artifact_type": "storyboard_grid",
+                "scenes": [
+                    {
+                        "scene_id": "scene-1",
+                        "title": "Override",
+                        "scene_goal": "Explain ATP differently.",
+                        "narration_focus": "Override focus.",
+                        "visual_prompt": "Show ATP generation differently.",
+                        "claim_refs": ["c1"],
+                        "continuity_refs": [],
+                        "acceptance_checks": [],
+                    }
+                ],
+            },
+        )
+
+        assert locked_request.script_pack_source_media_enriched is True
+        assert override_request.script_pack_source_media_enriched is False
+
+    asyncio.run(run())
