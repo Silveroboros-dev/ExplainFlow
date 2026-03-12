@@ -5,8 +5,8 @@ import React from "react";
 import { type AgentNoteType } from "@/components/AgentActivityPanel";
 import { submitAdvancedWorkflowChat } from "@/lib/advanced-api";
 import {
-  actionInvalidatesGeneratedOutputs,
   apiErrorMessage,
+  asPendingAssistantAction,
   asPlannerQaSummary,
   buildAdvancedSourceManifest,
   deriveSceneCount,
@@ -17,8 +17,8 @@ import {
   type ChatMessage,
   type ChatRole,
   type ExtractedSignal,
+  type PendingAssistantAction,
   type ScriptPackPayload,
-  type SceneViewModel,
   type UploadedSourceAsset,
   type WorkflowAgentApiTurn,
   type WorkflowAgentChatResponse,
@@ -36,7 +36,6 @@ type UseAdvancedAgentChatOptions = {
   uploadedSourceAssets: UploadedSourceAsset[];
   artifactType: string;
   scriptPresentationMode: "review" | "auto";
-  scriptPack: ScriptPackPayload | null;
   chatInput: string;
   chatMessages: ChatMessage[];
   setChatInput: React.Dispatch<React.SetStateAction<string>>;
@@ -50,9 +49,6 @@ type UseAdvancedAgentChatOptions = {
   setExpectedSceneCount: React.Dispatch<React.SetStateAction<number>>;
   setActivePanel: React.Dispatch<React.SetStateAction<AdvancedPanel>>;
   setGenerationStatus: React.Dispatch<React.SetStateAction<string>>;
-  setScenes: React.Dispatch<React.SetStateAction<Record<string, SceneViewModel>>>;
-  clearGeneratedOutputs: () => void;
-  fullTextBufferRef: React.MutableRefObject<Record<string, string>>;
   buildRenderProfilePayload: () => unknown;
   updateWorkflowSnapshot: (snapshot: unknown) => void;
   resetWorkflowSession: (
@@ -65,7 +61,6 @@ type UseAdvancedAgentChatOptions = {
   ) => void;
   pushAgentNote: PushAgentNote;
   pushPlannerQaNote: (summary: ReturnType<typeof asPlannerQaSummary>) => void;
-  handleGenerateStream: (scriptPackOverride?: ScriptPackPayload | null) => Promise<void>;
 };
 
 export default function useAdvancedAgentChat({
@@ -77,7 +72,6 @@ export default function useAdvancedAgentChat({
   uploadedSourceAssets,
   artifactType,
   scriptPresentationMode,
-  scriptPack,
   chatInput,
   chatMessages,
   setChatInput,
@@ -91,16 +85,14 @@ export default function useAdvancedAgentChat({
   setExpectedSceneCount,
   setActivePanel,
   setGenerationStatus,
-  setScenes,
-  clearGeneratedOutputs,
-  fullTextBufferRef,
   buildRenderProfilePayload,
   updateWorkflowSnapshot,
   resetWorkflowSession,
   pushAgentNote,
   pushPlannerQaNote,
-  handleGenerateStream,
 }: UseAdvancedAgentChatOptions) {
+  const [pendingAssistantAction, setPendingAssistantAction] = React.useState<PendingAssistantAction | null>(null);
+
   const pushChatMessage = (role: ChatRole, text: string) => {
     const message: ChatMessage = {
       id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -125,6 +117,7 @@ export default function useAdvancedAgentChat({
     }));
 
     try {
+      setPendingAssistantAction(null);
       setGenerationError("");
       const agentResult = await submitAdvancedWorkflowChat(apiBase, {
         message,
@@ -153,18 +146,9 @@ export default function useAdvancedAgentChat({
       const returnedWorkflow = data.workflow && typeof data.workflow === "object"
         ? data.workflow as WorkflowSnapshot
         : null;
-      const returnedWorkflowId = typeof data.workflow_id === "string"
-        ? data.workflow_id
-        : returnedWorkflow?.workflow_id ?? null;
-      const workflowChanged = Boolean(returnedWorkflowId && returnedWorkflowId !== workflowId);
 
       if (typeof data.workflow_id === "string") {
         setWorkflowId(data.workflow_id);
-      }
-      if (workflowChanged) {
-        setExtractedSignal(null);
-        setSignalStage("idle");
-        clearGeneratedOutputs();
       }
       if (returnedWorkflow) {
         updateWorkflowSnapshot(returnedWorkflow);
@@ -177,16 +161,6 @@ export default function useAdvancedAgentChat({
         if (returnedWorkflow.has_script_pack === false && !data.script_pack) {
           setScriptPack(null);
           setExpectedSceneCount(0);
-        }
-        if (
-          workflowChanged
-          || (
-            actionInvalidatesGeneratedOutputs(data.selected_action)
-            && returnedWorkflow.checkpoint_state?.CP5_STREAM_COMPLETE !== "passed"
-          )
-        ) {
-          setScenes({});
-          fullTextBufferRef.current = {};
         }
       }
       if (data.content_signal && typeof data.content_signal === "object") {
@@ -201,7 +175,10 @@ export default function useAdvancedAgentChat({
         setExpectedSceneCount(deriveSceneCount(scriptPackOverride));
       }
       pushPlannerQaNote(asPlannerQaSummary(data.planner_qa_summary));
-      if (data.ui?.active_panel) {
+      const pendingAction = asPendingAssistantAction(data);
+      if (pendingAction) {
+        setPendingAssistantAction(pendingAction);
+      } else if (data.ui?.active_panel) {
         setActivePanel(data.ui.active_panel);
       }
       if (typeof data.assistant_message === "string" && data.assistant_message.trim()) {
@@ -214,22 +191,16 @@ export default function useAdvancedAgentChat({
       if (detail) {
         setGenerationError(detail);
         pushAgentNote("error", "Agent", detail);
-      } else if (
-        data.selected_action
-        && !["respond", "open_panel", "generate_stream"].includes(data.selected_action)
-      ) {
+      } else if (!pendingAction) {
         const nextStatus = snapshotStatusSummary(returnedWorkflow ?? workflowSnapshot);
         if (nextStatus) {
           setGenerationStatus(nextStatus);
         }
       }
-
-      if (data.ui?.start_stream) {
-        await handleGenerateStream(scriptPackOverride ?? scriptPack ?? null);
-      }
     } catch (error) {
       console.error("Agent chat error:", error);
       setGenerationError("Unable to contact agent.");
+      setPendingAssistantAction(null);
       pushAgentNote("error", "Agent", "Unable to contact agent.");
     }
   };
@@ -245,5 +216,7 @@ export default function useAdvancedAgentChat({
 
   return {
     handleChatSubmit,
+    pendingAssistantAction,
+    dismissPendingAssistantAction: () => setPendingAssistantAction(null),
   };
 }

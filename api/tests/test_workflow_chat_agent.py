@@ -50,7 +50,7 @@ class FakeStoryAgent:
         }
 
 
-def test_apply_render_profile_action_locks_artifacts_and_render() -> None:
+def test_apply_render_profile_action_requires_confirmation_before_locking() -> None:
     async def run() -> None:
         coordinator = AgentCoordinator()
         chat_agent = WorkflowChatAgent(
@@ -87,9 +87,10 @@ def test_apply_render_profile_action_locks_artifacts_and_render() -> None:
 
         assert result.status == "success"
         assert result.selected_action == "apply_render_profile"
+        assert result.requires_confirmation is True
         assert result.workflow is not None
-        assert result.workflow["checkpoint_state"]["CP2_ARTIFACTS_LOCKED"] == "passed"
-        assert result.workflow["checkpoint_state"]["CP3_RENDER_LOCKED"] == "passed"
+        assert result.workflow["checkpoint_state"]["CP2_ARTIFACTS_LOCKED"] != "passed"
+        assert result.workflow["checkpoint_state"]["CP3_RENDER_LOCKED"] != "passed"
 
     asyncio.run(run())
 
@@ -126,16 +127,17 @@ def test_apply_render_profile_action_reports_queued_state_before_signal_ready() 
 
         assert result.status == "success"
         assert result.selected_action == "apply_render_profile"
+        assert result.requires_confirmation is True
         assert result.workflow is not None
-        assert result.workflow["checkpoint_state"]["CP2_ARTIFACTS_LOCKED"] == "passed"
+        assert result.workflow["checkpoint_state"]["CP2_ARTIFACTS_LOCKED"] != "passed"
         assert result.workflow["checkpoint_state"]["CP3_RENDER_LOCKED"] == "pending"
-        assert "queued" in result.assistant_message.lower()
-        assert "signal" in result.assistant_message.lower()
+        assert "continue" in result.assistant_message.lower()
+        assert "render profile" in result.assistant_message.lower()
 
     asyncio.run(run())
 
 
-def test_confirm_signal_action_generates_script_pack() -> None:
+def test_confirm_signal_action_requires_confirmation_before_script_pack_generation() -> None:
     async def run() -> None:
         coordinator = AgentCoordinator()
         chat_agent = WorkflowChatAgent(
@@ -173,12 +175,14 @@ def test_confirm_signal_action_generates_script_pack() -> None:
 
         assert result.status == "success"
         assert result.selected_action == "confirm_signal"
-        assert result.script_pack is not None
-        assert result.planner_qa_summary is not None
-        assert result.planner_qa_summary.mode == "repaired"
-        assert result.ui.active_panel == "stream"
+        assert result.requires_confirmation is True
+        assert result.script_pack is None
+        assert result.planner_qa_summary is None
+        assert result.ui.active_panel == "script"
         assert result.workflow is not None
-        assert result.workflow["checkpoint_state"]["CP4_SCRIPT_LOCKED"] == "passed"
+        assert result.workflow["checkpoint_state"]["CP4_SCRIPT_LOCKED"] != "passed"
+        assert "script pack" in result.assistant_message.lower()
+        assert "continue" in result.assistant_message.lower()
 
     asyncio.run(run())
 
@@ -240,8 +244,9 @@ def test_generate_stream_action_sets_start_stream_flag() -> None:
 
         assert result.status == "success"
         assert result.selected_action == "generate_stream"
-        assert result.ui.start_stream is True
-        assert result.script_pack is not None
+        assert result.requires_confirmation is True
+        assert result.ui.start_stream is False
+        assert "continue" in result.assistant_message.lower()
 
     asyncio.run(run())
 

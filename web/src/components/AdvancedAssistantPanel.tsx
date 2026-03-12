@@ -16,15 +16,25 @@ type ChatMessage = {
   text: string;
 };
 
+type PendingAssistantAction = {
+  title: string;
+  message: string;
+  confirmLabel: string;
+};
+
 type AdvancedAssistantPanelProps = {
   chatMessages: ChatMessage[];
   chatInput: string;
   isWorking: boolean;
+  pendingAction: PendingAssistantAction | null;
+  pendingActionDisabled: boolean;
   primaryActionClassName: string;
   primaryActionLabelClassName: string;
   chatScrollAnchorRef: React.RefObject<HTMLDivElement | null>;
   onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
   onChatInputChange: (value: string) => void;
+  onConfirmPendingAction: () => void;
+  onDismissPendingAction: () => void;
 };
 
 const chatRoleMeta = (role: ChatRole): {
@@ -57,11 +67,15 @@ export default function AdvancedAssistantPanel({
   chatMessages,
   chatInput,
   isWorking,
+  pendingAction,
+  pendingActionDisabled,
   primaryActionClassName,
   primaryActionLabelClassName,
   chatScrollAnchorRef,
   onSubmit,
   onChatInputChange,
+  onConfirmPendingAction,
+  onDismissPendingAction,
 }: AdvancedAssistantPanelProps) {
   return (
     <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
@@ -106,6 +120,25 @@ export default function AdvancedAssistantPanel({
             </div>
           </ScrollArea>
         </div>
+        {pendingAction ? (
+          <div className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            <div className="space-y-1">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-800">
+                Awaiting Confirmation
+              </p>
+              <p className="text-sm font-semibold text-amber-950">{pendingAction.title}</p>
+              <p className="text-sm leading-6 text-amber-950">{pendingAction.message}</p>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Button type="button" variant="outline" className="border-amber-300" onClick={onDismissPendingAction}>
+                Not Now
+              </Button>
+              <Button type="button" onClick={onConfirmPendingAction} disabled={pendingActionDisabled}>
+                {pendingAction.confirmLabel}
+              </Button>
+            </div>
+          </div>
+        ) : null}
         <form onSubmit={onSubmit} className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
           <Textarea
             value={chatInput}

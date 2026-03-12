@@ -54,6 +54,7 @@ import {
   type ChatMessage,
   type EvidenceViewerState,
   type ExtractedSignal,
+  type PendingAssistantAction,
   type PlannerQaSummary,
   type RenderProfileStep,
   type SceneViewModel,
@@ -359,6 +360,8 @@ export default function AdvancedStudio() {
 
   const {
     handleChatSubmit,
+    pendingAssistantAction,
+    dismissPendingAssistantAction,
   } = useAdvancedAgentChat({
     apiBase: API_BASE,
     workflowId,
@@ -368,7 +371,6 @@ export default function AdvancedStudio() {
     uploadedSourceAssets,
     artifactType,
     scriptPresentationMode,
-    scriptPack,
     chatInput,
     chatMessages,
     setChatInput,
@@ -382,15 +384,11 @@ export default function AdvancedStudio() {
     setExpectedSceneCount,
     setActivePanel,
     setGenerationStatus,
-    setScenes,
-    clearGeneratedOutputs,
-    fullTextBufferRef: fullTextBuffer,
     buildRenderProfilePayload: () => buildRenderProfilePayload(),
     updateWorkflowSnapshot,
     resetWorkflowSession,
     pushAgentNote,
     pushPlannerQaNote,
-    handleGenerateStream: startGenerationStream,
   });
 
   const removeUploadedSourceAsset = (assetId: string) => {
@@ -712,11 +710,67 @@ export default function AdvancedStudio() {
     return true;
   };
 
+  const executePendingAssistantAction = async (pendingAction: PendingAssistantAction): Promise<boolean> => {
+    if (pendingAction.action === 'extract_signal') {
+      if (!hasSourceInput || isExtracting || isUploadingAssets) return false;
+      if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before extracting again.')) {
+        return false;
+      }
+      setActivePanel(extractedSignal ? 'signal' : 'profile');
+      await runExtraction({ armSignalPreview: Boolean(extractedSignal) });
+      return true;
+    }
+
+    if (pendingAction.action === 'apply_render_profile') {
+      if (!workflowId || isApplyingProfile) return false;
+      if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before applying the render profile.')) {
+        return false;
+      }
+      setActivePanel('signal');
+      startSignalPreviewRun();
+      await applyProfileToWorkflow();
+      return true;
+    }
+
+    if (pendingAction.action === 'confirm_signal' || pendingAction.action === 'generate_script_pack') {
+      if (!workflowSnapshot?.ready_for_script_pack || isGeneratingScriptPack || isGenerating) return false;
+      if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before generating the script pack.')) {
+        return false;
+      }
+      resetBundleImageMode();
+      await generateScriptPack('review');
+      return true;
+    }
+
+    if (pendingAction.action === 'generate_stream') {
+      if (!workflowSnapshot?.ready_for_stream || !scriptPack || isGenerating) return false;
+      if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before starting the generation stream.')) {
+        return false;
+      }
+      setActivePanel('stream');
+      await startGenerationStream();
+      return true;
+    }
+
+    return false;
+  };
+
+  const handleConfirmAssistantAction = async () => {
+    if (!pendingAssistantAction) {
+      return;
+    }
+    const didExecute = await executePendingAssistantAction(pendingAssistantAction);
+    if (didExecute) {
+      dismissPendingAssistantAction();
+    }
+  };
+
   const handleExtract = (e: React.FormEvent) => {
     e.preventDefault();
     if (!hasSourceInput) {
       return;
     }
+    dismissPendingAssistantAction();
     if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before extracting again.')) {
       return;
     }
@@ -730,6 +784,7 @@ export default function AdvancedStudio() {
   };
 
   const handleApplyRenderProfile = () => {
+    dismissPendingAssistantAction();
     setActivePanel('signal');
     startSignalPreviewRun();
     pushAgentNote('info', 'Render Profile', 'Render profile ready. Waiting for lock confirmation.');
@@ -738,6 +793,7 @@ export default function AdvancedStudio() {
 
   const handleRegenerateSignal = () => {
     if (!hasSourceInput || isExtracting || isUploadingAssets) return;
+    dismissPendingAssistantAction();
     if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before regenerating signal.')) return;
     resetBundleImageMode();
     setActivePanel('signal');
@@ -746,12 +802,14 @@ export default function AdvancedStudio() {
 
   const handleRegenerateScript = () => {
     if (!scriptPack || isGeneratingScriptPack || isGenerating) return;
+    dismissPendingAssistantAction();
     if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before regenerating the script pack.')) return;
     void handleGenerateScriptPack('review');
   };
 
   const handleRegenerateStream = () => {
     if (isGenerating || !scriptPack || Object.keys(scenes).length === 0) return;
+    dismissPendingAssistantAction();
     if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before regenerating the stream.')) return;
     void handleGenerateStreamAction();
   };
@@ -776,6 +834,7 @@ export default function AdvancedStudio() {
     if (isUpscalingBundle || isGenerating || isGeneratingScriptPack || isApplyingProfile || isExtracting) {
       return;
     }
+    dismissPendingAssistantAction();
 
     const currentScenes = Object.values(scenes);
     const sceneImages = currentScenes.filter((scene) => typeof scene.imageUrl === 'string' && scene.imageUrl.trim().length > 0);
@@ -850,12 +909,14 @@ export default function AdvancedStudio() {
   };
 
   const handleGenerateScriptPack = async (mode: 'review' | 'auto' = 'review') => {
+    dismissPendingAssistantAction();
     if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before generating the script pack.')) return;
     resetBundleImageMode();
     await generateScriptPack(mode, { onAutoStartStream: startGenerationStream });
   };
 
   const handleConfirmSignal = async () => {
+    dismissPendingAssistantAction();
     if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before confirming signal.')) return;
     resetBundleImageMode();
     await confirmSignal({ onAutoStartStream: startGenerationStream });
@@ -868,6 +929,7 @@ export default function AdvancedStudio() {
 
   const handleGenerateStreamAction = () => {
     if (!workflowSnapshot?.ready_for_stream || !scriptPack || isGenerating || isUpscalingBundle) return;
+    dismissPendingAssistantAction();
     if (scriptPresentationMode === 'auto') {
       void startGenerationStream();
       return;
@@ -880,6 +942,7 @@ export default function AdvancedStudio() {
     if (!stage) return;
 
     if (stage === 'extract') {
+      dismissPendingAssistantAction();
       if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before extracting again.')) {
         return;
       }
@@ -888,11 +951,13 @@ export default function AdvancedStudio() {
       return;
     }
     if (stage === 'profile') {
+      dismissPendingAssistantAction();
       closeActionDialog();
       await applyProfileToWorkflow();
       return;
     }
     if (stage === 'script' || stage === 'stream') {
+      dismissPendingAssistantAction();
       if (
         stage === 'script'
           ? blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before regenerating the script pack.')
@@ -919,6 +984,7 @@ export default function AdvancedStudio() {
 
   const handleDialogRelaunch = async () => {
     if (actionDialogStage === 'script') {
+      dismissPendingAssistantAction();
       if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before regenerating the script pack.')) {
         return;
       }
@@ -1124,6 +1190,15 @@ export default function AdvancedStudio() {
     || (actionDialogStage === 'profile' && (!workflowId || isApplyingProfile))
     || (actionDialogStage === 'script' && (!workflowSnapshot?.ready_for_script_pack || isGeneratingScriptPack || isGenerating || isUpscalingBundle))
     || (actionDialogStage === 'stream' && (!workflowSnapshot?.ready_for_stream || !scriptPack || isGenerating || isUpscalingBundle));
+  const assistantPendingActionDisabled = !pendingAssistantAction
+    ? false
+    : pendingAssistantAction.action === 'extract_signal'
+      ? (!hasSourceInput || isExtracting || isUploadingAssets || isUpscalingBundle)
+      : pendingAssistantAction.action === 'apply_render_profile'
+        ? (!workflowId || isApplyingProfile || isUpscalingBundle)
+        : pendingAssistantAction.action === 'generate_stream'
+          ? (isGenerating || isUpscalingBundle || !workflowSnapshot?.ready_for_stream || !scriptPack)
+          : (isGeneratingScriptPack || isGenerating || isUpscalingBundle || !workflowSnapshot?.ready_for_script_pack);
 
   return (
     <main className="relative isolate min-h-screen overflow-x-clip bg-[#05070f] py-12 px-4 sm:px-6 lg:px-8 font-sans text-slate-100">
@@ -1164,11 +1239,15 @@ export default function AdvancedStudio() {
               chatMessages={chatMessages}
               chatInput={chatInput}
               isWorking={agentIsWorking}
+              pendingAction={pendingAssistantAction}
+              pendingActionDisabled={assistantPendingActionDisabled}
               primaryActionClassName={PRIMARY_ACTION_CARD_CLASS}
               primaryActionLabelClassName={PRIMARY_ACTION_LABEL_CLASS}
               chatScrollAnchorRef={chatScrollAnchorRef}
               onSubmit={(event) => void handleChatSubmit(event)}
               onChatInputChange={setChatInput}
+              onConfirmPendingAction={() => void handleConfirmAssistantAction()}
+              onDismissPendingAction={dismissPendingAssistantAction}
             />
 
             <AgentActivityPanel

@@ -526,6 +526,14 @@ export type AdvancedPanel = "source" | "profile" | "signal" | "stream" | "script
 export type ActionDialogStage = "extract" | "profile" | "script" | "stream";
 export type RenderProfileStep = "output" | "audience" | "style" | "constraints";
 export type ChatRole = "agent" | "user" | "system";
+export type WorkflowAgentAction =
+  | "respond"
+  | "open_panel"
+  | "extract_signal"
+  | "apply_render_profile"
+  | "confirm_signal"
+  | "generate_script_pack"
+  | "generate_stream";
 
 export type ChatMessage = {
   id: string;
@@ -542,7 +550,8 @@ export type WorkflowAgentApiTurn = {
 export type WorkflowAgentChatResponse = {
   status?: "success" | "error";
   assistant_message?: string;
-  selected_action?: string;
+  selected_action?: WorkflowAgentAction;
+  requires_confirmation?: boolean;
   workflow_id?: string | null;
   workflow?: WorkflowSnapshot;
   content_signal?: ExtractedSignal | null;
@@ -553,6 +562,66 @@ export type WorkflowAgentChatResponse = {
     start_stream?: boolean;
   };
   message?: string | null;
+};
+
+export type PendingAssistantAction = {
+  action: Exclude<WorkflowAgentAction, "respond" | "open_panel">;
+  title: string;
+  confirmLabel: string;
+  message: string;
+};
+
+const ASSISTANT_PENDING_ACTION_META: Record<PendingAssistantAction["action"], {
+  title: string;
+  confirmLabel: string;
+}> = {
+  extract_signal: {
+    title: "Extract Signal",
+    confirmLabel: "Extract Signal",
+  },
+  apply_render_profile: {
+    title: "Apply Render Profile",
+    confirmLabel: "Apply Profile",
+  },
+  confirm_signal: {
+    title: "Confirm Signal",
+    confirmLabel: "Confirm Signal",
+  },
+  generate_script_pack: {
+    title: "Generate Script Pack",
+    confirmLabel: "Generate Script Pack",
+  },
+  generate_stream: {
+    title: "Generate Stream",
+    confirmLabel: "Start Stream",
+  },
+};
+
+export const asPendingAssistantAction = (
+  response: WorkflowAgentChatResponse,
+): PendingAssistantAction | null => {
+  if (response.requires_confirmation !== true) {
+    return null;
+  }
+  const action = response.selected_action;
+  if (
+    action !== "extract_signal"
+    && action !== "apply_render_profile"
+    && action !== "confirm_signal"
+    && action !== "generate_script_pack"
+    && action !== "generate_stream"
+  ) {
+    return null;
+  }
+  const message = typeof response.assistant_message === "string" && response.assistant_message.trim()
+    ? response.assistant_message.trim()
+    : "Continue with this workflow action?";
+  return {
+    action,
+    title: ASSISTANT_PENDING_ACTION_META[action].title,
+    confirmLabel: ASSISTANT_PENDING_ACTION_META[action].confirmLabel,
+    message,
+  };
 };
 
 export const CHECKPOINT_LABELS: Record<string, string> = {

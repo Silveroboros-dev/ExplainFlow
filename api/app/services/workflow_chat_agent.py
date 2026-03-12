@@ -9,9 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.config import get_gemini_client
 from app.schemas.requests import (
-    ArtifactName,
     PlannerQaSummary,
-    SignalExtractionRequest,
     WorkflowAgentAction,
     WorkflowAgentChatContext,
     WorkflowAgentChatRequest,
@@ -34,7 +32,7 @@ class PlannerDecision(BaseModel):
 
 
 class WorkflowChatAgent:
-    """Gemini-backed single-turn planner that executes one safe workflow action per turn."""
+    """Gemini-backed single-turn planner that proposes workflow actions and executes only non-mutating UI guidance."""
 
     def __init__(
         self,
@@ -55,17 +53,6 @@ class WorkflowChatAgent:
             return "{}"
 
     @staticmethod
-    def _default_artifact_scope(render_profile: dict[str, Any]) -> list[ArtifactName]:
-        artifact_type = str(render_profile.get("artifact_type", "")).strip().lower()
-        if artifact_type == "slide_thumbnail":
-            return ["thumbnail", "social_caption"]
-        if artifact_type == "storyboard_grid":
-            return ["storyboard", "voiceover", "social_caption"]
-        if artifact_type == "comparison_one_pager":
-            return ["story_cards", "social_caption"]
-        return ["story_cards", "voiceover"]
-
-    @staticmethod
     def _missing_checkpoints(snapshot: dict[str, Any], required: tuple[str, ...]) -> list[str]:
         checkpoint_state = snapshot.get("checkpoint_state")
         if not isinstance(checkpoint_state, dict):
@@ -81,6 +68,7 @@ class WorkflowChatAgent:
         *,
         assistant_message: str,
         selected_action: WorkflowAgentAction = "respond",
+        requires_confirmation: bool = False,
         workflow_id: str | None = None,
         workflow: dict[str, Any] | None = None,
         content_signal: dict[str, Any] | None = None,
@@ -94,6 +82,7 @@ class WorkflowChatAgent:
             status=status,
             assistant_message=assistant_message,
             selected_action=selected_action,
+            requires_confirmation=requires_confirmation,
             workflow_id=workflow_id,
             workflow=workflow,
             content_signal=content_signal,
@@ -115,6 +104,61 @@ class WorkflowChatAgent:
         if not isinstance(checkpoint_state, dict):
             return False
         return checkpoint_state.get(checkpoint) == "passed"
+
+    @staticmethod
+    def _action_requires_confirmation(action: WorkflowAgentAction) -> bool:
+        return action in {
+            "extract_signal",
+            "apply_render_profile",
+            "confirm_signal",
+            "generate_script_pack",
+            "generate_stream",
+        }
+
+    @classmethod
+    def _confirmation_message(
+        cls,
+        action: WorkflowAgentAction,
+        snapshot: dict[str, Any] | None,
+    ) -> str:
+        has_script_pack = bool(snapshot.get("has_script_pack")) if isinstance(snapshot, dict) else False
+        has_generated_bundle = (
+            cls._checkpoint_passed(snapshot, "CP5_STREAM_COMPLETE")
+            or cls._checkpoint_passed(snapshot, "CP6_BUNDLE_FINALIZED")
+        )
+        if action == "extract_signal":
+            if has_script_pack or has_generated_bundle:
+                return (
+                    "To do that, I need to extract a new content signal from the current source. "
+                    "That will clear the current script pack and generated bundle so later stages can be rebuilt. Continue?"
+                )
+            return "To do that, I need to extract a content signal from the current source. Continue?"
+        if action == "apply_render_profile":
+            if has_script_pack or has_generated_bundle:
+                return (
+                    "To do that, I need to lock the current artifact scope and render profile. "
+                    "After that, downstream script or bundle outputs may need regeneration. Continue?"
+                )
+            return "To do that, I need to lock the current artifact scope and render profile for this run. Continue?"
+        if action == "confirm_signal":
+            if has_script_pack or has_generated_bundle:
+                return (
+                    "To do that, I need to confirm the current signal and regenerate the script pack from it. "
+                    "That will replace the current script plan for later stages. Continue?"
+                )
+            return (
+                "To do that, I need to confirm the current signal and generate the script pack from the locked workflow state. Continue?"
+            )
+        if action == "generate_script_pack":
+            if has_script_pack or has_generated_bundle:
+                return (
+                    "To do that, I need to regenerate the script pack from the current signal and render profile. "
+                    "That will replace the current script plan for later stages. Continue?"
+                )
+            return "To do that, I need to generate the script pack from the current signal and render profile. Continue?"
+        if action == "generate_stream":
+            return "To do that, I need to start the generation stream for the current locked script pack. Continue?"
+        return "Continue with this workflow action?"
 
     @staticmethod
     def _concept_response(
@@ -308,6 +352,7 @@ class WorkflowChatAgent:
             "- Respect strict workflow gates from checkpoint_state.\n"
             "- If prerequisites are missing, choose respond or open_panel and explain clearly.\n"
             "- If the user asks a conceptual product question, choose respond and answer it directly.\n"
+            "- For mutating actions, describe what would happen next and ask for confirmation instead of claiming it already happened.\n"
             "- Keep assistant_message concise (<=2 sentences).\n"
             "- Use open_panel when user asks to inspect a stage.\n"
             "- Use confirm_signal when user intent is to approve signal and continue.\n"
@@ -441,40 +486,13 @@ class WorkflowChatAgent:
                     status="error",
                     message="Missing source_text.",
                 )
-
-            if not workflow_id:
-                started = await self._coordinator.start_workflow(source_text)
-                workflow_id = str(started["workflow_id"])
-                snapshot = started
-
-            extraction_result = await self._story_agent.extract_signal(
-                SignalExtractionRequest(input_text=source_text)
-            )
-            snapshot = await self._coordinator.record_signal_result(
-                workflow_id,
-                source_text=source_text,
-                result=extraction_result,
-            )
-            if extraction_result.get("status") != "success":
-                detail = str(extraction_result.get("message", "Signal extraction failed."))
-                return self._response(
-                    assistant_message=detail,
-                    selected_action="extract_signal",
-                    workflow_id=workflow_id,
-                    workflow=snapshot,
-                    ui=WorkflowAgentUiDirective(active_panel="source", start_stream=False),
-                    status="error",
-                    message=detail,
-                )
-            content_signal_raw = extraction_result.get("content_signal")
-            content_signal = content_signal_raw if isinstance(content_signal_raw, dict) else None
             return self._response(
-                assistant_message="Signal extracted. Next, apply profile to lock artifacts and render settings.",
+                assistant_message=self._confirmation_message("extract_signal", snapshot),
                 selected_action="extract_signal",
+                requires_confirmation=True,
                 workflow_id=workflow_id,
                 workflow=snapshot,
-                content_signal=content_signal,
-                ui=WorkflowAgentUiDirective(active_panel="profile", start_stream=False),
+                ui=WorkflowAgentUiDirective(active_panel="source", start_stream=False),
             )
 
         if action == "apply_render_profile":
@@ -507,20 +525,13 @@ class WorkflowChatAgent:
                     status="error",
                     message="Missing render_profile.",
                 )
-
-            artifact_scope = (
-                list(context.artifact_scope)
-                if context.artifact_scope
-                else self._default_artifact_scope(render_profile)
-            )
-            await self._coordinator.lock_artifacts(workflow_id, artifact_scope)
-            snapshot = await self._coordinator.lock_render_profile(workflow_id, render_profile)
             return self._response(
-                assistant_message=self._next_step_message(snapshot),
+                assistant_message=self._confirmation_message("apply_render_profile", snapshot),
                 selected_action="apply_render_profile",
+                requires_confirmation=True,
                 workflow_id=workflow_id,
                 workflow=snapshot,
-                ui=WorkflowAgentUiDirective(active_panel="signal", start_stream=False),
+                ui=WorkflowAgentUiDirective(active_panel="profile", start_stream=False),
             )
 
         if action in {"confirm_signal", "generate_script_pack"}:
@@ -552,39 +563,13 @@ class WorkflowChatAgent:
                     status="error",
                     message=detail,
                 )
-
-            script_request = await self._coordinator.build_script_pack_request(workflow_id)
-            script_result = await self._story_agent.generate_script_pack_advanced(script_request)
-            snapshot = await self._coordinator.record_script_pack_result(workflow_id, script_result)
-            if script_result.get("status") != "success":
-                detail = str(script_result.get("message", "Script pack generation failed."))
-                return self._response(
-                    assistant_message=detail,
-                    selected_action=action,
-                    workflow_id=workflow_id,
-                    workflow=snapshot,
-                    ui=WorkflowAgentUiDirective(active_panel="script", start_stream=False),
-                    status="error",
-                    message=detail,
-                )
-
-            script_pack_raw = script_result.get("script_pack")
-            script_pack = script_pack_raw if isinstance(script_pack_raw, dict) else None
-            target_panel: WorkflowPanelName = (
-                "stream" if context.script_presentation_mode == "auto" else "script"
-            )
             return self._response(
-                assistant_message=(
-                    "Script pack generated and locked. Review it, then generate stream."
-                    if context.script_presentation_mode == "review"
-                    else "Script pack generated and locked. Next, generate stream."
-                ),
+                assistant_message=self._confirmation_message(action, snapshot),
                 selected_action=action,
+                requires_confirmation=True,
                 workflow_id=workflow_id,
                 workflow=snapshot,
-                script_pack=script_pack,
-                planner_qa_summary=script_result.get("planner_qa_summary"),
-                ui=WorkflowAgentUiDirective(active_panel=target_panel, start_stream=False),
+                ui=WorkflowAgentUiDirective(active_panel="script", start_stream=False),
             )
 
         if action == "generate_stream":
@@ -616,14 +601,13 @@ class WorkflowChatAgent:
                     status="error",
                     message=detail,
                 )
-            script_pack = await self._coordinator.get_script_pack(workflow_id)
             return self._response(
-                assistant_message="Stream gate is ready. Starting generation stream now.",
+                assistant_message=self._confirmation_message("generate_stream", snapshot),
                 selected_action="generate_stream",
+                requires_confirmation=True,
                 workflow_id=workflow_id,
                 workflow=snapshot,
-                script_pack=script_pack,
-                ui=WorkflowAgentUiDirective(active_panel="stream", start_stream=True),
+                ui=WorkflowAgentUiDirective(active_panel="stream", start_stream=False),
             )
 
         return self._response(

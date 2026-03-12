@@ -477,6 +477,7 @@ class WorkflowAgentChatResponse(BaseModel):
     status: Literal["success", "error"] = "success"
     assistant_message: str
     selected_action: WorkflowAgentAction = "respond"
+    requires_confirmation: bool = False
     workflow_id: str | None = None
     workflow: dict[str, Any] | None = None
     content_signal: dict[str, Any] | None = None
