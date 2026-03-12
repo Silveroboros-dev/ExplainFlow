@@ -14,11 +14,11 @@ import AdvancedSourcePanel from '@/components/AdvancedSourcePanel';
 import AgentActivityPanel, { AgentNote, AgentNoteType } from '@/components/AgentActivityPanel';
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import useAdvancedAgentChat from "@/hooks/useAdvancedAgentChat";
 import useAdvancedGenerationStream from "@/hooks/useAdvancedGenerationStream";
 import useAdvancedWorkflowActions from "@/hooks/useAdvancedWorkflowActions";
 import useAdvancedWorkflowSession from "@/hooks/useAdvancedWorkflowSession";
 import {
-  submitAdvancedWorkflowChat,
   uploadAdvancedSourceAssets,
   upscaleAdvancedFinalBundle,
 } from "@/lib/advanced-api";
@@ -46,30 +46,19 @@ import {
   STREAM_TYPEWRITER_DURATION_MS,
   TASTE_BAR_TILES,
   VISUAL_MODE_TILES,
-  actionInvalidatesGeneratedOutputs,
-  apiErrorMessage,
-  asPlannerQaSummary,
-  buildAdvancedSourceManifest,
-  deriveSceneCount,
   formatMilliseconds,
-  isUnknownWorkflowMessage,
-  mapArtifactScope,
   readVideoDurationMs,
-  snapshotStatusSummary,
+  selectAdvancedEvidenceMedia,
   type ActionDialogStage,
   type AdvancedPanel,
   type ChatMessage,
-  type ChatRole,
   type EvidenceViewerState,
   type ExtractedSignal,
   type PlannerQaSummary,
   type RenderProfileStep,
   type SceneViewModel,
   type ScriptPackPayload,
-  type SourceMediaViewModel,
   type UploadedSourceAsset,
-  type WorkflowAgentApiTurn,
-  type WorkflowAgentChatResponse,
   type WorkflowSnapshot,
 } from "@/lib/advanced";
 
@@ -177,20 +166,6 @@ export default function AdvancedStudio() {
     setTypedStreamPreview('');
     setStreamTypewriterArmed(true);
     setStreamTypingRunId((prev) => prev + 1);
-  };
-
-  const pushChatMessage = (role: ChatRole, text: string) => {
-    const message: ChatMessage = {
-      id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      role,
-      text,
-      timestamp: Date.now(),
-    };
-    setChatMessages((prev) => {
-      const withoutSameRole = prev.filter((item) => item.role !== role);
-      const next = [...withoutSameRole, message].sort((a, b) => a.timestamp - b.timestamp);
-      return next.slice(-2);
-    });
   };
 
   const pushAgentNote = (type: AgentNoteType, stage: string, message: string) => {
@@ -361,6 +336,42 @@ export default function AdvancedStudio() {
     pushPlannerQaNote,
   });
 
+  const {
+    handleChatSubmit,
+  } = useAdvancedAgentChat({
+    apiBase: API_BASE,
+    workflowId,
+    workflowSnapshot,
+    activePanel,
+    sourceDoc,
+    uploadedSourceAssets,
+    artifactType,
+    scriptPresentationMode,
+    scriptPack,
+    chatInput,
+    chatMessages,
+    setChatInput,
+    setChatMessages,
+    setGenerationError,
+    setWorkflowId,
+    setExtractedSignal,
+    setSignalStage,
+    setExtractProgress,
+    setScriptPack,
+    setExpectedSceneCount,
+    setActivePanel,
+    setGenerationStatus,
+    setScenes,
+    clearGeneratedOutputs,
+    fullTextBufferRef: fullTextBuffer,
+    buildRenderProfilePayload: () => buildRenderProfilePayload(),
+    updateWorkflowSnapshot,
+    resetWorkflowSession,
+    pushAgentNote,
+    pushPlannerQaNote,
+    handleGenerateStream,
+  });
+
   const removeUploadedSourceAsset = (assetId: string) => {
     setUploadedSourceAssets((prev) => prev.filter((asset) => asset.asset_id !== assetId));
   };
@@ -416,37 +427,9 @@ export default function AdvancedStudio() {
     }
   };
 
-  const selectEvidenceMedia = (scene: SceneViewModel | undefined, claimRef?: string): SourceMediaViewModel | null => {
-    if (!scene?.source_media?.length) return null;
-    const scoreMedia = (media: SourceMediaViewModel): number => {
-      let score = 0;
-      if (media.modality === 'pdf_page') score += 40;
-      if (media.modality === 'image') score += 30;
-      if (media.usage === 'region_crop') score += 20;
-      if (typeof media.page_index === 'number' && media.page_index >= 1) score += 20;
-      if (typeof media.line_start === 'number') score += 12;
-      if (typeof media.line_end === 'number') score += 4;
-      if (typeof media.matched_excerpt === 'string' && media.matched_excerpt.trim()) score += 10;
-      if (typeof media.start_ms === 'number') score += 5;
-      if (media.modality === 'audio') score -= 5;
-      if (typeof media.page_index === 'number' && media.page_index < 1) score -= 25;
-      return score;
-    };
-
-    const candidates = claimRef
-      ? scene.source_media.filter((item) => item.claim_refs.includes(claimRef))
-      : scene.source_media;
-
-    if (candidates.length === 0) {
-      return scene.source_media[0] ?? null;
-    }
-
-    return [...candidates].sort((left, right) => scoreMedia(right) - scoreMedia(left))[0] ?? null;
-  };
-
   const openEvidenceViewer = (sceneId: string, claimRef?: string) => {
     const scene = scenes[sceneId];
-    const media = selectEvidenceMedia(scene, claimRef);
+    const media = selectAdvancedEvidenceMedia(scene, claimRef);
     if (!media) {
       toast.error('No linked source proof is available for this claim yet.');
       return;
@@ -904,134 +887,6 @@ export default function AdvancedStudio() {
       closeActionDialog();
       await handleGenerateScriptPack();
     }
-  };
-
-  const handleChatCommand = async (rawInput: string) => {
-    const message = rawInput.trim();
-    if (!message) return;
-
-    const conversation: WorkflowAgentApiTurn[] = chatMessages.slice(-10).map((turn) => ({
-      role: turn.role === 'agent' ? 'agent' : turn.role === 'system' ? 'system' : 'user',
-      text: turn.text,
-    }));
-
-    try {
-      setGenerationError('');
-      const agentResult = await submitAdvancedWorkflowChat(API_BASE, {
-        message,
-        context: {
-          workflow_id: workflowId,
-          active_panel: activePanel,
-          source_text: sourceDoc,
-          source_manifest: buildAdvancedSourceManifest(uploadedSourceAssets),
-          render_profile: buildRenderProfilePayload(),
-          artifact_scope: mapArtifactScope(artifactType),
-          script_presentation_mode: scriptPresentationMode,
-        },
-        conversation,
-      });
-      const data = agentResult.data as WorkflowAgentChatResponse;
-      if (!agentResult.ok) {
-        const detail = apiErrorMessage(data, 'Agent request failed.');
-        if (isUnknownWorkflowMessage(detail)) {
-          resetWorkflowSession({ noteStage: 'Agent' });
-          return;
-        }
-        setGenerationError(detail);
-        pushAgentNote('error', 'Agent', detail);
-        return;
-      }
-      const returnedWorkflow = data.workflow && typeof data.workflow === 'object'
-        ? data.workflow as WorkflowSnapshot
-        : null;
-      const returnedWorkflowId = typeof data.workflow_id === 'string'
-        ? data.workflow_id
-        : returnedWorkflow?.workflow_id ?? null;
-      const workflowChanged = Boolean(returnedWorkflowId && returnedWorkflowId !== workflowId);
-
-      if (typeof data.workflow_id === 'string') {
-        setWorkflowId(data.workflow_id);
-      }
-      if (workflowChanged) {
-        setExtractedSignal(null);
-        setSignalStage('idle');
-        clearGeneratedOutputs();
-      }
-      if (returnedWorkflow) {
-        updateWorkflowSnapshot(returnedWorkflow);
-        if (returnedWorkflow.has_signal === false && !data.content_signal) {
-          setExtractedSignal(null);
-          setSignalStage(
-            returnedWorkflow.checkpoint_state?.CP1_SIGNAL_READY === 'failed' ? 'error' : 'idle'
-          );
-        }
-        if (returnedWorkflow.has_script_pack === false && !data.script_pack) {
-          setScriptPack(null);
-          setExpectedSceneCount(0);
-        }
-        if (
-          workflowChanged
-          || (
-            actionInvalidatesGeneratedOutputs(data.selected_action)
-            && returnedWorkflow.checkpoint_state?.CP5_STREAM_COMPLETE !== 'passed'
-          )
-        ) {
-          setScenes({});
-          fullTextBuffer.current = {};
-        }
-      }
-      if (data.content_signal && typeof data.content_signal === 'object') {
-        setExtractedSignal(data.content_signal);
-        setSignalStage('ready');
-        setExtractProgress(100);
-      }
-      let scriptPackOverride: ScriptPackPayload | null = null;
-      if (data.script_pack && typeof data.script_pack === 'object') {
-        scriptPackOverride = data.script_pack as ScriptPackPayload;
-        setScriptPack(scriptPackOverride);
-        setExpectedSceneCount(deriveSceneCount(scriptPackOverride));
-      }
-      pushPlannerQaNote(asPlannerQaSummary(data.planner_qa_summary));
-      if (data.ui?.active_panel) {
-        setActivePanel(data.ui.active_panel);
-      }
-      if (typeof data.assistant_message === 'string' && data.assistant_message.trim()) {
-        pushChatMessage('agent', data.assistant_message.trim());
-      }
-
-      const detail = typeof data.message === 'string'
-        ? data.message
-        : '';
-      if (detail) {
-        setGenerationError(detail);
-        pushAgentNote('error', 'Agent', detail);
-      } else if (
-        data.selected_action
-        && !['respond', 'open_panel', 'generate_stream'].includes(data.selected_action)
-      ) {
-        const nextStatus = snapshotStatusSummary(returnedWorkflow ?? workflowSnapshot);
-        if (nextStatus) {
-          setGenerationStatus(nextStatus);
-        }
-      }
-
-      if (data.ui?.start_stream) {
-        await handleGenerateStream(scriptPackOverride ?? scriptPack ?? null);
-      }
-    } catch (err) {
-      console.error("Agent chat error:", err);
-      setGenerationError('Unable to contact agent.');
-      pushAgentNote('error', 'Agent', 'Unable to contact agent.');
-    }
-  };
-
-  const handleChatSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const text = chatInput.trim();
-    if (!text) return;
-    pushChatMessage('user', text);
-    setChatInput('');
-    await handleChatCommand(text);
   };
 
   const handleRegenerate = handleRegenerateScene;

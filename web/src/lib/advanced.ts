@@ -741,6 +741,38 @@ export const asSourceMediaList = (value: unknown): SourceMediaViewModel[] => (
     : []
 );
 
+const scoreEvidenceMedia = (media: SourceMediaViewModel): number => {
+  let score = 0;
+  if (media.modality === "pdf_page") score += 40;
+  if (media.modality === "image") score += 30;
+  if (media.usage === "region_crop") score += 20;
+  if (typeof media.page_index === "number" && media.page_index >= 1) score += 20;
+  if (typeof media.line_start === "number") score += 12;
+  if (typeof media.line_end === "number") score += 4;
+  if (typeof media.matched_excerpt === "string" && media.matched_excerpt.trim()) score += 10;
+  if (typeof media.start_ms === "number") score += 5;
+  if (media.modality === "audio") score -= 5;
+  if (typeof media.page_index === "number" && media.page_index < 1) score -= 25;
+  return score;
+};
+
+export const selectAdvancedEvidenceMedia = (
+  scene: SceneViewModel | undefined,
+  claimRef?: string,
+): SourceMediaViewModel | null => {
+  if (!scene?.source_media?.length) return null;
+
+  const candidates = claimRef
+    ? scene.source_media.filter((item) => item.claim_refs.includes(claimRef))
+    : scene.source_media;
+
+  if (candidates.length === 0) {
+    return scene.source_media[0] ?? null;
+  }
+
+  return [...candidates].sort((left, right) => scoreEvidenceMedia(right) - scoreEvidenceMedia(left))[0] ?? null;
+};
+
 export const asUploadedSourceAsset = (value: unknown): UploadedSourceAsset | null => {
   if (!value || typeof value !== "object") return null;
   const candidate = value as Record<string, unknown>;
