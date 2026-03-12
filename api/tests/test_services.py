@@ -907,6 +907,83 @@ def test_generate_quick_video_builds_reel_if_missing_and_attaches_video() -> Non
     assert artifact.video.video_url == "http://127.0.0.1:8000/static/assets/quick_video_demo.mp4"
 
 
+def test_generate_stream_events_normalizes_short_outlines_to_four_scenes() -> None:
+    async def run() -> None:
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [],
+            "query_string": b"",
+            "client": ("testclient", 50000),
+            "server": ("testserver", 80),
+            "scheme": "http",
+        }
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        request = Request(scope, receive)
+        agent = object.__new__(GeminiStoryAgent)
+        agent.client = RoutingFakeClient(
+            outline_payload={
+                "scenes": [
+                    {
+                        "scene_id": "intro",
+                        "title": "Intro",
+                        "narration_focus": "Set up the main idea.",
+                        "visual_prompt": "A clear introductory visual.",
+                        "claim_refs": ["c1"],
+                    }
+                ]
+            }
+        )
+
+        async def fake_stream_scene_assets(**kwargs):  # noqa: ANN003
+            result_collector = kwargs["result_collector"]
+            result_collector["text"] = f"Narration for {kwargs['scene_id']}"
+            result_collector["image_url"] = f"http://example.com/{kwargs['scene_id']}.png"
+            result_collector["audio_url"] = f"http://example.com/{kwargs['scene_id']}.mp3"
+            result_collector["word_count"] = 4
+            yield build_sse_event(
+                "story_text_delta",
+                {"scene_id": kwargs["scene_id"], "delta": "Narration"},
+            )
+
+        agent._stream_scene_assets = fake_stream_scene_assets  # type: ignore[method-assign]
+
+        events: list[dict[str, str]] = []
+        async for event in agent.generate_stream_events(
+            request=request,
+            topic="Cell energy",
+            audience="Beginners",
+            tone="clear",
+            visual_mode="illustration",
+        ):
+            events.append(event)
+
+        parsed_events = [
+            (event["event"], json.loads(event["data"]))
+            for event in events
+        ]
+        queue_event = next(data for name, data in parsed_events if name == "scene_queue_ready")
+        scene_start_events = [data for name, data in parsed_events if name == "scene_start"]
+        final_bundle_event = next(data for name, data in parsed_events if name == "final_bundle_ready")
+
+        assert len(queue_event["scenes"]) == 4
+        assert queue_event["optimized_count"] == 4
+        assert queue_event["scenes"][0]["scene_id"] == "intro"
+        assert queue_event["scenes"][1]["scene_id"] == "scene-2"
+        assert queue_event["scenes"][3]["title"] == "Scene 4"
+        assert len(scene_start_events) == 4
+        assert scene_start_events[0]["claim_refs"] == ["c1"]
+        assert scene_start_events[3]["scene_id"] == "scene-4"
+        assert final_bundle_event["bundle_url"].startswith("/api/final-bundle/interleaved-run-")
+        assert "Create a 4-scene outline" in agent.client.models.prompts[0]
+
+    asyncio.run(run())
+
+
 def test_populate_quick_block_visuals_generates_images_even_for_source_backed_blocks() -> None:
     agent = GeminiStoryAgent()
     artifact = QuickArtifactSchema.model_validate(
