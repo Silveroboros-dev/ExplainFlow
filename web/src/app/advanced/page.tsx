@@ -2,6 +2,7 @@
 
 import Image from 'next/image';
 import React, { useState } from 'react';
+import AdvancedActionDialog from '@/components/AdvancedActionDialog';
 import AdvancedAssistantPanel from '@/components/AdvancedAssistantPanel';
 import AdvancedContentSignalPanel from '@/components/AdvancedContentSignalPanel';
 import AdvancedGeneratedExplainerSection from '@/components/AdvancedGeneratedExplainerSection';
@@ -11,10 +12,8 @@ import AdvancedRenderProfilePanel from '@/components/AdvancedRenderProfilePanel'
 import AdvancedScriptPackPanel from '@/components/AdvancedScriptPackPanel';
 import AdvancedSourcePanel from '@/components/AdvancedSourcePanel';
 import AgentActivityPanel, { AgentNote, AgentNoteType } from '@/components/AgentActivityPanel';
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   type LucideIcon,
   GitBranch,
@@ -3092,57 +3091,18 @@ export default function AdvancedStudio() {
         evidenceViewer={evidenceViewer}
         onClose={() => setEvidenceViewer(null)}
       />
-      <Dialog open={Boolean(actionDialogStage)} onOpenChange={(open) => { if (!open) closeActionDialog(); }}>
-        <DialogContent className="bg-white text-slate-900 border-slate-300">
-          <DialogHeader>
-            <DialogTitle>{dialogMeta?.title}</DialogTitle>
-            <DialogDescription className="text-slate-700">
-              {dialogMeta?.description}
-            </DialogDescription>
-          </DialogHeader>
-
-          {showAmendHelp && dialogMeta?.amendHelp && (
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
-              {dialogMeta.amendHelp}
-            </div>
-          )}
-
-          <DialogFooter className="gap-2">
-            {!showAmendHelp && (
-              <>
-                {dialogMeta?.amendLabel && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="border-slate-300"
-                    onClick={() => setShowAmendHelp(true)}
-                  >
-                    {dialogMeta.amendLabel}
-                  </Button>
-                )}
-                <Button type="button" onClick={() => void handleDialogContinue()} disabled={dialogContinueDisabled}>
-                  {dialogMeta?.continueLabel ?? 'Continue'}
-                </Button>
-              </>
-            )}
-
-            {showAmendHelp && (
-              <>
-                <Button type="button" variant="outline" className="border-slate-300" onClick={handleDialogGoBack}>
-                  Go Back to Amend
-                </Button>
-                <Button
-                  type="button"
-                  onClick={() => void handleDialogRelaunch()}
-                  disabled={actionDialogStage === 'script' ? isGenerating || !workflowSnapshot?.ready_for_script_pack : isExtracting}
-                >
-                  Relaunch Segment
-                </Button>
-              </>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AdvancedActionDialog
+        open={Boolean(actionDialogStage)}
+        dialogMeta={dialogMeta}
+        showAmendHelp={showAmendHelp}
+        continueDisabled={dialogContinueDisabled}
+        relaunchDisabled={actionDialogStage === 'script' ? isGenerating || !workflowSnapshot?.ready_for_script_pack : isExtracting}
+        onOpenChange={(open) => { if (!open) closeActionDialog(); }}
+        onShowAmendHelp={() => setShowAmendHelp(true)}
+        onContinue={() => void handleDialogContinue()}
+        onGoBack={handleDialogGoBack}
+        onRelaunch={() => void handleDialogRelaunch()}
+      />
       <Toaster position="top-right" richColors closeButton />
     </main>
   );
