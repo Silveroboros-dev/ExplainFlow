@@ -47,6 +47,7 @@ from app.schemas.requests import (
     WorkflowSceneRegenerateRequest,
 )
 from app.services.audio_pipeline import generate_audio_and_get_url
+from app.services.story_agent_advanced_first_scene import stream_live_advanced_scene_with_qa
 from app.services.story_agent_advanced_qa import execute_advanced_scene_qa_loop
 from app.services.story_agent_scene_prelude import build_scene_prelude_events
 from app.services.image_pipeline import (
@@ -57,7 +58,6 @@ from app.services.image_pipeline import (
 )
 from app.services.interleaved_parser import (
     append_text_part,
-    evaluate_scene_quality,
     extract_anchor_terms,
     extract_parts_from_chunk,
     extract_parts_from_response,
@@ -1993,103 +1993,38 @@ class GeminiStoryAgent:
                 ):
                     yield event
 
-                first_retries_used = 0
-                first_qa_result: dict[str, Any] = self._default_scene_qa_result(first_scene_id)
-                first_scene_result: dict[str, Any] = {}
-                first_retry_reason_constraints: list[str] = []
-
-                for attempt_index in range(2):
-                    first_scene_result = {}
-                    active_continuity = self._active_scene_continuity(
-                        continuity_memory,
-                        list(first_scene.continuity_refs),
-                    )
-                    attempt_constraints = self._build_scene_attempt_constraints(
-                        acceptance_checks=list(first_scene.acceptance_checks),
-                        retry_constraints=first_retry_reason_constraints,
-                    )
-
-                    if attempt_index > 0:
-                        yield build_sse_event(
-                            "scene_retry_reset",
-                            {
-                                "scene_id": first_scene_id,
-                                "retry_index": attempt_index,
-                                "trace": first_scene_trace_payload,
-                            },
-                        )
-
-                    async for event in self._stream_scene_assets(
-                        request=request,
-                        scene_id=first_scene_id,
-                        topic=thesis,
-                        audience=audience_descriptor,
-                        tone=goal,
-                        scene_title=first_title,
-                        narration_focus=first_scene.narration_focus,
-                        scene_goal=first_scene.scene_goal,
-                        style_guide=style_guide,
-                        visual_prompt=first_scene.visual_prompt,
-                        image_prefix="advanced_interleaved",
-                        audio_prefix="advanced_audio",
-                        artifact_type=script_pack.artifact_type,
-                        scene_mode=first_scene.scene_mode,
-                        layout_template=first_scene.layout_template,
-                        focal_subject=first_scene.focal_subject,
-                        visual_hierarchy=first_scene.visual_hierarchy,
-                        modules=first_scene.modules,
-                        claim_refs=first_scene.claim_refs,
-                        claim_text_snippets=list(first_spec.claim_text_snippets),
-                        evidence_text_snippets=list(first_spec.evidence_text_snippets),
-                        crop_safe_regions=first_scene.crop_safe_regions,
-                        continuity_hints=active_continuity,
-                        extra_constraints=attempt_constraints,
-                        result_collector=first_scene_result,
-                        trace_payload=first_scene_trace_payload,
-                    ):
-                        yield event
-
-                    first_qa_result = evaluate_scene_quality(
-                        scene=first_scene,
-                        generated_text=str(first_scene_result.get("text", "")),
-                        image_url=str(first_scene_result.get("image_url", "")),
-                        must_include=must_include,
-                        must_avoid=must_avoid,
-                        continuity_hints=active_continuity,
-                        attempt=attempt_index + 1,
-                        artifact_type=script_pack.artifact_type,
-                    )
-                    add_or_update_scene_trace(
+                first_scene_runtime: dict[str, Any] = {}
+                async for event in stream_live_advanced_scene_with_qa(
+                    stream_scene_assets=self._stream_scene_assets,
+                    build_scene_attempt_constraints=self._build_scene_attempt_constraints,
+                    default_scene_qa_result=self._default_scene_qa_result,
+                    active_scene_continuity=self._active_scene_continuity,
+                    request=request,
+                    scene=first_scene,
+                    thesis=thesis,
+                    audience_descriptor=audience_descriptor,
+                    goal=goal,
+                    style_guide=style_guide,
+                    artifact_type=script_pack.artifact_type,
+                    must_include=must_include,
+                    must_avoid=must_avoid,
+                    claim_text_snippets=list(first_spec.claim_text_snippets),
+                    evidence_text_snippets=list(first_spec.evidence_text_snippets),
+                    continuity_memory=continuity_memory,
+                    scene_trace_payload=first_scene_trace_payload,
+                    on_qa_result=lambda qa_result: add_or_update_scene_trace(
                         trace,
                         scene_id=first_scene_id,
                         scene_trace_id=first_scene_trace_id,
-                        qa_result=first_qa_result,
-                    )
-                    yield build_sse_event(
-                        "qa_status",
-                        {
-                            **first_qa_result,
-                            "trace": first_scene_trace_payload,
-                        },
-                    )
+                        qa_result=qa_result,
+                    ),
+                    result_collector=first_scene_runtime,
+                ):
+                    yield event
 
-                    if first_qa_result["status"] != "FAIL":
-                        break
-
-                    if attempt_index == 0:
-                        first_retry_reason_constraints = list(first_qa_result["reasons"])
-                        first_retries_used = 1
-                        yield build_sse_event(
-                            "qa_retry",
-                            {
-                                "scene_id": first_scene_id,
-                                "retry_index": 1,
-                                "reasons": first_qa_result["reasons"],
-                                "trace": first_scene_trace_payload,
-                            },
-                        )
-
-                first_continuity_tokens = extract_anchor_terms(str(first_scene_result.get("text", "")), limit=4)
+                first_qa_result = first_scene_runtime["qa_result"]
+                first_retries_used = int(first_scene_runtime["retries_used"])
+                first_continuity_tokens = first_scene_runtime["continuity_tokens"]
                 continuity_memory = self._update_scene_continuity_memory(
                     continuity_memory,
                     title=first_title,
@@ -2100,17 +2035,7 @@ class GeminiStoryAgent:
                     scene_id=first_scene_id,
                     scene_trace_id=first_scene_trace_id,
                     retries_used=first_retries_used,
-                    word_count=int(first_scene_result.get("word_count", 0)),
-                )
-
-                yield build_sse_event(
-                    "scene_done",
-                    {
-                        "scene_id": first_scene_id,
-                        "qa_status": first_qa_result["status"],
-                        "auto_retries": first_retries_used,
-                        "trace": first_scene_trace_payload,
-                    },
+                    word_count=int(first_scene_runtime["word_count"]),
                 )
 
             remaining_scenes = prepared_scenes[1:]
