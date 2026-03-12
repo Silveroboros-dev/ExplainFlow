@@ -2,17 +2,15 @@
 
 import Image from 'next/image';
 import React, { useState } from 'react';
+import AdvancedRenderProfilePanel from '@/components/AdvancedRenderProfilePanel';
 import AdvancedSourcePanel from '@/components/AdvancedSourcePanel';
 import SceneCard from '@/components/SceneCard';
 import FinalBundle from '@/components/FinalBundle';
 import AgentActivityPanel, { AgentNote, AgentNoteType } from '@/components/AgentActivityPanel';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -3060,331 +3058,49 @@ export default function AdvancedStudio() {
               )}
 
               {activePanel === 'profile' && (
-                <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
-                  <CardHeader>
-                    <CardTitle className="text-slate-900">2. Render Profile</CardTitle>
-                    <CardDescription className="text-slate-600">
-                      Configure output while signal extraction runs in parallel. Questions are split so each choice is deliberate.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="high-contrast-form-labels space-y-5">
-                    <Tabs value={profileStep} onValueChange={(value) => setProfileStep(value as RenderProfileStep)} className="space-y-4">
-                      <TabsList className="grid w-full grid-cols-2 md:grid-cols-4">
-                        {RENDER_PROFILE_STEPS.map((step) => (
-                          <TabsTrigger key={step} value={step}>
-                            {RENDER_PROFILE_STEP_LABELS[step]}
-                          </TabsTrigger>
-                        ))}
-                      </TabsList>
-
-                      <TabsContent value="output" className="space-y-4">
-                        <p className="text-sm text-slate-600">Question 1: What output format and visual mode should the agent optimize for?</p>
-                        <div className="space-y-3">
-                          <Label>Artifact Type</Label>
-                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                            {ARTIFACT_SELECTION_TILES.map((tile) => {
-                              const isSelected = artifactType === tile.value;
-                              const Icon = tile.icon;
-                              return (
-                                <button
-                                  key={tile.value}
-                                  type="button"
-                                  onClick={() => setArtifactType(tile.value)}
-                                  className={`${RENDER_PROFILE_TILE_CLASS} ${
-                                    tile.baseClassName
-                                  } ${isSelected ? tile.selectedClassName : RENDER_PROFILE_TILE_HOVER_CLASS}`}
-                                >
-                                  <div className="mb-4 flex items-center gap-3">
-                                    <span
-                                      className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
-                                        isSelected ? tile.selectedIconClassName : tile.iconClassName
-                                      }`}
-                                    >
-                                      <Icon className="h-5 w-5" />
-                                    </span>
-                                    <div>
-                                      <p className="font-semibold">{tile.title}</p>
-                                      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-600">
-                                        {isSelected ? 'Selected' : 'Tap to select'}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                        <div className="space-y-3">
-                          <Label>Visual Mode</Label>
-                          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-                            {VISUAL_MODE_TILES.map((tile) => {
-                              const isSelected = visualMode === tile.value;
-                              const Icon = tile.icon;
-                              return (
-                                <button
-                                  key={tile.value}
-                                  type="button"
-                                  onClick={() => setVisualMode(tile.value)}
-                                  className={`${RENDER_PROFILE_TILE_CLASS} ${
-                                    tile.baseClassName
-                                  } ${isSelected ? tile.selectedClassName : RENDER_PROFILE_TILE_HOVER_CLASS}`}
-                                >
-                                  <div className="mb-4 flex items-center gap-3">
-                                    <span
-                                      className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
-                                        isSelected ? tile.selectedIconClassName : tile.iconClassName
-                                      }`}
-                                    >
-                                      <Icon className="h-5 w-5" />
-                                    </span>
-                                    <div>
-                                      <p className="font-semibold">{tile.title}</p>
-                                      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-600">
-                                        {isSelected ? 'Selected' : 'Tap to select'}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-                          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Current Selection</p>
-                          <p className="mt-2 text-sm text-slate-700">
-                            {ARTIFACT_SELECTION_TILES.find((item) => item.value === artifactType)?.title ?? artifactType}
-                            {' · '}
-                            {VISUAL_MODE_TILES.find((item) => item.value === visualMode)?.title ?? visualMode}
-                          </p>
-                        </div>
-                      </TabsContent>
-
-                      <TabsContent value="audience" className="space-y-4">
-                        <p className="text-sm text-slate-600">Question 2: Who is this explainer for?</p>
-                        <div className="space-y-3">
-                          <Label>Audience Level</Label>
-                          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-                            {AUDIENCE_LEVEL_TILES.map((tile) => {
-                              const isSelected = audienceLevel === tile.value;
-                              const Icon = tile.icon;
-                              return (
-                                <button
-                                  key={tile.value}
-                                  type="button"
-                                  onClick={() => setAudienceLevel(tile.value)}
-                                  className={`${RENDER_PROFILE_TILE_CLASS} ${
-                                    tile.baseClassName
-                                  } ${isSelected ? tile.selectedClassName : RENDER_PROFILE_TILE_HOVER_CLASS}`}
-                                >
-                                  <div className="mb-4 flex items-center gap-3">
-                                    <span
-                                      className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
-                                        isSelected ? tile.selectedIconClassName : tile.iconClassName
-                                      }`}
-                                    >
-                                      <Icon className="h-5 w-5" />
-                                    </span>
-                                    <div>
-                                      <p className="font-semibold">{tile.title}</p>
-                                      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-600">
-                                        {isSelected ? 'Selected' : 'Tap to select'}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          <div className="space-y-2 sm:col-span-2">
-                            <Label htmlFor="audiencePersona">Audience Persona</Label>
-                            <Input
-                              id="audiencePersona"
-                              value={audiencePersona}
-                              onChange={e => setAudiencePersona(e.target.value)}
-                              placeholder="e.g. Product manager, data journalist, startup founder"
-                              className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                            />
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="domainContext">Domain Context (Optional)</Label>
-                          <Input
-                            id="domainContext"
-                            value={domainContext}
-                            onChange={e => setDomainContext(e.target.value)}
-                            placeholder="e.g. B2B SaaS roadmap decisions"
-                            className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                          />
-                        </div>
-                      </TabsContent>
-
-                      <TabsContent value="style" className="space-y-4">
-                        <p className="text-sm text-slate-600">Question 3: What quality and density should visuals and narration target?</p>
-                        <div className="space-y-3">
-                          <Label>Information Density</Label>
-                          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-                            {DENSITY_TILES.map((tile) => {
-                              const isSelected = density === tile.value;
-                              const Icon = tile.icon;
-                              return (
-                                <button
-                                  key={tile.value}
-                                  type="button"
-                                  onClick={() => setDensity(tile.value)}
-                                  className={`${RENDER_PROFILE_TILE_CLASS} ${
-                                    tile.baseClassName
-                                  } ${isSelected ? tile.selectedClassName : RENDER_PROFILE_TILE_HOVER_CLASS}`}
-                                >
-                                  <div className="mb-4 flex items-center gap-3">
-                                    <span
-                                      className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
-                                        isSelected ? tile.selectedIconClassName : tile.iconClassName
-                                      }`}
-                                    >
-                                      <Icon className="h-5 w-5" />
-                                    </span>
-                                    <div>
-                                      <p className="font-semibold">{tile.title}</p>
-                                      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-600">
-                                        {isSelected ? 'Selected' : 'Tap to select'}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                        <div className="space-y-3">
-                          <Label>Taste Bar</Label>
-                          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-                            {TASTE_BAR_TILES.map((tile) => {
-                              const isSelected = tasteBar === tile.value;
-                              const Icon = tile.icon;
-                              return (
-                                <button
-                                  key={tile.value}
-                                  type="button"
-                                  onClick={() => setTasteBar(tile.value)}
-                                  className={`${RENDER_PROFILE_TILE_CLASS} ${
-                                    tile.baseClassName
-                                  } ${isSelected ? tile.selectedClassName : RENDER_PROFILE_TILE_HOVER_CLASS}`}
-                                >
-                                  <div className="mb-4 flex items-center gap-3">
-                                    <span
-                                      className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
-                                        isSelected ? tile.selectedIconClassName : tile.iconClassName
-                                      }`}
-                                    >
-                                      <Icon className="h-5 w-5" />
-                                    </span>
-                                    <div>
-                                      <p className="font-semibold">{tile.title}</p>
-                                      <p className="text-[11px] uppercase tracking-[0.14em] text-slate-600">
-                                        {isSelected ? 'Selected' : 'Tap to select'}
-                                      </p>
-                                    </div>
-                                  </div>
-                                  <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                        <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
-                          Low-key preview is always enabled for speed. You can request a high-fidelity rerun at Final Bundle stage.
-                        </div>
-                      </TabsContent>
-
-                      <TabsContent value="constraints" className="space-y-4">
-                        <p className="text-sm text-slate-600">Question 4: What should always be included, and what must be avoided?</p>
-                        <div className="space-y-2">
-                          <Label htmlFor="mustInclude">Must Include (Optional)</Label>
-                          <Input
-                            id="mustInclude"
-                            value={mustIncludeText}
-                            onChange={e => setMustIncludeText(e.target.value)}
-                            placeholder="Comma-separated, e.g. business tradeoffs, clean hierarchy"
-                            className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label htmlFor="mustAvoid">Must Avoid (Optional)</Label>
-                          <Input
-                            id="mustAvoid"
-                            value={mustAvoidText}
-                            onChange={e => setMustAvoidText(e.target.value)}
-                            placeholder="Comma-separated, e.g. typical AI-generated gibberish, very abstract speculation"
-                            className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                          />
-                        </div>
-                      </TabsContent>
-                    </Tabs>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="w-full border-slate-300"
-                        onClick={handleProfileStepBack}
-                        disabled={!canMoveProfileBack}
-                      >
-                        Previous Question
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="w-full border-slate-300"
-                        onClick={handleProfileStepNext}
-                        disabled={!canMoveProfileNext}
-                      >
-                        {canMoveProfileNext ? 'Next Question' : 'All Questions Answered'}
-                      </Button>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                      <Button
-                        type="button"
-                        className={PRIMARY_ACTION_CARD_CLASS}
-                        onClick={handleApplyRenderProfile}
-                        disabled={isApplyingProfile || !workflowId}
-                      >
-                        <span className="flex w-full items-center justify-between gap-4">
-                          <span className="space-y-1 text-left">
-                            <span className={PRIMARY_ACTION_LABEL_CLASS}>
-                              Primary Action
-                            </span>
-                            <span className="block text-base font-semibold">
-                              {isApplyingProfile ? 'Locking Profile...' : 'Apply Render Profile'}
-                            </span>
-                          </span>
-                          {isApplyingProfile ? (
-                            <Loader2 className="h-5 w-5 animate-spin text-slate-100" />
-                          ) : null}
-                        </span>
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className={SECONDARY_ACTION_CARD_CLASS}
-                        onClick={() => setActivePanel(collapseTarget.profile)}
-                      >
-                        <span className="space-y-1 text-left">
-                          <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                            Secondary Action
-                          </span>
-                          <span className="block text-base font-semibold">Collapse Window</span>
-                        </span>
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                <AdvancedRenderProfilePanel
+                  profileStep={profileStep}
+                  renderProfileSteps={RENDER_PROFILE_STEPS}
+                  renderProfileStepLabels={RENDER_PROFILE_STEP_LABELS}
+                  artifactTiles={ARTIFACT_SELECTION_TILES}
+                  visualModeTiles={VISUAL_MODE_TILES}
+                  audienceLevelTiles={AUDIENCE_LEVEL_TILES}
+                  densityTiles={DENSITY_TILES}
+                  tasteBarTiles={TASTE_BAR_TILES}
+                  artifactType={artifactType}
+                  visualMode={visualMode}
+                  audienceLevel={audienceLevel}
+                  audiencePersona={audiencePersona}
+                  domainContext={domainContext}
+                  density={density}
+                  tasteBar={tasteBar}
+                  mustIncludeText={mustIncludeText}
+                  mustAvoidText={mustAvoidText}
+                  currentSelectionLabel={`${ARTIFACT_SELECTION_TILES.find((item) => item.value === artifactType)?.title ?? artifactType} · ${VISUAL_MODE_TILES.find((item) => item.value === visualMode)?.title ?? visualMode}`}
+                  canMoveProfileBack={canMoveProfileBack}
+                  canMoveProfileNext={canMoveProfileNext}
+                  isApplyingProfile={isApplyingProfile}
+                  applyDisabled={!workflowId}
+                  primaryActionClassName={PRIMARY_ACTION_CARD_CLASS}
+                  primaryActionLabelClassName={PRIMARY_ACTION_LABEL_CLASS}
+                  secondaryActionClassName={SECONDARY_ACTION_CARD_CLASS}
+                  tileClassName={RENDER_PROFILE_TILE_CLASS}
+                  tileHoverClassName={RENDER_PROFILE_TILE_HOVER_CLASS}
+                  onProfileStepChange={(value) => setProfileStep(value as RenderProfileStep)}
+                  onArtifactTypeChange={setArtifactType}
+                  onVisualModeChange={setVisualMode}
+                  onAudienceLevelChange={setAudienceLevel}
+                  onAudiencePersonaChange={setAudiencePersona}
+                  onDomainContextChange={setDomainContext}
+                  onDensityChange={setDensity}
+                  onTasteBarChange={setTasteBar}
+                  onMustIncludeTextChange={setMustIncludeText}
+                  onMustAvoidTextChange={setMustAvoidText}
+                  onProfileStepBack={handleProfileStepBack}
+                  onProfileStepNext={handleProfileStepNext}
+                  onApply={handleApplyRenderProfile}
+                  onCollapse={() => setActivePanel(collapseTarget.profile)}
+                />
               )}
 
               {activePanel === 'signal' && (
