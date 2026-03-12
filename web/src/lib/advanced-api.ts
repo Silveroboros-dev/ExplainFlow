@@ -236,6 +236,18 @@ export const lockAdvancedWorkflowRender = async (
   })
 );
 
+export const applyAdvancedWorkflowProfile = async (
+  apiBase: string,
+  workflowId: string,
+  artifactScope: string[],
+  renderProfile: unknown,
+): Promise<JsonApiResult<AdvancedWorkflowStatusResponse>> => (
+  postJson<AdvancedWorkflowStatusResponse>(`${apiBase}/api/workflow/${workflowId}/apply-profile`, {
+    artifact_scope: artifactScope,
+    render_profile: renderProfile,
+  })
+);
+
 export const generateAdvancedWorkflowScriptPack = async (
   apiBase: string,
   workflowId: string,

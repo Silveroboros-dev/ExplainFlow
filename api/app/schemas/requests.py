@@ -386,6 +386,11 @@ class WorkflowRenderLockRequest(BaseModel):
     render_profile: dict[str, Any] = Field(default_factory=dict)
 
 
+class WorkflowProfileApplyRequest(BaseModel):
+    artifact_scope: list[ArtifactName]
+    render_profile: dict[str, Any] = Field(default_factory=dict)
+
+
 class WorkflowStreamRequest(BaseModel):
     script_pack: dict[str, Any] | None = None
 

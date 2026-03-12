@@ -4,10 +4,9 @@ import React from "react";
 
 import { type AgentNote, type AgentNoteType } from "@/components/AgentActivityPanel";
 import {
+  applyAdvancedWorkflowProfile,
   extractAdvancedWorkflowSignal,
   generateAdvancedWorkflowScriptPack,
-  lockAdvancedWorkflowArtifacts,
-  lockAdvancedWorkflowRender,
   startAdvancedWorkflow,
 } from "@/lib/advanced-api";
 import {
@@ -265,40 +264,30 @@ export default function useAdvancedWorkflowActions({
 
     try {
       const artifactScope = mapArtifactScope(renderProfileInput.artifactType);
-      const artifactResult = await lockAdvancedWorkflowArtifacts(apiBase, workflowId, artifactScope);
-      const artifactData = artifactResult.data;
-      if (!artifactResult.ok || artifactData?.status !== "success") {
-        const detail = typeof artifactData?.detail === "string"
-          ? artifactData.detail
-          : (typeof artifactData?.message === "string" ? artifactData.message : "Artifact scope lock failed.");
-        setGenerationError(detail);
-        pushAgentNote("error", "Render Profile", detail);
-        setGenerationStatus("");
-        return null;
-      }
-      if (artifactData.workflow) {
-        updateWorkflowSnapshot(artifactData.workflow);
-      }
-
       const renderProfile = buildRenderProfilePayload();
-      const renderResult = await lockAdvancedWorkflowRender(apiBase, workflowId, renderProfile);
-      const renderData = renderResult.data;
-      if (!renderResult.ok || renderData?.status !== "success") {
-        const detail = typeof renderData?.detail === "string"
-          ? renderData.detail
-          : (typeof renderData?.message === "string" ? renderData.message : "Render profile lock failed.");
+      const profileResult = await applyAdvancedWorkflowProfile(
+        apiBase,
+        workflowId,
+        artifactScope,
+        renderProfile,
+      );
+      const profileData = profileResult.data;
+      if (!profileResult.ok || profileData?.status !== "success") {
+        const detail = typeof profileData?.detail === "string"
+          ? profileData.detail
+          : (typeof profileData?.message === "string" ? profileData.message : "Profile apply failed.");
         setGenerationError(detail);
         pushAgentNote("error", "Render Profile", detail);
         setGenerationStatus("");
         return null;
       }
 
-      const updatedWorkflow = renderData.workflow as WorkflowSnapshot | undefined;
+      const updatedWorkflow = profileData.workflow as WorkflowSnapshot | undefined;
       if (updatedWorkflow) {
         updateWorkflowSnapshot(updatedWorkflow);
       }
-      const cp3Status = typeof renderData?.workflow?.checkpoint_state?.CP3_RENDER_LOCKED === "string"
-        ? renderData.workflow.checkpoint_state.CP3_RENDER_LOCKED
+      const cp3Status = typeof profileData?.workflow?.checkpoint_state?.CP3_RENDER_LOCKED === "string"
+        ? profileData.workflow.checkpoint_state.CP3_RENDER_LOCKED
         : "";
       if (cp3Status === "passed") {
         setGenerationStatus("Render profile locked. Continue to signal confirmation and script planning.");

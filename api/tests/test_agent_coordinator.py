@@ -219,6 +219,33 @@ def test_fidelity_only_render_update_preserves_script_pack_lock() -> None:
     asyncio.run(run())
 
 
+def test_apply_profile_locks_artifacts_and_render_in_one_snapshot() -> None:
+    async def run() -> None:
+        coordinator = AgentCoordinator()
+        started = await coordinator.start_workflow("Input text")
+        workflow_id = started["workflow_id"]
+
+        await coordinator.record_signal_result(
+            workflow_id,
+            source_text="Input text",
+            result=_signal_success_result(),
+        )
+
+        snap = await coordinator.apply_profile(
+            workflow_id,
+            artifact_scope=["storyboard", "voiceover"],
+            render_profile={"visual_mode": "diagram", "density": "standard"},
+        )
+
+        assert snap["checkpoint_state"]["CP2_ARTIFACTS_LOCKED"] == "passed"
+        assert snap["checkpoint_state"]["CP3_RENDER_LOCKED"] == "passed"
+        assert snap["ready_for_script_pack"] is True
+        assert snap["artifact_scope"] == ["storyboard", "voiceover"]
+        assert snap["has_render_profile"] is True
+
+    asyncio.run(run())
+
+
 def test_source_manifest_propagates_into_script_and_stream_requests() -> None:
     async def run() -> None:
         coordinator = AgentCoordinator()

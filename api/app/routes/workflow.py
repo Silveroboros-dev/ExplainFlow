@@ -8,6 +8,7 @@ from app.schemas.requests import (
     SignalExtractionRequest,
     WorkflowArtifactLockRequest,
     WorkflowAgentChatRequest,
+    WorkflowProfileApplyRequest,
     WorkflowSceneRegenerateRequest,
     WorkflowRenderLockRequest,
     WorkflowStartRequest,
@@ -133,6 +134,23 @@ async def workflow_lock_artifacts(workflow_id: str, payload: WorkflowArtifactLoc
 async def workflow_lock_render(workflow_id: str, payload: WorkflowRenderLockRequest):
     try:
         snapshot = await coordinator.lock_render_profile(workflow_id, payload.render_profile)
+        return {
+            "status": "success",
+            "workflow_id": workflow_id,
+            "workflow": snapshot,
+        }
+    except Exception as exc:
+        raise _handle_error(exc) from exc
+
+
+@router.post("/workflow/{workflow_id}/apply-profile")
+async def workflow_apply_profile(workflow_id: str, payload: WorkflowProfileApplyRequest):
+    try:
+        snapshot = await coordinator.apply_profile(
+            workflow_id,
+            artifact_scope=payload.artifact_scope,
+            render_profile=payload.render_profile,
+        )
         return {
             "status": "success",
             "workflow_id": workflow_id,

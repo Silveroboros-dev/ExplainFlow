@@ -157,6 +157,45 @@ def test_workflow_recovery_routes_return_saved_signal_and_script_pack() -> None:
         workflow_route.coordinator = original_coordinator
 
 
+def test_workflow_apply_profile_route_locks_artifacts_and_render() -> None:
+    original_coordinator = workflow_route.coordinator
+    workflow_route.coordinator = AgentCoordinator()
+
+    try:
+        async def seed() -> str:
+            started = await workflow_route.coordinator.start_workflow("Input text")
+            workflow_id = started["workflow_id"]
+            await workflow_route.coordinator.record_signal_result(
+                workflow_id,
+                source_text="Input text",
+                result=_signal_success_result(),
+            )
+            return workflow_id
+
+        workflow_id = asyncio.run(seed())
+
+        client = TestClient(app)
+        response = client.post(
+            f"/api/workflow/{workflow_id}/apply-profile",
+            json={
+                "artifact_scope": ["storyboard", "voiceover"],
+                "render_profile": {
+                    "visual_mode": "diagram",
+                    "density": "standard",
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "success"
+        assert payload["workflow"]["checkpoint_state"]["CP2_ARTIFACTS_LOCKED"] == "passed"
+        assert payload["workflow"]["checkpoint_state"]["CP3_RENDER_LOCKED"] == "passed"
+        assert payload["workflow"]["ready_for_script_pack"] is True
+    finally:
+        workflow_route.coordinator = original_coordinator
+
+
 def test_workflow_snapshot_route_returns_clean_404_for_unknown_workflow() -> None:
     client = TestClient(app)
     response = client.get("/api/workflow/wf-missing")

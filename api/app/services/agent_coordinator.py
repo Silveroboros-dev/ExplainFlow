@@ -435,6 +435,75 @@ class AgentCoordinator:
             self._touch(state)
             return self._snapshot(state)
 
+    async def apply_profile(
+        self,
+        workflow_id: str,
+        *,
+        artifact_scope: list[ArtifactName],
+        render_profile: dict[str, Any],
+    ) -> dict[str, Any]:
+        async with self._lock:
+            state = self._states.get(workflow_id)
+            if state is None:
+                raise KeyError(f"Unknown workflow_id: {workflow_id}")
+
+            new_scope = list(dict.fromkeys(artifact_scope))
+            artifact_changed = new_scope != state.artifact_scope
+            semantic_changed = (
+                self._normalized_render_profile(render_profile)
+                != self._normalized_render_profile(state.render_profile)
+            )
+            script_inputs_changed = (
+                self._normalized_render_profile(render_profile, strip_asset_only_fields=True)
+                != self._normalized_render_profile(state.render_profile, strip_asset_only_fields=True)
+            )
+
+            state.artifact_scope = new_scope
+            state.render_profile = deepcopy(render_profile)
+
+            if artifact_changed or (semantic_changed and script_inputs_changed):
+                self._invalidate_checkpoints(
+                    state,
+                    ["CP4_SCRIPT_LOCKED", "CP5_STREAM_COMPLETE", "CP6_BUNDLE_FINALIZED"],
+                    reason="profile_apply_changed",
+                )
+                state.script_pack = None
+                state.planner_qa_summary = None
+                state.latest_run_id = None
+                state.latest_bundle_url = None
+
+            self._set_checkpoint(
+                state,
+                "CP2_ARTIFACTS_LOCKED",
+                status="passed",
+                details={"artifact_scope": new_scope},
+            )
+
+            if self._join_gate_ready(state):
+                self._set_checkpoint(
+                    state,
+                    "CP3_RENDER_LOCKED",
+                    status="passed",
+                    details={
+                        "visual_mode": str(render_profile.get("visual_mode", "illustration")),
+                        "density": str(render_profile.get("density", "standard")),
+                        "source": "profile_apply",
+                    },
+                )
+            else:
+                self._set_checkpoint(
+                    state,
+                    "CP3_RENDER_LOCKED",
+                    status="pending",
+                    details={
+                        "waiting_for": ["CP1_SIGNAL_READY", "CP2_ARTIFACTS_LOCKED"],
+                        "source": "profile_apply_queued",
+                    },
+                )
+
+            self._touch(state)
+            return self._snapshot(state)
+
     async def build_script_pack_request(self, workflow_id: str) -> ScriptPackRequest:
         async with self._lock:
             state = self._states.get(workflow_id)
