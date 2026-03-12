@@ -236,23 +236,30 @@ export default function useAdvancedWorkflowSession({
 
     try {
       const snapshot = await loadWorkflowSnapshot(workflowIdValue, { syncPanel: true });
-      if (snapshot.has_signal) {
-        try {
-          const recoveredSignal = await loadWorkflowSignal(workflowIdValue);
-          setExtractedSignal(recoveredSignal);
-        } catch (signalError) {
-          console.warn("Signal recovery error:", signalError);
-        }
+      const [signalResult, scriptPackResult] = await Promise.allSettled([
+        snapshot.has_signal
+          ? loadWorkflowSignal(workflowIdValue)
+          : Promise.resolve<ExtractedSignal | null>(null),
+        snapshot.has_script_pack
+          ? loadWorkflowScriptPack(workflowIdValue)
+          : Promise.resolve<ScriptPackPayload | null>(null),
+      ]);
+
+      if (signalResult.status === "fulfilled" && signalResult.value) {
+        setExtractedSignal(signalResult.value);
+      } else if (signalResult.status === "rejected") {
+        console.warn("Signal recovery error:", signalResult.reason);
       }
-      if (snapshot.has_script_pack) {
-        try {
-          const recoveredScriptPack = await loadWorkflowScriptPack(workflowIdValue);
-          setScriptPack(recoveredScriptPack);
-          setExpectedSceneCount(deriveSceneCount(recoveredScriptPack));
-          setScriptPackStage("ready");
-          setScriptPackProgress(100);
-        } catch (scriptPackError) {
-          console.warn("Script pack recovery error:", scriptPackError);
+
+      if (scriptPackResult.status === "fulfilled" && scriptPackResult.value) {
+        const recoveredScriptPack = scriptPackResult.value;
+        setScriptPack(recoveredScriptPack);
+        setExpectedSceneCount(deriveSceneCount(recoveredScriptPack));
+        setScriptPackStage("ready");
+        setScriptPackProgress(100);
+      } else if (snapshot.has_script_pack) {
+        if (scriptPackResult.status === "rejected") {
+          console.warn("Script pack recovery error:", scriptPackResult.reason);
         }
       } else {
         setExpectedSceneCount(0);

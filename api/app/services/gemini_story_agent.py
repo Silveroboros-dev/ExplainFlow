@@ -312,51 +312,131 @@ class GeminiStoryAgent:
         if manifest is None or not manifest.assets:
             return UploadedSourceAssets(parts=(), file_names=(), count=0)
 
-        parts: list[Any] = []
-        uploaded_file_names: list[str] = []
-        uploaded_count = 0
         modal_allowlist = allowed_modalities or {"audio", "image", "pdf_page"}
+        upload_semaphore = asyncio.Semaphore(3)
 
-        for asset in manifest.assets[:6]:
+        async def upload_asset(
+            index: int,
+            asset: SourceAssetSchema,
+        ) -> tuple[int, Any | None, str | None]:
             if asset.modality not in modal_allowlist:
-                continue
+                return index, None, None
 
             local_path = asset_path_from_reference(asset.uri)
             if local_path is None:
-                continue
+                return index, None, None
 
             try:
-                uploaded = await self.client.aio.files.upload(
-                    file=str(local_path),
-                    config=types.UploadFileConfig(
-                        display_name=asset.title or local_path.name,
-                        mime_type=asset.mime_type,
-                    ),
-                )
+                async with upload_semaphore:
+                    uploaded = await self.client.aio.files.upload(
+                        file=str(local_path),
+                        config=types.UploadFileConfig(
+                            display_name=asset.title or local_path.name,
+                            mime_type=asset.mime_type,
+                        ),
+                    )
             except Exception as exc:
                 print(f"Source upload failed for {asset.asset_id}: {exc}")
-                continue
+                return index, None, None
 
             upload_name = getattr(uploaded, "name", None)
             upload_uri = getattr(uploaded, "uri", None)
             upload_mime = getattr(uploaded, "mime_type", None) or asset.mime_type
-            if isinstance(upload_name, str) and upload_name:
-                uploaded_file_names.append(upload_name)
             if not isinstance(upload_uri, str) or not upload_uri:
-                continue
+                return index, None, None
 
-            parts.append(
-                types.Part.from_uri(
-                    file_uri=upload_uri,
-                    mime_type=upload_mime or "application/octet-stream",
-                )
+            part = types.Part.from_uri(
+                file_uri=upload_uri,
+                mime_type=upload_mime or "application/octet-stream",
             )
-            uploaded_count += 1
+            return index, part, upload_name if isinstance(upload_name, str) and upload_name else None
+
+        upload_results = await asyncio.gather(
+            *(upload_asset(index, asset) for index, asset in enumerate(manifest.assets[:6])),
+        )
+
+        parts: list[Any] = []
+        uploaded_file_names: list[str] = []
+        for _, part, upload_name in sorted(upload_results, key=lambda item: item[0]):
+            if upload_name:
+                uploaded_file_names.append(upload_name)
+            if part is not None:
+                parts.append(part)
 
         return UploadedSourceAssets(
             parts=tuple(parts),
             file_names=tuple(uploaded_file_names),
-            count=uploaded_count,
+            count=len(parts),
+        )
+
+    @staticmethod
+    async def _save_image_and_get_url_async(
+        *,
+        request: Request,
+        scene_id: str,
+        image_bytes: bytes,
+        prefix: str,
+    ) -> str:
+        return await asyncio.to_thread(
+            save_image_and_get_url,
+            request=request,
+            scene_id=scene_id,
+            image_bytes=image_bytes,
+            prefix=prefix,
+        )
+
+    @staticmethod
+    async def _compose_thumbnail_cover_and_get_url_async(
+        *,
+        request: Request,
+        scene_id: str,
+        source_url: str,
+        title: str,
+        support_text: str,
+        cue_lines: list[str],
+        prefix: str,
+    ) -> str:
+        return await asyncio.to_thread(
+            compose_thumbnail_cover_and_get_url,
+            request=request,
+            scene_id=scene_id,
+            source_url=source_url,
+            title=title,
+            support_text=support_text,
+            cue_lines=cue_lines,
+            prefix=prefix,
+        )
+
+    @staticmethod
+    async def _generate_audio_and_get_url_async(
+        *,
+        request: Request,
+        scene_id: str,
+        text: str,
+        prefix: str,
+        playback_rate: float = 1.0,
+    ) -> str:
+        return await asyncio.to_thread(
+            generate_audio_and_get_url,
+            request=request,
+            scene_id=scene_id,
+            text=text,
+            prefix=prefix,
+            playback_rate=playback_rate,
+        )
+
+    @staticmethod
+    async def _build_quick_video_async(
+        *,
+        request: Request,
+        artifact: QuickArtifactSchema,
+        source_manifest: SourceManifestSchema | dict[str, Any] | None,
+    ):
+        return await asyncio.to_thread(
+            build_quick_video,
+            request=request,
+            artifact=artifact,
+            source_manifest=source_manifest,
         )
 
     async def _build_signal_extraction_contents(
@@ -975,7 +1055,7 @@ class GeminiStoryAgent:
                         )
 
                     for image_bytes in image_parts:
-                        latest_image_url = save_image_and_get_url(
+                        latest_image_url = await self._save_image_and_get_url_async(
                             request=request,
                             scene_id=scene_id,
                             image_bytes=image_bytes,
@@ -1012,7 +1092,7 @@ class GeminiStoryAgent:
 
         if artifact_type == "slide_thumbnail" and latest_image_url and scene_title.strip():
             try:
-                composited_image_url = compose_thumbnail_cover_and_get_url(
+                composited_image_url = await self._compose_thumbnail_cover_and_get_url_async(
                     request=request,
                     scene_id=scene_id,
                     source_url=latest_image_url,
@@ -1036,7 +1116,7 @@ class GeminiStoryAgent:
                 yield build_sse_event("diagram_ready", payload)
 
         if current_scene_text.strip() and artifact_type != "slide_thumbnail":
-            audio_url = generate_audio_and_get_url(
+            audio_url = await self._generate_audio_and_get_url_async(
                 request=request,
                 scene_id=scene_id,
                 text=current_scene_text,
@@ -1938,7 +2018,7 @@ class GeminiStoryAgent:
         _, image_bytes = extract_parts_from_response(response)
         if not image_bytes:
             return ""
-        return save_image_and_get_url(
+        return await self._save_image_and_get_url_async(
             request=request,
             scene_id=f"{artifact.artifact_id}-{block.block_id}",
             image_bytes=image_bytes,
@@ -2062,7 +2142,7 @@ class GeminiStoryAgent:
         _, image_bytes = extract_parts_from_response(response)
         if not image_bytes:
             return ""
-        return save_image_and_get_url(
+        return await self._save_image_and_get_url_async(
             request=request,
             scene_id=artifact.artifact_id,
             image_bytes=image_bytes,
@@ -2208,7 +2288,7 @@ class GeminiStoryAgent:
             working_artifact = working_artifact.model_copy(update={"reel": reel})
 
         try:
-            video = build_quick_video(
+            video = await self._build_quick_video_async(
                 request=request,
                 artifact=working_artifact,
                 source_manifest=payload.source_manifest,
@@ -3411,14 +3491,14 @@ class GeminiStoryAgent:
 
             image_url = ""
             if image_bytes:
-                image_url = save_image_and_get_url(
+                image_url = await self._save_image_and_get_url_async(
                     request=request,
                     scene_id=scene_id,
                     image_bytes=image_bytes,
                     prefix="regen",
                 )
 
-            audio_url = generate_audio_and_get_url(
+            audio_url = await self._generate_audio_and_get_url_async(
                 request=request,
                 scene_id=scene_id,
                 text=updated_text,

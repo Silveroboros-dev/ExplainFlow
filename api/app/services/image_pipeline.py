@@ -3,6 +3,7 @@ from io import BytesIO
 from pathlib import Path
 import re
 import os
+from threading import Lock
 from urllib.parse import urlparse
 
 from fastapi import Request
@@ -10,6 +11,10 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
 from google.cloud import storage
 
 from app.config import ASSET_DIR, BUCKET_NAME
+
+
+_STORAGE_BUCKET: storage.Bucket | None = None
+_STORAGE_BUCKET_LOCK = Lock()
 
 
 def base_url(request: Request) -> str:
@@ -82,6 +87,21 @@ def public_asset_url(request: Request, asset_uri: str | None) -> str:
     return candidate
 
 
+def _get_storage_bucket() -> storage.Bucket | None:
+    global _STORAGE_BUCKET
+
+    if not BUCKET_NAME:
+        return None
+    if _STORAGE_BUCKET is not None:
+        return _STORAGE_BUCKET
+
+    with _STORAGE_BUCKET_LOCK:
+        if _STORAGE_BUCKET is None:
+            storage_client = storage.Client()
+            _STORAGE_BUCKET = storage_client.bucket(BUCKET_NAME)
+    return _STORAGE_BUCKET
+
+
 def save_image_and_get_url(request: Request, scene_id: str, image_bytes: bytes, prefix: str) -> str:
     ts = int(time.time() * 1000)
     img_filename = f"{prefix}_{scene_id}_{ts}.png"
@@ -93,8 +113,9 @@ def save_image_and_get_url(request: Request, scene_id: str, image_bytes: bytes, 
     # If GCS bucket is configured, upload and return GCS URL
     if BUCKET_NAME:
         try:
-            storage_client = storage.Client()
-            bucket = storage_client.bucket(BUCKET_NAME)
+            bucket = _get_storage_bucket()
+            if bucket is None:
+                raise RuntimeError("Storage bucket is unavailable.")
             blob = bucket.blob(img_filename)
             blob.upload_from_string(image_bytes, content_type="image/png")
             return f"https://storage.googleapis.com/{BUCKET_NAME}/{img_filename}"
