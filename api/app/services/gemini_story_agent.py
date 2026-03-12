@@ -47,7 +47,7 @@ from app.schemas.requests import (
     WorkflowSceneRegenerateRequest,
 )
 from app.services.audio_pipeline import generate_audio_and_get_url
-from app.services.story_agent_buffered_scene import execute_buffered_scene_pass
+from app.services.story_agent_advanced_qa import execute_advanced_scene_qa_loop
 from app.services.story_agent_scene_prelude import build_scene_prelude_events
 from app.services.image_pipeline import (
     asset_path_from_reference,
@@ -1247,104 +1247,30 @@ class GeminiStoryAgent:
             )
         )
 
-        retries_used = 0
-        qa_result: dict[str, Any] = {
-            **self._default_scene_qa_result(scene_id),
-        }
-        latest_pass = None
-        retry_constraints = list(retry_reason_constraints or [])
-        override_constraints = list(extra_constraints or [])
-
-        for attempt_index in range(2):
-            attempt_constraints = self._build_scene_attempt_constraints(
-                acceptance_checks=list(scene.acceptance_checks),
-                override_constraints=override_constraints,
-                retry_constraints=retry_constraints,
-            )
-
-            prelude_events: list[dict[str, str]] = []
-            if attempt_index > 0:
-                prelude_events.append(
-                    build_sse_event(
-                        "scene_retry_reset",
-                        {
-                            "scene_id": scene_id,
-                            "retry_index": attempt_index,
-                            "trace": scene_trace_payload,
-                        },
-                    )
-                )
-
-            latest_pass = await execute_buffered_scene_pass(
-                stream_scene_assets=self._stream_scene_assets,
-                request=request,
-                prelude_events=prelude_events,
-                stream_kwargs={
-                    "scene_id": scene_id,
-                    "topic": thesis,
-                    "audience": audience_descriptor,
-                    "tone": goal,
-                    "scene_title": scene.title,
-                    "narration_focus": scene.narration_focus,
-                    "scene_goal": scene.scene_goal,
-                    "style_guide": style_guide,
-                    "visual_prompt": scene.visual_prompt,
-                    "image_prefix": "advanced_interleaved",
-                    "audio_prefix": "advanced_audio",
-                    "artifact_type": script_pack.artifact_type,
-                    "scene_mode": scene.scene_mode,
-                    "layout_template": scene.layout_template,
-                    "focal_subject": scene.focal_subject,
-                    "visual_hierarchy": scene.visual_hierarchy,
-                    "modules": scene.modules,
-                    "claim_refs": scene.claim_refs,
-                    "claim_text_snippets": claim_text_snippets,
-                    "evidence_text_snippets": evidence_text_snippets,
-                    "crop_safe_regions": scene.crop_safe_regions,
-                    "continuity_hints": active_continuity,
-                    "extra_constraints": attempt_constraints,
-                    "trace_payload": scene_trace_payload,
-                },
-            )
-            events.extend(latest_pass.events)
-
-            qa_result = evaluate_scene_quality(
-                scene=scene,
-                generated_text=latest_pass.text,
-                image_url=latest_pass.image_url,
-                must_include=must_include,
-                must_avoid=must_avoid,
-                continuity_hints=active_continuity,
-                attempt=attempt_index + 1,
-                artifact_type=script_pack.artifact_type,
-            )
-            events.append(
-                build_sse_event(
-                    "qa_status",
-                    {
-                        **qa_result,
-                        "trace": scene_trace_payload,
-                    },
-                )
-            )
-
-            if qa_result["status"] != "FAIL":
-                break
-
-            if attempt_index == 0:
-                retry_constraints = list(qa_result["reasons"])
-                retries_used = 1
-                events.append(
-                    build_sse_event(
-                        "qa_retry",
-                        {
-                            "scene_id": scene_id,
-                            "retry_index": 1,
-                            "reasons": qa_result["reasons"],
-                            "trace": scene_trace_payload,
-                        },
-                    )
-                )
+        qa_loop_result = await execute_advanced_scene_qa_loop(
+            stream_scene_assets=self._stream_scene_assets,
+            build_scene_attempt_constraints=self._build_scene_attempt_constraints,
+            default_scene_qa_result=self._default_scene_qa_result,
+            request=request,
+            scene=scene,
+            thesis=thesis,
+            audience_descriptor=audience_descriptor,
+            goal=goal,
+            style_guide=style_guide,
+            script_pack=script_pack,
+            must_include=must_include,
+            must_avoid=must_avoid,
+            claim_text_snippets=claim_text_snippets,
+            evidence_text_snippets=evidence_text_snippets,
+            active_continuity=active_continuity,
+            scene_trace_payload=scene_trace_payload,
+            retry_reason_constraints=retry_reason_constraints,
+            extra_constraints=extra_constraints,
+        )
+        events.extend(qa_loop_result.events)
+        qa_result = qa_loop_result.qa_result
+        retries_used = qa_loop_result.retries_used
+        latest_pass = qa_loop_result.latest_pass
 
         events.append(
             build_sse_event(
