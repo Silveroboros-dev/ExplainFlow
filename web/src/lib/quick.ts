@@ -1,3 +1,103 @@
+import { Blend, Blocks, GalleryVerticalEnd, GraduationCap, LayoutGrid, Sparkles, UserRound, type LucideIcon } from "lucide-react";
+
+export type QuickTile = {
+  value: string;
+  title: string;
+  description: string;
+  icon: LucideIcon;
+  baseClassName: string;
+  selectedClassName: string;
+  iconClassName: string;
+  selectedIconClassName: string;
+};
+
+export const QUICK_AUDIENCE_TILES: QuickTile[] = [
+  {
+    value: 'Beginner',
+    title: 'Beginner',
+    description: 'Simple language and bigger conceptual steps.',
+    icon: GraduationCap,
+    baseClassName: 'border-sky-100 bg-sky-50/85 text-sky-950',
+    selectedClassName: 'border-sky-300 bg-sky-100 shadow-[0_14px_28px_rgba(14,165,233,0.14)]',
+    iconClassName: 'bg-white/80 text-sky-700',
+    selectedIconClassName: 'bg-sky-700 text-white',
+  },
+  {
+    value: 'Intermediate',
+    title: 'Intermediate',
+    description: 'Balanced clarity for informed general audiences.',
+    icon: LayoutGrid,
+    baseClassName: 'border-indigo-100 bg-indigo-50/85 text-indigo-950',
+    selectedClassName: 'border-indigo-300 bg-indigo-100 shadow-[0_14px_28px_rgba(99,102,241,0.14)]',
+    iconClassName: 'bg-white/80 text-indigo-700',
+    selectedIconClassName: 'bg-indigo-700 text-white',
+  },
+  {
+    value: 'Expert',
+    title: 'Expert',
+    description: 'Denser framing with more technical compression.',
+    icon: Blocks,
+    baseClassName: 'border-slate-200 bg-slate-50/95 text-slate-950',
+    selectedClassName: 'border-slate-400 bg-slate-100 shadow-[0_14px_28px_rgba(15,23,42,0.12)]',
+    iconClassName: 'bg-white/80 text-slate-700',
+    selectedIconClassName: 'bg-slate-800 text-white',
+  },
+  {
+    value: 'Other',
+    title: 'Custom',
+    description: 'Specify your own audience profile.',
+    icon: UserRound,
+    baseClassName: 'border-amber-100 bg-amber-50/85 text-amber-950',
+    selectedClassName: 'border-amber-300 bg-amber-100 shadow-[0_14px_28px_rgba(245,158,11,0.14)]',
+    iconClassName: 'bg-white/80 text-amber-700',
+    selectedIconClassName: 'bg-amber-700 text-white',
+  },
+];
+
+export const QUICK_VISUAL_TILES: QuickTile[] = [
+  {
+    value: 'illustration',
+    title: 'Illustration',
+    description: 'More cinematic framing and expressive imagery.',
+    icon: Sparkles,
+    baseClassName: 'border-fuchsia-100 bg-fuchsia-50/85 text-fuchsia-950',
+    selectedClassName: 'border-fuchsia-300 bg-fuchsia-100 shadow-[0_14px_28px_rgba(217,70,239,0.14)]',
+    iconClassName: 'bg-white/80 text-fuchsia-700',
+    selectedIconClassName: 'bg-fuchsia-700 text-white',
+  },
+  {
+    value: 'diagram',
+    title: 'Diagram',
+    description: 'Cleaner vectors and schematic explanation.',
+    icon: GalleryVerticalEnd,
+    baseClassName: 'border-emerald-100 bg-emerald-50/85 text-emerald-950',
+    selectedClassName: 'border-emerald-300 bg-emerald-100 shadow-[0_14px_28px_rgba(16,185,129,0.14)]',
+    iconClassName: 'bg-white/80 text-emerald-700',
+    selectedIconClassName: 'bg-emerald-700 text-white',
+  },
+  {
+    value: 'hybrid',
+    title: 'Hybrid',
+    description: 'Blend structured UI cues with illustration polish.',
+    icon: Blend,
+    baseClassName: 'border-violet-100 bg-violet-50/85 text-violet-950',
+    selectedClassName: 'border-violet-300 bg-violet-100 shadow-[0_14px_28px_rgba(139,92,246,0.14)]',
+    iconClassName: 'bg-white/80 text-violet-700',
+    selectedIconClassName: 'bg-violet-700 text-white',
+  },
+];
+
+export const QUICK_TONE_PRESETS = [
+  'Practical',
+  'Clear',
+  'Executive',
+  'Cinematic',
+  'Playful',
+];
+
+export const QUICK_PRIMARY_ACTION_CARD_CLASS = "group h-auto w-full rounded-[24px] bg-slate-950 px-5 py-4 text-left text-white shadow-[0_18px_36px_rgba(15,23,42,0.18)] transition-transform hover:-translate-y-0.5 hover:bg-slate-900 disabled:opacity-100 disabled:bg-slate-300 disabled:text-slate-500 disabled:hover:translate-y-0";
+export const QUICK_PRIMARY_ACTION_LABEL_CLASS = "block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300 transition-colors group-disabled:text-slate-600";
+
 export type QuickArtifactBlock = {
   block_id: string;
   label: string;

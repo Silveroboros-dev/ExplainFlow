@@ -5,144 +5,29 @@ import React, { useEffect, useRef, useState } from 'react';
 import AgentActivityPanel, { AgentNote, AgentNoteType } from '@/components/AgentActivityPanel';
 import QuickArtifactView from '@/components/QuickArtifactView';
 import QuickArtifactSummary from '@/components/QuickArtifactSummary';
+import QuickSourceForm from '@/components/QuickSourceForm';
 import ProofPlaylistPlayer, { type ProofPlaylistSegment } from '@/components/ProofPlaylistPlayer';
 import QuickReelView from '@/components/QuickReelView';
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import {
-  type LucideIcon,
-  Blend,
-  Blocks,
   Bot,
-  Clapperboard,
-  GalleryVerticalEnd,
-  GraduationCap,
-  LayoutGrid,
   Loader2,
-  Mic,
-  PlayCircle,
-  Sparkles,
-  Square,
-  UserRound,
-  Upload,
   Wand2,
 } from "lucide-react";
 import {
   type PlaylistPresentationMode,
   type QuickArtifact,
   type QuickArtifactBlock,
-  type QuickReel,
   type QuickReelSegment,
   type QuickSourceMedia,
-  type QuickVideo,
   type UploadedQuickSourceAsset,
   formatMilliseconds,
   formatTimeRangeLabel,
 } from "@/lib/quick";
 import { Toaster, toast } from "sonner";
 
-type QuickTile = {
-  value: string;
-  title: string;
-  description: string;
-  icon: LucideIcon;
-  baseClassName: string;
-  selectedClassName: string;
-  iconClassName: string;
-  selectedIconClassName: string;
-};
-
-const QUICK_AUDIENCE_TILES: QuickTile[] = [
-  {
-    value: 'Beginner',
-    title: 'Beginner',
-    description: 'Simple language and bigger conceptual steps.',
-    icon: GraduationCap,
-    baseClassName: 'border-sky-100 bg-sky-50/85 text-sky-950',
-    selectedClassName: 'border-sky-300 bg-sky-100 shadow-[0_14px_28px_rgba(14,165,233,0.14)]',
-    iconClassName: 'bg-white/80 text-sky-700',
-    selectedIconClassName: 'bg-sky-700 text-white',
-  },
-  {
-    value: 'Intermediate',
-    title: 'Intermediate',
-    description: 'Balanced clarity for informed general audiences.',
-    icon: LayoutGrid,
-    baseClassName: 'border-indigo-100 bg-indigo-50/85 text-indigo-950',
-    selectedClassName: 'border-indigo-300 bg-indigo-100 shadow-[0_14px_28px_rgba(99,102,241,0.14)]',
-    iconClassName: 'bg-white/80 text-indigo-700',
-    selectedIconClassName: 'bg-indigo-700 text-white',
-  },
-  {
-    value: 'Expert',
-    title: 'Expert',
-    description: 'Denser framing with more technical compression.',
-    icon: Blocks,
-    baseClassName: 'border-slate-200 bg-slate-50/95 text-slate-950',
-    selectedClassName: 'border-slate-400 bg-slate-100 shadow-[0_14px_28px_rgba(15,23,42,0.12)]',
-    iconClassName: 'bg-white/80 text-slate-700',
-    selectedIconClassName: 'bg-slate-800 text-white',
-  },
-  {
-    value: 'Other',
-    title: 'Custom',
-    description: 'Specify your own audience profile.',
-    icon: UserRound,
-    baseClassName: 'border-amber-100 bg-amber-50/85 text-amber-950',
-    selectedClassName: 'border-amber-300 bg-amber-100 shadow-[0_14px_28px_rgba(245,158,11,0.14)]',
-    iconClassName: 'bg-white/80 text-amber-700',
-    selectedIconClassName: 'bg-amber-700 text-white',
-  },
-];
-
-const QUICK_VISUAL_TILES: QuickTile[] = [
-  {
-    value: 'illustration',
-    title: 'Illustration',
-    description: 'More cinematic framing and expressive imagery.',
-    icon: Sparkles,
-    baseClassName: 'border-fuchsia-100 bg-fuchsia-50/85 text-fuchsia-950',
-    selectedClassName: 'border-fuchsia-300 bg-fuchsia-100 shadow-[0_14px_28px_rgba(217,70,239,0.14)]',
-    iconClassName: 'bg-white/80 text-fuchsia-700',
-    selectedIconClassName: 'bg-fuchsia-700 text-white',
-  },
-  {
-    value: 'diagram',
-    title: 'Diagram',
-    description: 'Cleaner vectors and schematic explanation.',
-    icon: GalleryVerticalEnd,
-    baseClassName: 'border-emerald-100 bg-emerald-50/85 text-emerald-950',
-    selectedClassName: 'border-emerald-300 bg-emerald-100 shadow-[0_14px_28px_rgba(16,185,129,0.14)]',
-    iconClassName: 'bg-white/80 text-emerald-700',
-    selectedIconClassName: 'bg-emerald-700 text-white',
-  },
-  {
-    value: 'hybrid',
-    title: 'Hybrid',
-    description: 'Blend structured UI cues with illustration polish.',
-    icon: Blend,
-    baseClassName: 'border-violet-100 bg-violet-50/85 text-violet-950',
-    selectedClassName: 'border-violet-300 bg-violet-100 shadow-[0_14px_28px_rgba(139,92,246,0.14)]',
-    iconClassName: 'bg-white/80 text-violet-700',
-    selectedIconClassName: 'bg-violet-700 text-white',
-  },
-];
-
-const QUICK_TONE_PRESETS = [
-  'Practical',
-  'Clear',
-  'Executive',
-  'Cinematic',
-  'Playful',
-];
-
-const QUICK_PRIMARY_ACTION_CARD_CLASS = "group h-auto w-full rounded-[24px] bg-slate-950 px-5 py-4 text-left text-white shadow-[0_18px_36px_rgba(15,23,42,0.18)] transition-transform hover:-translate-y-0.5 hover:bg-slate-900 disabled:opacity-100 disabled:bg-slate-300 disabled:text-slate-500 disabled:hover:translate-y-0";
-const QUICK_PRIMARY_ACTION_LABEL_CLASS = "block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300 transition-colors group-disabled:text-slate-600";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 type BrowserSpeechResult = {
@@ -1172,376 +1057,43 @@ export default function QuickGenerate() {
           <p className="text-lg text-slate-200/95 drop-shadow-[0_1px_8px_rgba(2,6,23,0.6)]">Live Interleaved Generative Storyteller</p>
         </div>
 
-        <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
-          <CardHeader>
-            <CardTitle className="text-slate-900">Quick Generate</CardTitle>
-            <CardDescription className="text-slate-600">Enter a topic and style to generate a complete visual explainer instantly.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleGenerate} className="high-contrast-form-labels grid grid-cols-1 md:grid-cols-2 gap-6">
-              
-              <div className="space-y-2 md:col-span-2">
-                <div className="flex items-center justify-between gap-3">
-                  <Label htmlFor="topic">Prompt</Label>
-                  <Button
-                    type="button"
-                    variant={isListening ? "default" : "outline"}
-                    size="sm"
-                    onClick={toggleVoiceInput}
-                    className="shrink-0"
-                  >
-                    {isListening ? (
-                      <>
-                        <Square className="mr-2 h-4 w-4" />
-                        Stop Listening
-                      </>
-                    ) : (
-                      <>
-                        <Mic className="mr-2 h-4 w-4" />
-                        Voice Prompt
-                      </>
-                    )}
-                  </Button>
-                </div>
-                <Input
-                  id="topic"
-                  value={topic}
-                  onChange={e => setTopic(e.target.value)}
-                  placeholder="Create visuals that explain [topic/problem] for [audience], tone [tone]."
-                  required
-                  className="text-lg bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                />
-                <p className="text-xs text-slate-600">
-                  Example: &quot;Create visuals explaining model context protocols for PMs, tone practical and clear.&quot;
-                </p>
-                {speechError && (
-                  <p className="text-xs text-rose-600 font-medium">{speechError}</p>
-                )}
-              </div>
-
-              <div className="space-y-4 md:col-span-2 rounded-[28px] border border-slate-200 bg-slate-50/90 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="flex items-start gap-3">
-                    <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-slate-700 shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
-                      <Clapperboard className="h-5 w-5" />
-                    </span>
-                    <div className="space-y-1">
-                      <Label className="text-sm font-semibold text-slate-900">Source Video or YouTube URL (Optional)</Label>
-                      <p className="max-w-2xl text-sm leading-6 text-slate-600">
-                        Quick can index an uploaded clip or a YouTube URL, use transcript/captions as the truth layer, and reuse clip-backed proof inside the HTML artifact.
-                      </p>
-                    </div>
-                  </div>
-                  <input
-                    ref={sourceFileInputRef}
-                    type="file"
-                    accept="video/*"
-                    className="hidden"
-                    onChange={handleVideoAssetUpload}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="rounded-full"
-                    onClick={() => sourceFileInputRef.current?.click()}
-                    disabled={isUploadingSource}
-                  >
-                    {isUploadingSource ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Upload className="mr-2 h-4 w-4" />
-                    )}
-                    {uploadedVideoAsset ? 'Replace Video' : 'Upload Video'}
-                  </Button>
-                </div>
-
-                <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-                  <div className="space-y-2">
-                    <Label htmlFor="sourceVideoUrl">YouTube URL</Label>
-                    <div className="flex gap-3">
-                      <Input
-                        id="sourceVideoUrl"
-                        value={sourceVideoUrl}
-                        onChange={(event) => {
-                          setSourceVideoUrl(event.target.value);
-                          clearIndexedSource();
-                        }}
-                        placeholder="https://www.youtube.com/watch?v=..."
-                        className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                      />
-                      {sourceVideoUrl.trim() ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="shrink-0 rounded-full"
-                          onClick={removeYoutubeSource}
-                        >
-                          Clear
-                        </Button>
-                      ) : null}
-                    </div>
-                    <p className="text-xs leading-5 text-slate-600">
-                      First version: YouTube URLs work only with pasted transcript or subtitles. ExplainFlow does not download the video.
-                    </p>
-                    <Label htmlFor="sourceTranscript">Transcript or Captions</Label>
-                    <Textarea
-                      id="sourceTranscript"
-                      value={sourceTranscript}
-                      onChange={(event) => {
-                        setSourceTranscript(event.target.value);
-                        clearIndexedSource();
-                      }}
-                      placeholder="Paste transcript or captions here. Required for YouTube URLs and for videos longer than 2 minutes."
-                      className="min-h-[148px] bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                    />
-                    <p className="text-xs leading-5 text-slate-600">
-                      ExplainFlow uses transcript text as the main truth layer, then consults video frames only for “this chart,” “as you can see,” clip-worthy moments, and proof playback.
-                    </p>
-                  </div>
-
-                  <div className="space-y-3 rounded-[24px] border border-slate-200 bg-white p-4">
-                    <div className="flex items-center gap-3">
-                      <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                        <PlayCircle className="h-5 w-5" />
-                      </span>
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">Video Constraints</p>
-                        <p className="text-xs uppercase tracking-[0.14em] text-slate-500">Quick v1</p>
-                      </div>
-                    </div>
-                    <div className="space-y-2 text-sm leading-6 text-slate-600">
-                      <p>Uploaded videos up to 2 minutes work without transcript.</p>
-                      <p>Uploaded videos up to 10 minutes require transcript or captions.</p>
-                      <p>YouTube URLs require transcript or subtitles and stay transcript-first.</p>
-                    </div>
-                    {youtubeSourceAsset ? (
-                      <div className="space-y-3 rounded-[20px] border border-slate-200 bg-slate-50 p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                YouTube
-                              </span>
-                            </div>
-                            <p className="text-sm font-medium text-slate-900">{youtubeSourceAsset.title || 'YouTube source'}</p>
-                          </div>
-                        </div>
-                        {youtubeSourceAsset.embed_url ? (
-                          <iframe
-                            title="YouTube source preview"
-                            src={youtubeSourceAsset.embed_url}
-                            className="h-[220px] w-full rounded-2xl border border-slate-200 bg-slate-950"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                            allowFullScreen
-                          />
-                        ) : null}
-                      </div>
-                    ) : uploadedVideoAsset ? (
-                      <div className="space-y-3 rounded-[20px] border border-slate-200 bg-slate-50 p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                Video
-                              </span>
-                              {uploadedVideoAsset.duration_ms ? (
-                                <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                  {formatMilliseconds(uploadedVideoAsset.duration_ms)}
-                                </span>
-                              ) : null}
-                            </div>
-                            <p className="text-sm font-medium text-slate-900">{uploadedVideoAsset.title || 'Uploaded video'}</p>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="rounded-full text-slate-500"
-                            onClick={removeUploadedVideoAsset}
-                          >
-                            Remove
-                          </Button>
-                        </div>
-                        <video
-                          controls
-                          preload="metadata"
-                          className="w-full rounded-2xl border border-slate-200 bg-slate-950"
-                          src={uploadedVideoAsset.uri}
-                        />
-                      </div>
-                    ) : (
-                      <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">
-                        No source video attached yet. Quick will still work from the prompt alone, or from a YouTube URL plus transcript.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3 md:col-span-2">
-                <Label>Target Audience</Label>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  {QUICK_AUDIENCE_TILES.map((tile) => {
-                    const isSelected = audience === tile.value;
-                    const Icon = tile.icon;
-                    return (
-                      <button
-                        key={tile.value}
-                        type="button"
-                        onClick={() => setAudience(tile.value)}
-                        className={`rounded-[24px] border p-4 text-left transition-all duration-200 ${
-                          tile.baseClassName
-                        } ${isSelected ? tile.selectedClassName : 'hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]'}`}
-                      >
-                        <div className="mb-4 flex items-center gap-3">
-                          <span
-                            className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
-                              isSelected ? tile.selectedIconClassName : tile.iconClassName
-                            }`}
-                          >
-                            <Icon className="h-5 w-5" />
-                          </span>
-                          <div>
-                            <p className="font-semibold">{tile.title}</p>
-                            <p className="text-[11px] uppercase tracking-[0.14em] text-slate-600">
-                              {isSelected ? 'Selected' : 'Tap to select'}
-                            </p>
-                          </div>
-                        </div>
-                        <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {audience === 'Other' && (
-                <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="customAudience">Specify Audience</Label>
-                  <Input 
-                    id="customAudience" 
-                    value={customAudience} 
-                    onChange={e => setCustomAudience(e.target.value)} 
-                    placeholder="e.g. 5-year old children, investors..." 
-                    required 
-                    className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                  />
-                </div>
-              )}
-
-              <div className="space-y-3 md:col-span-2">
-                <Label>Visual Style</Label>
-                <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-                  {QUICK_VISUAL_TILES.map((tile) => {
-                    const isSelected = visualMode === tile.value;
-                    const Icon = tile.icon;
-                    return (
-                      <button
-                        key={tile.value}
-                        type="button"
-                        onClick={() => setVisualMode(tile.value)}
-                        className={`rounded-[24px] border p-4 text-left transition-all duration-200 ${
-                          tile.baseClassName
-                        } ${isSelected ? tile.selectedClassName : 'hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]'}`}
-                      >
-                        <div className="mb-4 flex items-center gap-3">
-                          <span
-                            className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
-                              isSelected ? tile.selectedIconClassName : tile.iconClassName
-                            }`}
-                          >
-                            <Icon className="h-5 w-5" />
-                          </span>
-                          <div>
-                            <p className="font-semibold">{tile.title}</p>
-                            <p className="text-[11px] uppercase tracking-[0.14em] text-slate-600">
-                              {isSelected ? 'Selected' : 'Tap to select'}
-                            </p>
-                          </div>
-                        </div>
-                        <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="tone">Tone of Voice (Optional)</Label>
-                <Input 
-                  id="tone" 
-                  value={tone} 
-                  onChange={e => setTone(e.target.value)} 
-                  placeholder="e.g. Engaging, Professional, Humorous" 
-                  className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                />
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {QUICK_TONE_PRESETS.map((preset) => {
-                    const isSelected = tone.trim().toLowerCase() === preset.toLowerCase();
-                    return (
-                      <button
-                        key={preset}
-                        type="button"
-                        onClick={() => setTone(preset)}
-                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] transition-colors ${
-                          isSelected
-                            ? 'border-slate-900 bg-slate-900 text-white'
-                            : 'border-slate-300 bg-slate-50 text-slate-700 hover:border-slate-400 hover:bg-slate-100'
-                        }`}
-                      >
-                        {preset}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="md:col-span-2 pt-4">
-                <Button
-                  type="submit"
-                  className={QUICK_PRIMARY_ACTION_CARD_CLASS}
-                  disabled={isGenerating || isUploadingSource}
-                  size="lg"
-                >
-                  <span className="flex w-full items-center justify-between gap-4">
-                    <span className="space-y-1 text-left">
-                      <span className={QUICK_PRIMARY_ACTION_LABEL_CLASS}>
-                        Primary Action
-                      </span>
-                      <span className="block text-base font-semibold">
-                        {isGenerating ? 'Generating Quick Artifact...' : 'Generate Quick Artifact'}
-                      </span>
-                    </span>
-                    {isGenerating ? (
-                      <Loader2 className="h-5 w-5 animate-spin text-slate-100" />
-                    ) : null}
-                  </span>
-                </Button>
-              </div>
-
-              {(generationStatus || generationError || isGenerating) && (
-                <div className="md:col-span-2 space-y-2">
-                  {generationStatus && (
-                    <p className="text-sm text-blue-700 font-medium">{generationStatus}</p>
-                  )}
-                  {isGenerating && (
-                    <div className="flex items-center gap-2 text-xs text-slate-600">
-                      <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
-                      <span>
-                        {activeSourceAsset
-                          ? `Indexing transcript-backed ${activeSourceAsset.provider === 'youtube' ? 'YouTube' : 'video'} context, then building lightweight artifact blocks.`
-                          : 'Generating lightweight artifact blocks for immediate rendering.'}
-                      </span>
-                    </div>
-                  )}
-                  {generationError && (
-                    <p className="text-sm text-rose-600 font-medium">{generationError}</p>
-                  )}
-                </div>
-              )}
-            </form>
-          </CardContent>
-        </Card>
+        <QuickSourceForm
+          topic={topic}
+          audience={audience}
+          customAudience={customAudience}
+          visualMode={visualMode}
+          tone={tone}
+          sourceVideoUrl={sourceVideoUrl}
+          sourceTranscript={sourceTranscript}
+          speechError={speechError}
+          isListening={isListening}
+          isUploadingSource={isUploadingSource}
+          isGenerating={isGenerating}
+          generationStatus={generationStatus}
+          generationError={generationError}
+          uploadedVideoAsset={uploadedVideoAsset}
+          youtubeSourceAsset={youtubeSourceAsset}
+          activeSourceAsset={activeSourceAsset}
+          sourceFileInputRef={sourceFileInputRef}
+          onSubmit={handleGenerate}
+          onToggleVoiceInput={toggleVoiceInput}
+          onTopicChange={setTopic}
+          onAudienceChange={setAudience}
+          onCustomAudienceChange={setCustomAudience}
+          onVisualModeChange={setVisualMode}
+          onToneChange={setTone}
+          onSourceVideoUrlChange={(value) => {
+            setSourceVideoUrl(value);
+            clearIndexedSource();
+          }}
+          onSourceTranscriptChange={(value) => {
+            setSourceTranscript(value);
+            clearIndexedSource();
+          }}
+          onVideoAssetUpload={handleVideoAssetUpload}
+          onRemoveYoutubeSource={removeYoutubeSource}
+          onRemoveUploadedVideoAsset={removeUploadedVideoAsset}
+        />
 
         <AgentActivityPanel
           title="Agent Session Notes"
