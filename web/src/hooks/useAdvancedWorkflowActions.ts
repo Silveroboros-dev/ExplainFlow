@@ -41,6 +41,11 @@ type StartStreamFn = (
   options?: StartStreamOptions,
 ) => Promise<void>;
 
+type GenerateScriptPackOptions = {
+  onAutoStartStream?: StartStreamFn;
+  snapshot?: WorkflowSnapshot | null;
+};
+
 type PushAgentNote = (type: AgentNoteType, stage: string, message: string) => void;
 
 type UseAdvancedWorkflowActionsOptions = {
@@ -332,21 +337,23 @@ export default function useAdvancedWorkflowActions({
 
   const generateScriptPack = async (
     mode: ScriptPresentationMode = "review",
-    options: { onAutoStartStream?: StartStreamFn } = {},
+    options: GenerateScriptPackOptions = {},
   ) => {
     if (!workflowId) {
       setGenerationStatus("Run extraction first to initialize workflow.");
       pushAgentNote("error", "Script Pack", "Cannot generate script pack before extraction workflow starts.");
       return;
     }
-    let currentSnapshot = workflowSnapshot;
-    try {
-      currentSnapshot = await fetchWorkflowSnapshot(workflowId);
-    } catch (snapshotError) {
-      if (handleUnknownWorkflowError(snapshotError, { noteStage: "Script Pack" })) {
-        return;
+    let currentSnapshot = options.snapshot ?? workflowSnapshot;
+    if (!currentSnapshot) {
+      try {
+        currentSnapshot = await fetchWorkflowSnapshot(workflowId);
+      } catch (snapshotError) {
+        if (handleUnknownWorkflowError(snapshotError, { noteStage: "Script Pack" })) {
+          return;
+        }
+        console.error("Script pack snapshot refresh error:", snapshotError);
       }
-      console.error("Script pack snapshot refresh error:", snapshotError);
     }
     if (!currentSnapshot?.ready_for_script_pack) {
       setGenerationStatus("Workflow gate not ready. Lock artifacts and render profile first.");
@@ -488,7 +495,10 @@ export default function useAdvancedWorkflowActions({
     setActivePanel("script");
     setGenerationStatus("Signal confirmed. Generating script pack...");
     pushAgentNote("info", "Signal", "Signal confirmed. Script pack generation started.");
-    await generateScriptPack(scriptPresentationMode, options);
+    await generateScriptPack(scriptPresentationMode, {
+      ...options,
+      snapshot: currentSnapshot,
+    });
   };
 
   return {
