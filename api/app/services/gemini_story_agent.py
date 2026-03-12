@@ -204,6 +204,7 @@ SIGNAL_CREATIVE_MODEL_DEFAULT = "gemini-3.1-pro-preview"
 SIGNAL_SOURCE_TEXT_MODEL_DEFAULT = "gemini-3-flash-preview"
 PLANNER_PRECOMPUTE_MODEL_DEFAULT = "gemini-3-flash-preview"
 ADVANCED_SCENE_CONCURRENCY_DEFAULT = 2
+QUICK_SCENE_CONCURRENCY_DEFAULT = 2
 QUICK_ARTIFACT_MODEL_DEFAULT = "gemini-3-flash-preview"
 
 @dataclass(frozen=True)
@@ -309,6 +310,15 @@ class GeminiStoryAgent:
         except Exception:
             parsed = ADVANCED_SCENE_CONCURRENCY_DEFAULT
         return max(1, min(parsed, 4))
+
+    @staticmethod
+    def _quick_scene_concurrency() -> int:
+        raw_value = os.getenv("EXPLAINFLOW_QUICK_SCENE_CONCURRENCY", str(QUICK_SCENE_CONCURRENCY_DEFAULT)).strip()
+        try:
+            parsed = int(raw_value)
+        except Exception:
+            parsed = QUICK_SCENE_CONCURRENCY_DEFAULT
+        return max(1, min(parsed, 3))
 
     async def _build_asset_augmented_contents(
         self,

@@ -985,6 +985,88 @@ def test_generate_stream_events_normalizes_short_outlines_to_four_scenes() -> No
     asyncio.run(run())
 
 
+def test_generate_stream_events_overlaps_later_quick_scenes_after_scene_one() -> None:
+    async def run() -> None:
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "headers": [],
+            "query_string": b"",
+            "client": ("testclient", 50000),
+            "server": ("testserver", 80),
+            "scheme": "http",
+        }
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        request = Request(scope, receive)
+        agent = object.__new__(GeminiStoryAgent)
+        agent.client = RoutingFakeClient(
+            outline_payload={
+                "scenes": [
+                    {
+                        "scene_id": "intro",
+                        "title": "Intro",
+                        "narration_focus": "Set up the main idea.",
+                        "visual_prompt": "A clear introductory visual.",
+                        "claim_refs": ["c1"],
+                    }
+                ]
+            }
+        )
+
+        active_buffered = 0
+        max_active_buffered = 0
+
+        async def fake_stream_scene_assets(**kwargs):  # noqa: ANN003
+            nonlocal active_buffered, max_active_buffered
+            scene_id = kwargs["scene_id"]
+            result_collector = kwargs["result_collector"]
+            if scene_id != "intro":
+                active_buffered += 1
+                max_active_buffered = max(max_active_buffered, active_buffered)
+                await asyncio.sleep(0.01)
+            try:
+                result_collector["text"] = f"Narration for {scene_id}"
+                result_collector["image_url"] = f"http://example.com/{scene_id}.png"
+                result_collector["audio_url"] = f"http://example.com/{scene_id}.mp3"
+                result_collector["word_count"] = 4
+                yield build_sse_event(
+                    "story_text_delta",
+                    {"scene_id": scene_id, "delta": "Narration"},
+                )
+                if scene_id != "intro":
+                    await asyncio.sleep(0.01)
+            finally:
+                if scene_id != "intro":
+                    active_buffered -= 1
+
+        agent._stream_scene_assets = fake_stream_scene_assets  # type: ignore[method-assign]
+
+        events: list[dict[str, str]] = []
+        async for event in agent.generate_stream_events(
+            request=request,
+            topic="Cell energy",
+            audience="Beginners",
+            tone="clear",
+            visual_mode="illustration",
+        ):
+            events.append(event)
+
+        parsed_events = [
+            (event["event"], json.loads(event["data"]))
+            for event in events
+        ]
+        scene_done_events = [data for name, data in parsed_events if name == "scene_done"]
+
+        assert max_active_buffered >= 2
+        assert len(scene_done_events) == 4
+
+    asyncio.run(run())
+
+
 def test_populate_quick_block_visuals_generates_images_even_for_source_backed_blocks() -> None:
     agent = GeminiStoryAgent()
     artifact = QuickArtifactSchema.model_validate(

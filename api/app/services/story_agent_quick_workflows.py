@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
@@ -34,6 +35,14 @@ class QuickRequestContext:
     visual_mode: str
 
 
+@dataclass(frozen=True)
+class BufferedQuickSceneExecutionResult:
+    scene_id: str
+    scene_trace_id: str
+    events: tuple[dict[str, str], ...]
+    word_count: int
+
+
 def resolve_quick_request_context(
     *,
     topic: str,
@@ -46,6 +55,66 @@ def resolve_quick_request_context(
         audience=audience.strip() or "general audience",
         tone=tone.strip(),
         visual_mode=visual_mode.strip() or "illustration",
+    )
+
+
+async def execute_buffered_quick_scene(
+    agent: Any,
+    *,
+    request: Request,
+    scene_id: str,
+    title: str,
+    claim_refs: list[str],
+    topic: str,
+    audience: str,
+    tone: str,
+    style_guide: str,
+    narration_focus: str,
+    visual_prompt: str,
+    scene_trace_payload: dict[str, Any],
+) -> BufferedQuickSceneExecutionResult:
+    events: list[dict[str, str]] = [
+        build_sse_event(
+            "scene_start",
+            agent._build_quick_scene_start_payload(
+                scene_id=scene_id,
+                title=title,
+                claim_refs=claim_refs,
+                scene_trace_payload=scene_trace_payload,
+            ),
+        )
+    ]
+    scene_result: dict[str, Any] = {}
+
+    async for event in agent._stream_scene_assets(
+        request=request,
+        scene_id=scene_id,
+        topic=topic,
+        audience=audience,
+        tone=tone,
+        scene_title=title,
+        narration_focus=narration_focus,
+        style_guide=style_guide,
+        visual_prompt=visual_prompt,
+        image_prefix="interleaved",
+        audio_prefix="audio",
+        result_collector=scene_result,
+        trace_payload=scene_trace_payload,
+    ):
+        events.append(event)
+
+    events.append(
+        build_sse_event(
+            "scene_done",
+            {"scene_id": scene_id, "trace": scene_trace_payload},
+        )
+    )
+
+    return BufferedQuickSceneExecutionResult(
+        scene_id=scene_id,
+        scene_trace_id=str(scene_trace_payload.get("scene_trace_id", "")),
+        events=tuple(events),
+        word_count=int(scene_result.get("word_count", 0)),
     )
 
 
@@ -460,11 +529,9 @@ async def generate_quick_stream_events(
         )
         yield build_checkpoint_event(trace, cp4)
 
+        prepared_scenes: list[tuple[str, str, str, str, list[str], str, dict[str, Any]]] = []
         scene_claim_map: dict[str, list[str]] = {}
         for idx, scene in enumerate(scenes, start=1):
-            if await request.is_disconnected():
-                return
-
             scene_id, title, narration_focus, visual_prompt, claim_refs = (
                 agent._normalize_quick_scene_identity(scene=scene, index=idx)
             )
@@ -477,46 +544,114 @@ async def generate_quick_stream_events(
                 claim_refs=claim_refs,
             )
             scene_trace_payload = trace_meta(trace, scene_trace_id=scene_trace_id)
+            prepared_scenes.append(
+                (
+                    scene_id,
+                    title,
+                    narration_focus,
+                    visual_prompt,
+                    claim_refs,
+                    scene_trace_id,
+                    scene_trace_payload,
+                )
+            )
+
+        if prepared_scenes:
+            first_scene_id, first_title, first_narration_focus, first_visual_prompt, first_claim_refs, first_scene_trace_id, first_scene_trace_payload = prepared_scenes[0]
 
             yield build_sse_event(
                 "scene_start",
                 agent._build_quick_scene_start_payload(
-                    scene_id=scene_id,
-                    title=title,
-                    claim_refs=claim_refs,
-                    scene_trace_payload=scene_trace_payload,
+                    scene_id=first_scene_id,
+                    title=first_title,
+                    claim_refs=first_claim_refs,
+                    scene_trace_payload=first_scene_trace_payload,
                 ),
             )
 
-            scene_result: dict[str, Any] = {}
+            first_scene_result: dict[str, Any] = {}
 
             async for event in agent._stream_scene_assets(
                 request=request,
-                scene_id=scene_id,
+                scene_id=first_scene_id,
                 topic=topic,
                 audience=audience,
                 tone=tone,
-                scene_title=title,
-                narration_focus=narration_focus,
+                scene_title=first_title,
+                narration_focus=first_narration_focus,
                 style_guide=style_guide,
-                visual_prompt=visual_prompt,
+                visual_prompt=first_visual_prompt,
                 image_prefix="interleaved",
                 audio_prefix="audio",
-                result_collector=scene_result,
-                trace_payload=scene_trace_payload,
+                result_collector=first_scene_result,
+                trace_payload=first_scene_trace_payload,
             ):
                 yield event
 
             add_or_update_scene_trace(
                 trace,
-                scene_id=scene_id,
-                scene_trace_id=scene_trace_id,
-                word_count=int(scene_result.get("word_count", 0)),
+                scene_id=first_scene_id,
+                scene_trace_id=first_scene_trace_id,
+                word_count=int(first_scene_result.get("word_count", 0)),
             )
             yield build_sse_event(
                 "scene_done",
-                {"scene_id": scene_id, "trace": scene_trace_payload},
+                {"scene_id": first_scene_id, "trace": first_scene_trace_payload},
             )
+
+        remaining_scenes = prepared_scenes[1:]
+        scene_concurrency = agent._quick_scene_concurrency()
+        for batch_start in range(0, len(remaining_scenes), scene_concurrency):
+            if await request.is_disconnected():
+                return
+
+            batch = remaining_scenes[batch_start : batch_start + scene_concurrency]
+            batch_tasks = [
+                asyncio.create_task(
+                    execute_buffered_quick_scene(
+                        agent,
+                        request=request,
+                        scene_id=scene_id,
+                        title=title,
+                        claim_refs=claim_refs,
+                        topic=topic,
+                        audience=audience,
+                        tone=tone,
+                        style_guide=style_guide,
+                        narration_focus=narration_focus,
+                        visual_prompt=visual_prompt,
+                        scene_trace_payload=dict(scene_trace_payload),
+                    )
+                )
+                for (
+                    scene_id,
+                    title,
+                    narration_focus,
+                    visual_prompt,
+                    claim_refs,
+                    _scene_trace_id,
+                    scene_trace_payload,
+                ) in batch
+            ]
+            batch_results = await asyncio.gather(*batch_tasks)
+
+            for (
+                scene_id,
+                _title,
+                _narration_focus,
+                _visual_prompt,
+                _claim_refs,
+                scene_trace_id,
+                _scene_trace_payload,
+            ), buffered_result in zip(batch, batch_results):
+                add_or_update_scene_trace(
+                    trace,
+                    scene_id=scene_id,
+                    scene_trace_id=scene_trace_id,
+                    word_count=buffered_result.word_count,
+                )
+                for event in buffered_result.events:
+                    yield event
 
         cp5 = add_checkpoint(
             trace,
