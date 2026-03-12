@@ -4,6 +4,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
+from app.routes.advanced_route_helpers import run_workflow_script_pack
 from app.schemas.requests import (
     SignalExtractionRequest,
     WorkflowArtifactLockRequest,
@@ -164,24 +165,12 @@ async def workflow_apply_profile(workflow_id: str, payload: WorkflowProfileApply
 async def workflow_generate_script_pack(workflow_id: str):
     try:
         script_request = await coordinator.build_script_pack_request(workflow_id)
-        result = await agent.generate_script_pack_advanced(script_request)
-        snapshot = await coordinator.record_script_pack_result(workflow_id, result)
-        response: dict[str, Any] = {
-            "workflow_id": workflow_id,
-            "workflow": snapshot,
-            "status": result.get("status", "error"),
-        }
-        if result.get("status") == "success":
-            response["script_pack"] = result.get("script_pack", {})
-            if isinstance(result.get("claim_traceability"), dict):
-                response["claim_traceability"] = result["claim_traceability"]
-            if isinstance(result.get("planner_qa_summary"), dict):
-                response["planner_qa_summary"] = result["planner_qa_summary"]
-        else:
-            response["message"] = result.get("message", "Script pack generation failed")
-        if isinstance(result.get("trace"), dict):
-            response["script_trace"] = result["trace"]
-        return response
+        return await run_workflow_script_pack(
+            workflow_id=workflow_id,
+            script_request=script_request,
+            coordinator=coordinator,
+            agent=agent,
+        )
     except Exception as exc:
         raise _handle_error(exc) from exc
 
