@@ -2,6 +2,7 @@
 
 import Image from 'next/image';
 import React, { useState } from 'react';
+import AdvancedSourcePanel from '@/components/AdvancedSourcePanel';
 import SceneCard from '@/components/SceneCard';
 import FinalBundle from '@/components/FinalBundle';
 import AgentActivityPanel, { AgentNote, AgentNoteType } from '@/components/AgentActivityPanel';
@@ -27,7 +28,6 @@ import {
   Rows3,
   ScanLine,
   Shapes,
-  Upload,
   Workflow,
 } from "lucide-react";
 import { Toaster, toast } from "sonner";
@@ -3037,181 +3037,26 @@ export default function AdvancedStudio() {
           <div className="mx-auto max-w-4xl">
             <div key={activePanel} className="animate-in fade-in-0 zoom-in-95 duration-300">
               {activePanel === 'source' && (
-                <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
-                  <CardHeader>
-                    <CardTitle className="text-slate-900">1. Source Material</CardTitle>
-                    <CardDescription className="text-slate-600">
-                      Start with source text, uploaded source assets, or both. Images and audio can flow into claim-level proof links; PDFs are accepted for extraction and page-linked proof viewing with matched excerpts when available; short videos are supported with transcript-first extraction.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <form onSubmit={handleExtract} className="high-contrast-form-labels space-y-6">
-                      <div className="space-y-2">
-                        <Label htmlFor="sourceDoc">Document Text</Label>
-                        <Textarea
-                          id="sourceDoc"
-                          value={sourceDoc}
-                          onChange={e => setSourceDoc(e.target.value)}
-                          placeholder="Paste long document here..."
-                          className="min-h-[280px] text-base bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                        />
-                        <p className="text-xs text-slate-500">
-                          Optional when uploaded assets already contain the source material. For video, paste transcript or captions here if the clip is longer than 2 minutes. Use page-image uploads if you want crop-level proof on slides; PDFs now add page-linked excerpts when local text matching succeeds.
-                        </p>
-                      </div>
-                      <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-3">
-                              <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-700">
-                                <Upload className="h-5 w-5" />
-                              </span>
-                              <div>
-                                <Label className="text-base text-slate-900">Source Assets</Label>
-                                <p className="text-xs uppercase tracking-[0.14em] text-slate-500">
-                                  PDFs, images, audio, video
-                                </p>
-                              </div>
-                            </div>
-                            <p className="text-sm leading-6 text-slate-600">
-                              Upload proof-backed source files. PDFs drive extraction and page-linked proof, per-page images still give the tightest crop-level evidence, and videos use transcript as the truth layer while frames resolve on-screen references and proof clips.
-                            </p>
-                            <div className="flex flex-wrap gap-2">
-                              {['image', 'audio', 'video', 'pdf'].map((kind) => (
-                                <span
-                                  key={kind}
-                                  className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600"
-                                >
-                                  {kind}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                          <div className="space-y-2 sm:min-w-[220px]">
-                            <Input
-                              id="sourceAssets"
-                              ref={sourceAssetsInputRef}
-                              type="file"
-                              accept="image/*,audio/*,video/*,application/pdf"
-                              multiple
-                              onChange={handleSourceAssetUpload}
-                              disabled={isUploadingAssets || isExtracting}
-                              className="sr-only"
-                            />
-                            <Button
-                              type="button"
-                              className="w-full"
-                              variant="outline"
-                              disabled={isUploadingAssets || isExtracting}
-                              onClick={() => sourceAssetsInputRef.current?.click()}
-                            >
-                              {isUploadingAssets ? (
-                                <>
-                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                  Uploading...
-                                </>
-                              ) : (
-                                'Choose Source Files'
-                              )}
-                            </Button>
-                            <p className="text-xs text-slate-500">
-                              {uploadedSourceAssets.length > 0
-                                ? `${uploadedSourceAssets.length} asset${uploadedSourceAssets.length === 1 ? '' : 's'} attached`
-                                : 'No assets attached yet'}
-                            </p>
-                          </div>
-                        </div>
-                        {isUploadingAssets ? (
-                          <div className="flex items-center gap-2 text-sm text-slate-600">
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            Uploading source assets...
-                          </div>
-                        ) : null}
-                        {uploadedSourceAssets.length > 0 ? (
-                          <div className="space-y-2">
-                            {uploadedSourceAssets.map((asset) => (
-                              <div
-                                key={asset.asset_id}
-                                className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-                              >
-                                <div className="min-w-0 space-y-1">
-                                  <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                                    {asset.modality}
-                                  </span>
-                                  <p className="truncate text-sm font-medium text-slate-900">
-                                    {asset.title || asset.asset_id}
-                                  </p>
-                                  <p className="text-xs text-slate-500">
-                                    {asset.mime_type ? `${asset.mime_type}` : 'Source asset'}
-                                    {typeof asset.page_index === 'number' ? ` • page ${asset.page_index}` : ''}
-                                    {typeof asset.duration_ms === 'number' ? ` • ${formatMilliseconds(asset.duration_ms)}` : ''}
-                                  </p>
-                                </div>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  className="border-slate-300"
-                                  onClick={() => removeUploadedSourceAsset(asset.asset_id)}
-                                >
-                                  Remove
-                                </Button>
-                              </div>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <Button
-                          type="submit"
-                          className={PRIMARY_ACTION_CARD_CLASS}
-                          disabled={!hasSourceInput || isExtracting || isUploadingAssets}
-                          size="lg"
-                        >
-                          <span className="flex w-full items-center justify-between gap-4">
-                            <span className="space-y-1 text-left">
-                              <span className={PRIMARY_ACTION_LABEL_CLASS}>
-                                Primary Action
-                              </span>
-                              <span className="block text-base font-semibold">
-                                {isExtracting
-                                  ? 'Extracting Signal...'
-                                  : isUploadingAssets
-                                    ? 'Uploading Assets...'
-                                    : 'Extract Content Signal'}
-                              </span>
-                            </span>
-                            {(isExtracting || isUploadingAssets) ? (
-                              <Loader2 className="h-5 w-5 animate-spin text-slate-100" />
-                            ) : null}
-                          </span>
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className={SECONDARY_ACTION_CARD_CLASS}
-                          onClick={() => setActivePanel(collapseTarget.source)}
-                        >
-                          <span className="space-y-1 text-left">
-                            <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                              Secondary Action
-                            </span>
-                            <span className="block text-base font-semibold">Collapse Window</span>
-                          </span>
-                        </Button>
-                      </div>
-                      {(isExtracting || extractProgress > 0) && (
-                        <div className="space-y-2">
-                          <Progress value={extractProgress} className="h-2 bg-amber-100 [&>*]:bg-amber-500" />
-                          <p className="text-xs text-slate-600">
-                            {isExtracting ? extractionPhaseText : signalStage === 'ready' ? 'Signal is ready for generation.' : ''}
-                          </p>
-                        </div>
-                      )}
-                      {error && <p className="text-red-500 text-sm font-medium">{error}</p>}
-                    </form>
-                  </CardContent>
-                </Card>
+                <AdvancedSourcePanel
+                  sourceDoc={sourceDoc}
+                  uploadedSourceAssets={uploadedSourceAssets}
+                  isUploadingAssets={isUploadingAssets}
+                  isExtracting={isExtracting}
+                  hasSourceInput={hasSourceInput}
+                  extractProgress={extractProgress}
+                  extractProgressMessage={isExtracting ? extractionPhaseText : signalStage === 'ready' ? 'Signal is ready for generation.' : ''}
+                  errorMessage={error}
+                  sourceAssetsInputRef={sourceAssetsInputRef}
+                  primaryActionClassName={PRIMARY_ACTION_CARD_CLASS}
+                  primaryActionLabelClassName={PRIMARY_ACTION_LABEL_CLASS}
+                  secondaryActionClassName={SECONDARY_ACTION_CARD_CLASS}
+                  onSubmit={handleExtract}
+                  onSourceDocChange={setSourceDoc}
+                  onSourceAssetUpload={handleSourceAssetUpload}
+                  onRemoveUploadedSourceAsset={removeUploadedSourceAsset}
+                  onCollapse={() => setActivePanel(collapseTarget.source)}
+                  formatDuration={formatMilliseconds}
+                />
               )}
 
               {activePanel === 'profile' && (
