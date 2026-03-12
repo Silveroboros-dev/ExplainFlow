@@ -806,9 +806,6 @@ export default function AdvancedStudio() {
   const [signalTypewriterArmed, setSignalTypewriterArmed] = useState(false);
   const [scriptTypewriterArmed, setScriptTypewriterArmed] = useState(false);
   const [streamTypewriterArmed, setStreamTypewriterArmed] = useState(false);
-  const [signalTypingComplete, setSignalTypingComplete] = useState(false);
-  const [scriptTypingComplete, setScriptTypingComplete] = useState(false);
-  const [streamTypingComplete, setStreamTypingComplete] = useState(false);
   const [signalTypingRunId, setSignalTypingRunId] = useState(0);
   const [scriptTypingRunId, setScriptTypingRunId] = useState(0);
   const [streamTypingRunId, setStreamTypingRunId] = useState(0);
@@ -843,14 +840,12 @@ export default function AdvancedStudio() {
     setTypedExplainer('');
     setTypedPreview('');
     setSignalTypewriterArmed(false);
-    setSignalTypingComplete(false);
   };
 
   const startSignalPreviewRun = () => {
     setTypedExplainer('');
     setTypedPreview('');
     setSignalTypewriterArmed(true);
-    setSignalTypingComplete(false);
     setSignalTypingRunId((prev) => prev + 1);
   };
 
@@ -858,14 +853,12 @@ export default function AdvancedStudio() {
     setTypedScriptExplainer('');
     setTypedScriptPreview('');
     setScriptTypewriterArmed(false);
-    setScriptTypingComplete(false);
   };
 
   const startScriptPreviewRun = () => {
     setTypedScriptExplainer('');
     setTypedScriptPreview('');
     setScriptTypewriterArmed(true);
-    setScriptTypingComplete(false);
     setScriptTypingRunId((prev) => prev + 1);
   };
 
@@ -873,14 +866,12 @@ export default function AdvancedStudio() {
     setTypedStreamExplainer('');
     setTypedStreamPreview('');
     setStreamTypewriterArmed(false);
-    setStreamTypingComplete(false);
   };
 
   const startStreamPreviewRun = () => {
     setTypedStreamExplainer('');
     setTypedStreamPreview('');
     setStreamTypewriterArmed(true);
-    setStreamTypingComplete(false);
     setStreamTypingRunId((prev) => prev + 1);
   };
 
@@ -1460,7 +1451,6 @@ export default function AdvancedStudio() {
 
     setTypedExplainer('');
     setTypedPreview('');
-    setSignalTypingComplete(false);
 
     const targetDurationMs = SIGNAL_TYPEWRITER_DURATION_MS;
     const tickMs = 60;
@@ -1479,7 +1469,6 @@ export default function AdvancedStudio() {
       setTypedPreview(SIGNAL_JSON_PREVIEW.slice(0, previewChars));
 
       if (cursor >= totalChars) {
-        setSignalTypingComplete(true);
         window.clearInterval(intervalId);
       }
     }, tickMs);
@@ -1494,7 +1483,6 @@ export default function AdvancedStudio() {
 
     setTypedScriptExplainer('');
     setTypedScriptPreview('');
-    setScriptTypingComplete(false);
 
     const targetDurationMs = SCRIPT_TYPEWRITER_DURATION_MS;
     const tickMs = 60;
@@ -1512,7 +1500,6 @@ export default function AdvancedStudio() {
       setTypedScriptPreview(SCRIPT_JSON_PREVIEW.slice(0, previewChars));
 
       if (cursor >= totalChars) {
-        setScriptTypingComplete(true);
         window.clearInterval(intervalId);
       }
     }, tickMs);
@@ -1535,7 +1522,6 @@ export default function AdvancedStudio() {
 
     setTypedStreamExplainer('');
     setTypedStreamPreview('');
-    setStreamTypingComplete(false);
 
     const targetDurationMs = STREAM_TYPEWRITER_DURATION_MS;
     const tickMs = 60;
@@ -1553,7 +1539,6 @@ export default function AdvancedStudio() {
       setTypedStreamPreview(STREAM_JSON_PREVIEW.slice(0, previewChars));
 
       if (cursor >= totalChars) {
-        setStreamTypingComplete(true);
         window.clearInterval(intervalId);
       }
     }, tickMs);
@@ -1566,7 +1551,6 @@ export default function AdvancedStudio() {
     setTypedExplainer('');
     setTypedPreview('');
     setSignalTypewriterArmed(false);
-    setSignalTypingComplete(true);
   }, [extractedSignal]);
 
   React.useEffect(() => {
@@ -1574,7 +1558,6 @@ export default function AdvancedStudio() {
     setTypedScriptExplainer('');
     setTypedScriptPreview('');
     setScriptTypewriterArmed(false);
-    setScriptTypingComplete(true);
   }, [scriptPack]);
 
   React.useEffect(() => {
@@ -1590,7 +1573,6 @@ export default function AdvancedStudio() {
     setTypedStreamExplainer('');
     setTypedStreamPreview('');
     setStreamTypewriterArmed(false);
-    setStreamTypingComplete(true);
   }, [scenes]);
 
   const openActionDialog = (stage: ActionDialogStage) => {
