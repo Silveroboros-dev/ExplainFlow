@@ -6,7 +6,7 @@ Last updated: 2026-03-12
 
 - Workspace: `/Users/rk/Desktop/Gemini Live Agent Challenge`
 - Active branch: `codex/advanced-qa-pipeline`
-- Latest branch commit: `4e9a7ba` (`Refactor Quick source form`)
+- Latest branch commit: `2302c18` (`Separate Advanced display and narration text`)
 - Branch status: clean and pushed to `fork/codex/advanced-qa-pipeline`
 
 Do not commit editor state or generated runtime assets unless explicitly requested.
@@ -61,25 +61,59 @@ Key properties:
 
 ### Advanced
 
-- Added `Advanced MP4 Export (Beta)`
+- Completed the first `Advanced Studio` frontend refactor phase.
+  - extracted panels / sections / dialogs:
+    - `AdvancedSourcePanel.tsx`
+    - `AdvancedRenderProfilePanel.tsx`
+    - `AdvancedContentSignalPanel.tsx`
+    - `AdvancedScriptPackPanel.tsx`
+    - `AdvancedGenerationStreamPanel.tsx`
+    - `AdvancedGeneratedExplainerSection.tsx`
+    - `AdvancedAssistantPanel.tsx`
+    - `AdvancedProofDialog.tsx`
+    - `AdvancedActionDialog.tsx`
+  - moved shared logic into:
+    - `web/src/lib/advanced.ts`
+    - `web/src/lib/advanced-api.ts`
+  - introduced workflow hooks:
+    - `useAdvancedWorkflowStorage.ts`
+    - `useAdvancedWorkflowSession.ts`
+    - `useAdvancedWorkflowActions.ts`
+    - `useAdvancedGenerationStream.ts`
+    - `useAdvancedAgentChat.ts`
+  - reduced `web/src/app/advanced/page.tsx` from about `4057` lines to about `1558` lines
+- Preserved `Advanced MP4 Export (Beta)` behavior:
   - exports from existing Advanced scenes only
   - no new Gemini call
   - no scene regeneration
   - current source of truth is the already generated scene asset list
-- Added dedicated download flow for Advanced MP4
-- Tightened standard Advanced scene narration budget
-- Added short overlay text for Advanced MP4
-- Replaced jittery motion with calmer scene motion in Advanced MP4
-- Fixed export button visibility so export remains accessible once scenes exist
+- Simplified workflow couplings that were too implicit:
+  - assistant checkpoint-changing actions now require explicit user confirmation
+  - bundle image upscale is bundle-local only and blocks conflicting workflow changes while running
+  - scene regenerate now uses locked workflow / script / proof context instead of a standalone side door
+- Fixed concrete correctness issues uncovered during refactor:
+  - stale proof asset URLs now rebase to the current request origin
+  - proof links are more reliable across reused / deployed workflows
+  - canonical narration is now separate from display / typewriter text, so export and scene regeneration do not depend on preview state
+- Removed unused Advanced typing-complete state
+- Kept Advanced MP4 calmer-motion / short-overlay behavior and visible export controls intact
 
 Central files:
 
 - `api/app/routes/assets.py`
+- `api/app/routes/workflow.py`
 - `api/app/services/video_pipeline.py`
 - `api/app/services/gemini_story_agent.py`
 - `api/app/services/interleaved_parser.py`
 - `api/app/schemas/requests.py`
+- `api/app/services/workflow_chat_agent.py`
+- `web/src/app/advanced/page.tsx`
 - `web/src/components/FinalBundle.tsx`
+- `web/src/components/SceneCard.tsx`
+- `web/src/hooks/useAdvancedGenerationStream.ts`
+- `web/src/hooks/useAdvancedWorkflowActions.ts`
+- `web/src/hooks/useAdvancedAgentChat.ts`
+- `web/src/lib/advanced.ts`
 
 ### Quick
 
@@ -122,7 +156,7 @@ Central files:
 
 ## Current Refactor Status
 
-Quick frontend refactor started and is already in two rollback-safe checkpoints:
+Quick frontend refactor was intentionally stopped in two rollback-safe checkpoints:
 
 1. `81f2552` `Refactor Quick artifact and reel views`
 2. `4e9a7ba` `Refactor Quick source form`
@@ -138,6 +172,38 @@ Current result:
   - `web/src/lib/quick.ts`
 
 Behavior was manually re-verified after each extraction.
+
+Advanced frontend refactor phase 1 is now complete in a long sequence of small rollback-safe checkpoints.
+
+Current result:
+
+- `web/src/app/advanced/page.tsx` reduced to about `1558` lines
+- extracted components:
+  - `web/src/components/AdvancedSourcePanel.tsx`
+  - `web/src/components/AdvancedRenderProfilePanel.tsx`
+  - `web/src/components/AdvancedContentSignalPanel.tsx`
+  - `web/src/components/AdvancedScriptPackPanel.tsx`
+  - `web/src/components/AdvancedGenerationStreamPanel.tsx`
+  - `web/src/components/AdvancedGeneratedExplainerSection.tsx`
+  - `web/src/components/AdvancedAssistantPanel.tsx`
+  - `web/src/components/AdvancedProofDialog.tsx`
+  - `web/src/components/AdvancedActionDialog.tsx`
+- extracted shared modules:
+  - `web/src/lib/advanced.ts`
+  - `web/src/lib/advanced-api.ts`
+- extracted hooks:
+  - `web/src/hooks/useAdvancedWorkflowStorage.ts`
+  - `web/src/hooks/useAdvancedWorkflowSession.ts`
+  - `web/src/hooks/useAdvancedWorkflowActions.ts`
+  - `web/src/hooks/useAdvancedGenerationStream.ts`
+  - `web/src/hooks/useAdvancedAgentChat.ts`
+- important stability / coupling checkpoints landed after the structural refactor:
+  - `283f45c` `Fix stale proof asset URLs`
+  - `1c4cf4b` `Add Advanced assistant action confirmations`
+  - `3e88d1a` `Simplify Advanced bundle upscale flow`
+  - `747ae4f` `Make Advanced scene override workflow-aware`
+  - `c361803` `Fix Advanced scene narration state`
+  - `2302c18` `Separate Advanced display and narration text`
 
 ## Files Most Central To The Current State
 
@@ -158,7 +224,22 @@ Frontend:
 
 - `web/src/app/advanced/page.tsx`
 - `web/src/app/quick/page.tsx`
+- `web/src/lib/advanced.ts`
+- `web/src/lib/advanced-api.ts`
+- `web/src/hooks/useAdvancedWorkflowSession.ts`
+- `web/src/hooks/useAdvancedWorkflowActions.ts`
+- `web/src/hooks/useAdvancedGenerationStream.ts`
+- `web/src/hooks/useAdvancedAgentChat.ts`
 - `web/src/components/FinalBundle.tsx`
+- `web/src/components/AdvancedGeneratedExplainerSection.tsx`
+- `web/src/components/AdvancedSourcePanel.tsx`
+- `web/src/components/AdvancedRenderProfilePanel.tsx`
+- `web/src/components/AdvancedContentSignalPanel.tsx`
+- `web/src/components/AdvancedScriptPackPanel.tsx`
+- `web/src/components/AdvancedGenerationStreamPanel.tsx`
+- `web/src/components/AdvancedAssistantPanel.tsx`
+- `web/src/components/AdvancedProofDialog.tsx`
+- `web/src/components/AdvancedActionDialog.tsx`
 - `web/src/components/ProofPlaylistPlayer.tsx`
 - `web/src/components/QuickSourceForm.tsx`
 - `web/src/components/QuickArtifactSummary.tsx`
@@ -205,10 +286,13 @@ Detailed version lives in `docs/refactor-plan.md`.
 
 These are real next-step items, not regressions.
 
-1. First small `Advanced` frontend extraction
-- Quick refactor started cleanly.
-- Advanced is still the larger technical-debt surface.
-- Best next slice is a small component extraction, not a rewrite.
+1. Targeted `Advanced` rehearsal / smoke pass after refactor phase 1
+- verify the full path:
+  - source -> extraction -> render profile -> signal confirm -> script pack -> stream
+  - proof viewer / proof links
+  - scene override
+  - bundle export / Advanced MP4 export
+- this branch has many correctness fixes, but there is not yet one documented end-to-end rehearsal pass after all of them landed
 
 2. Better scanned-PDF OCR fallback
 - digital PDFs are much better now
@@ -223,7 +307,9 @@ These are real next-step items, not regressions.
 
 5. Deeper post-demo refactor
 - backend `gemini_story_agent.py` is still a god object
-- Advanced page is still very large
+- Advanced page is much smaller, but still acts as the coordinator shell
+- proof-viewer image lint cleanup is still unaddressed
+- there has not yet been a full post-refactor rehearsal pass documenting the whole Advanced workflow
 
 ## Recommended Next Priority
 
@@ -236,8 +322,12 @@ If continuing product work:
 If continuing refactor work on this branch:
 
 1. stop Quick here
-2. start the first small `Advanced` extraction
-3. keep changes rollback-safe and behavior-preserving
+2. pause large frontend reshaping and run a targeted Advanced rehearsal / smoke pass
+3. only then choose the next narrow seam:
+   - backend service split from `gemini_story_agent.py`
+   - OCR / ingest improvements
+   - proof-link / proof-viewer precision
+4. keep changes rollback-safe and behavior-preserving
 
 Do not mix a large refactor with new product features.
 
@@ -251,7 +341,7 @@ If the Codex app updates or runtime state is lost:
 4. inspect `web/src/app/advanced/page.tsx`
 5. choose one path:
    - deploy/rehearse
-   - or continue the first small Advanced refactor
+   - or continue a narrow post-phase-1 Advanced cleanup only if a concrete bug / seam is already identified
 
 ## Short Mission For The Next Session
 
@@ -260,7 +350,12 @@ Continue from a stable base.
 Most likely next move:
 
 - keep Quick frozen at the current good state
-- begin the first small Advanced extraction without changing behavior
+- update / reread this handoff
+- run a targeted Advanced smoke pass on:
+  - source -> extraction -> render profile -> signal confirm -> script pack -> stream
+  - proof viewer / proof links
+  - scene override
+  - bundle export / Advanced MP4 export
 
 Fallback if demo needs dominate:
 
