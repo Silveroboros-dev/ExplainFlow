@@ -8,6 +8,7 @@ from fastapi import Request
 from google.genai import types
 
 from app.services.story_agent_buffered_scene import execute_buffered_scene_pass
+from app.services.story_agent_scene_prelude import build_scene_prelude_events
 from app.schemas.events import (
     add_checkpoint,
     add_or_update_scene_trace,
@@ -77,17 +78,16 @@ async def execute_buffered_quick_scene(
     pass_result = await execute_buffered_scene_pass(
         stream_scene_assets=agent._stream_scene_assets,
         request=request,
-        prelude_events=[
-            build_sse_event(
-                "scene_start",
-                agent._build_quick_scene_start_payload(
+        prelude_events=list(
+            build_scene_prelude_events(
+                scene_start_payload=agent._build_quick_scene_start_payload(
                     scene_id=scene_id,
                     title=title,
                     claim_refs=claim_refs,
                     scene_trace_payload=scene_trace_payload,
                 ),
             )
-        ],
+        ),
         stream_kwargs={
             "scene_id": scene_id,
             "topic": topic,

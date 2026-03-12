@@ -48,6 +48,7 @@ from app.schemas.requests import (
 )
 from app.services.audio_pipeline import generate_audio_and_get_url
 from app.services.story_agent_buffered_scene import execute_buffered_scene_pass
+from app.services.story_agent_scene_prelude import build_scene_prelude_events
 from app.services.image_pipeline import (
     asset_path_from_reference,
     build_thumbnail_cover_cues,
@@ -1206,7 +1207,6 @@ class GeminiStoryAgent:
         retry_reason_constraints: list[str] | None = None,
         extra_constraints: list[str] | None = None,
     ) -> BufferedSceneExecutionResult:
-        events: list[dict[str, str]] = []
         scene_id = scene.scene_id
         scene_trace_id = str(scene_trace_payload.get("scene_trace_id", ""))
         resolved_source_media_payloads = self._resolve_source_media_payloads(
@@ -1215,32 +1215,13 @@ class GeminiStoryAgent:
             source_media=scene.source_media,
             source_manifest=source_manifest,
         )
-
-        events.append(
-            build_sse_event(
-                "scene_start",
-                {
-                    "scene_id": scene_id,
-                    "title": scene.title,
-                    "claim_refs": [claim_ref for claim_ref in scene.claim_refs if claim_ref],
-                    "evidence_refs": [evidence_ref for evidence_ref in scene.evidence_refs if evidence_ref],
-                    "render_strategy": scene.render_strategy,
-                    "source_media": resolved_source_media_payloads,
-                    "trace": scene_trace_payload,
-                },
-            )
-        )
-
-        for source_media_payload in resolved_source_media_payloads:
-            source_media_payload["trace"] = scene_trace_payload
-            events.append(build_sse_event("source_media_ready", source_media_payload))
+        warning_payload = None
         if scene.source_media and not resolved_source_media_payloads:
             warning_payload = self._build_source_media_warning_payload(
                 scene_id=scene_id,
                 source_media=scene.source_media,
             )
             if warning_payload is not None:
-                warning_payload["trace"] = scene_trace_payload
                 print(
                     "[source_media_warning]",
                     {
@@ -1249,7 +1230,22 @@ class GeminiStoryAgent:
                         "expected_count": warning_payload["expected_count"],
                     },
                 )
-                events.append(build_sse_event("source_media_warning", warning_payload))
+        events = list(
+            build_scene_prelude_events(
+                scene_start_payload={
+                    "scene_id": scene_id,
+                    "title": scene.title,
+                    "claim_refs": [claim_ref for claim_ref in scene.claim_refs if claim_ref],
+                    "evidence_refs": [evidence_ref for evidence_ref in scene.evidence_refs if evidence_ref],
+                    "render_strategy": scene.render_strategy,
+                    "source_media": resolved_source_media_payloads,
+                    "trace": scene_trace_payload,
+                },
+                trace_payload=scene_trace_payload,
+                source_media_payloads=resolved_source_media_payloads,
+                source_media_warning_payload=warning_payload,
+            )
+        )
 
         retries_used = 0
         qa_result: dict[str, Any] = {
@@ -2044,34 +2040,32 @@ class GeminiStoryAgent:
                     source_media=first_scene.source_media,
                     source_manifest=payload.source_manifest,
                 )
-
-                yield build_sse_event(
-                    "scene_start",
-                    self._build_scene_start_payload(
-                        spec=first_spec,
-                        source_media=first_scene_source_media_payloads,
-                    ),
-                )
-
-                for source_media_payload in first_scene_source_media_payloads:
-                    source_media_payload["trace"] = first_scene_trace_payload
-                    yield build_sse_event("source_media_ready", source_media_payload)
+                first_scene_warning_payload = None
                 if first_scene.source_media and not first_scene_source_media_payloads:
-                    warning_payload = self._build_source_media_warning_payload(
+                    first_scene_warning_payload = self._build_source_media_warning_payload(
                         scene_id=first_scene_id,
                         source_media=first_scene.source_media,
                     )
-                    if warning_payload is not None:
-                        warning_payload["trace"] = first_scene_trace_payload
+                    if first_scene_warning_payload is not None:
                         print(
                             "[source_media_warning]",
                             {
                                 "scene_id": first_scene_id,
-                                "asset_ids": warning_payload["asset_ids"],
-                                "expected_count": warning_payload["expected_count"],
+                                "asset_ids": first_scene_warning_payload["asset_ids"],
+                                "expected_count": first_scene_warning_payload["expected_count"],
                             },
                         )
-                        yield build_sse_event("source_media_warning", warning_payload)
+
+                for event in build_scene_prelude_events(
+                    scene_start_payload=self._build_scene_start_payload(
+                        spec=first_spec,
+                        source_media=first_scene_source_media_payloads,
+                    ),
+                    trace_payload=first_scene_trace_payload,
+                    source_media_payloads=first_scene_source_media_payloads,
+                    source_media_warning_payload=first_scene_warning_payload,
+                ):
+                    yield event
 
                 first_retries_used = 0
                 first_qa_result: dict[str, Any] = self._default_scene_qa_result(first_scene_id)
