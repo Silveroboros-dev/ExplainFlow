@@ -3,235 +3,32 @@
 import Image from 'next/image';
 import React, { useEffect, useRef, useState } from 'react';
 import AgentActivityPanel, { AgentNote, AgentNoteType } from '@/components/AgentActivityPanel';
+import QuickArtifactView from '@/components/QuickArtifactView';
+import QuickArtifactSummary from '@/components/QuickArtifactSummary';
+import QuickSourceForm from '@/components/QuickSourceForm';
 import ProofPlaylistPlayer, { type ProofPlaylistSegment } from '@/components/ProofPlaylistPlayer';
+import QuickReelView from '@/components/QuickReelView';
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import {
-  type LucideIcon,
-  Blend,
-  Blocks,
   Bot,
-  Clapperboard,
-  ChevronRight,
-  Download,
-  GalleryVerticalEnd,
-  GraduationCap,
-  LayoutGrid,
   Loader2,
-  Mic,
-  PanelTop,
-  PlayCircle,
-  Sparkles,
-  Square,
-  UserRound,
-  Upload,
   Wand2,
 } from "lucide-react";
+import {
+  type PlaylistPresentationMode,
+  type QuickArtifact,
+  type QuickArtifactBlock,
+  type QuickReelSegment,
+  type QuickSourceMedia,
+  type UploadedQuickSourceAsset,
+  formatMilliseconds,
+  formatTimeRangeLabel,
+} from "@/lib/quick";
 import { Toaster, toast } from "sonner";
 
-type QuickTile = {
-  value: string;
-  title: string;
-  description: string;
-  icon: LucideIcon;
-  baseClassName: string;
-  selectedClassName: string;
-  iconClassName: string;
-  selectedIconClassName: string;
-};
-
-const QUICK_AUDIENCE_TILES: QuickTile[] = [
-  {
-    value: 'Beginner',
-    title: 'Beginner',
-    description: 'Simple language and bigger conceptual steps.',
-    icon: GraduationCap,
-    baseClassName: 'border-sky-100 bg-sky-50/85 text-sky-950',
-    selectedClassName: 'border-sky-300 bg-sky-100 shadow-[0_14px_28px_rgba(14,165,233,0.14)]',
-    iconClassName: 'bg-white/80 text-sky-700',
-    selectedIconClassName: 'bg-sky-700 text-white',
-  },
-  {
-    value: 'Intermediate',
-    title: 'Intermediate',
-    description: 'Balanced clarity for informed general audiences.',
-    icon: LayoutGrid,
-    baseClassName: 'border-indigo-100 bg-indigo-50/85 text-indigo-950',
-    selectedClassName: 'border-indigo-300 bg-indigo-100 shadow-[0_14px_28px_rgba(99,102,241,0.14)]',
-    iconClassName: 'bg-white/80 text-indigo-700',
-    selectedIconClassName: 'bg-indigo-700 text-white',
-  },
-  {
-    value: 'Expert',
-    title: 'Expert',
-    description: 'Denser framing with more technical compression.',
-    icon: Blocks,
-    baseClassName: 'border-slate-200 bg-slate-50/95 text-slate-950',
-    selectedClassName: 'border-slate-400 bg-slate-100 shadow-[0_14px_28px_rgba(15,23,42,0.12)]',
-    iconClassName: 'bg-white/80 text-slate-700',
-    selectedIconClassName: 'bg-slate-800 text-white',
-  },
-  {
-    value: 'Other',
-    title: 'Custom',
-    description: 'Specify your own audience profile.',
-    icon: UserRound,
-    baseClassName: 'border-amber-100 bg-amber-50/85 text-amber-950',
-    selectedClassName: 'border-amber-300 bg-amber-100 shadow-[0_14px_28px_rgba(245,158,11,0.14)]',
-    iconClassName: 'bg-white/80 text-amber-700',
-    selectedIconClassName: 'bg-amber-700 text-white',
-  },
-];
-
-const QUICK_VISUAL_TILES: QuickTile[] = [
-  {
-    value: 'illustration',
-    title: 'Illustration',
-    description: 'More cinematic framing and expressive imagery.',
-    icon: Sparkles,
-    baseClassName: 'border-fuchsia-100 bg-fuchsia-50/85 text-fuchsia-950',
-    selectedClassName: 'border-fuchsia-300 bg-fuchsia-100 shadow-[0_14px_28px_rgba(217,70,239,0.14)]',
-    iconClassName: 'bg-white/80 text-fuchsia-700',
-    selectedIconClassName: 'bg-fuchsia-700 text-white',
-  },
-  {
-    value: 'diagram',
-    title: 'Diagram',
-    description: 'Cleaner vectors and schematic explanation.',
-    icon: GalleryVerticalEnd,
-    baseClassName: 'border-emerald-100 bg-emerald-50/85 text-emerald-950',
-    selectedClassName: 'border-emerald-300 bg-emerald-100 shadow-[0_14px_28px_rgba(16,185,129,0.14)]',
-    iconClassName: 'bg-white/80 text-emerald-700',
-    selectedIconClassName: 'bg-emerald-700 text-white',
-  },
-  {
-    value: 'hybrid',
-    title: 'Hybrid',
-    description: 'Blend structured UI cues with illustration polish.',
-    icon: Blend,
-    baseClassName: 'border-violet-100 bg-violet-50/85 text-violet-950',
-    selectedClassName: 'border-violet-300 bg-violet-100 shadow-[0_14px_28px_rgba(139,92,246,0.14)]',
-    iconClassName: 'bg-white/80 text-violet-700',
-    selectedIconClassName: 'bg-violet-700 text-white',
-  },
-];
-
-const QUICK_TONE_PRESETS = [
-  'Practical',
-  'Clear',
-  'Executive',
-  'Cinematic',
-  'Playful',
-];
-
-const QUICK_PRIMARY_ACTION_CARD_CLASS = "group h-auto w-full rounded-[24px] bg-slate-950 px-5 py-4 text-left text-white shadow-[0_18px_36px_rgba(15,23,42,0.18)] transition-transform hover:-translate-y-0.5 hover:bg-slate-900 disabled:opacity-100 disabled:bg-slate-300 disabled:text-slate-500 disabled:hover:translate-y-0";
-const QUICK_PRIMARY_ACTION_LABEL_CLASS = "block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300 transition-colors group-disabled:text-slate-600";
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
-type QuickArtifactBlock = {
-  block_id: string;
-  label: string;
-  title: string;
-  body: string;
-  bullets: string[];
-  visual_direction: string;
-  image_url?: string | null;
-  emphasis: 'hook' | 'core' | 'proof' | 'implication' | 'action';
-  claim_refs: string[];
-  evidence_refs: string[];
-  source_media: QuickSourceMedia[];
-};
-
-type QuickArtifact = {
-  artifact_id: string;
-  title: string;
-  subtitle: string;
-  summary: string;
-  visual_style: string;
-  hero_direction: string;
-  hero_image_url?: string | null;
-  reel?: QuickReel | null;
-  video?: QuickVideo | null;
-  blocks: QuickArtifactBlock[];
-};
-
-type QuickReelSegment = {
-  segment_id: string;
-  block_id: string;
-  title: string;
-  render_mode: 'source_clip' | 'generated_image' | 'hybrid';
-  caption_text: string;
-  claim_refs: string[];
-  evidence_refs: string[];
-  primary_media?: QuickSourceMedia | null;
-  fallback_image_url?: string | null;
-  start_ms: number | null;
-  end_ms: number | null;
-  timing_inferred: boolean;
-};
-
-type QuickReel = {
-  reel_id: string;
-  title: string;
-  summary: string;
-  segments: QuickReelSegment[];
-};
-
-type PlaylistPresentationMode = 'auto' | 'source' | 'image';
-
-type QuickVideoSegment = {
-  segment_id: string;
-  block_id: string;
-  title: string;
-  caption_text: string;
-  voiceover_url?: string | null;
-  visual_url?: string | null;
-  source_video_url?: string | null;
-  source_start_ms: number | null;
-  source_end_ms: number | null;
-  duration_ms: number | null;
-  render_mode: 'image_only' | 'image_plus_clip' | 'clip_only';
-};
-
-type QuickVideo = {
-  video_id: string;
-  status: 'ready';
-  video_url: string;
-  duration_ms: number | null;
-  segments: QuickVideoSegment[];
-};
-
-type QuickSourceMedia = {
-  asset_id: string;
-  modality: 'audio' | 'video' | 'image' | 'pdf_page';
-  usage: 'background' | 'hero' | 'proof_clip' | 'region_crop' | 'callout';
-  claim_refs: string[];
-  evidence_refs: string[];
-  start_ms: number | null;
-  end_ms: number | null;
-  page_index: number | null;
-  bbox_norm: number[] | null;
-  label?: string | null;
-  quote_text?: string | null;
-  visual_context?: string | null;
-  loop?: boolean;
-  muted?: boolean;
-};
-
-type UploadedQuickSourceAsset = {
-  asset_id: string;
-  modality: 'video';
-  uri: string;
-  title?: string | null;
-  duration_ms?: number | null;
-  provider: 'upload' | 'youtube';
-  embed_url?: string | null;
-};
 
 type BrowserSpeechResult = {
   transcript: string;
@@ -259,23 +56,6 @@ type BrowserSpeechRecognition = {
 };
 
 type BrowserSpeechRecognitionCtor = new () => BrowserSpeechRecognition;
-
-const formatMilliseconds = (value?: number | null) => {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-    return null;
-  }
-  const totalSeconds = Math.max(0, Math.floor(value / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${String(seconds).padStart(2, '0')}`;
-};
-
-const formatTimeRangeLabel = (startMs?: number | null, endMs?: number | null) => {
-  const start = formatMilliseconds(startMs);
-  const end = formatMilliseconds(endMs);
-  if (start && end) return `${start} - ${end}`;
-  return start || end || null;
-};
 
 const diffQuickBlockFields = (previousBlock: QuickArtifactBlock, nextBlock: QuickArtifactBlock) => {
   const changedFields: string[] = [];
@@ -1224,20 +1004,14 @@ export default function QuickGenerate() {
     setVideoError('');
 
     try {
-      const response = await fetch(activeVideo.video_url);
-      if (!response.ok) {
-        throw new Error('Unable to download the rendered MP4.');
-      }
-
-      const videoBlob = await response.blob();
-      const blobUrl = URL.createObjectURL(videoBlob);
+      const downloadUrl = new URL(`${API_BASE}/api/quick-video/download`);
+      downloadUrl.searchParams.set('video_url', activeVideo.video_url);
+      downloadUrl.searchParams.set('filename', quickVideoFilename(activeVideo.video_url, artifact?.title));
       const anchor = document.createElement('a');
-      anchor.href = blobUrl;
-      anchor.download = quickVideoFilename(activeVideo.video_url, artifact?.title);
+      anchor.href = downloadUrl.toString();
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-      URL.revokeObjectURL(blobUrl);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to download the rendered MP4.';
       setVideoError(message);
@@ -1283,376 +1057,43 @@ export default function QuickGenerate() {
           <p className="text-lg text-slate-200/95 drop-shadow-[0_1px_8px_rgba(2,6,23,0.6)]">Live Interleaved Generative Storyteller</p>
         </div>
 
-        <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
-          <CardHeader>
-            <CardTitle className="text-slate-900">Quick Generate</CardTitle>
-            <CardDescription className="text-slate-600">Enter a topic and style to generate a complete visual explainer instantly.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleGenerate} className="high-contrast-form-labels grid grid-cols-1 md:grid-cols-2 gap-6">
-              
-              <div className="space-y-2 md:col-span-2">
-                <div className="flex items-center justify-between gap-3">
-                  <Label htmlFor="topic">Prompt</Label>
-                  <Button
-                    type="button"
-                    variant={isListening ? "default" : "outline"}
-                    size="sm"
-                    onClick={toggleVoiceInput}
-                    className="shrink-0"
-                  >
-                    {isListening ? (
-                      <>
-                        <Square className="mr-2 h-4 w-4" />
-                        Stop Listening
-                      </>
-                    ) : (
-                      <>
-                        <Mic className="mr-2 h-4 w-4" />
-                        Voice Prompt
-                      </>
-                    )}
-                  </Button>
-                </div>
-                <Input
-                  id="topic"
-                  value={topic}
-                  onChange={e => setTopic(e.target.value)}
-                  placeholder="Create visuals that explain [topic/problem] for [audience], tone [tone]."
-                  required
-                  className="text-lg bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                />
-                <p className="text-xs text-slate-600">
-                  Example: &quot;Create visuals explaining model context protocols for PMs, tone practical and clear.&quot;
-                </p>
-                {speechError && (
-                  <p className="text-xs text-rose-600 font-medium">{speechError}</p>
-                )}
-              </div>
-
-              <div className="space-y-4 md:col-span-2 rounded-[28px] border border-slate-200 bg-slate-50/90 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="flex items-start gap-3">
-                    <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-slate-700 shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
-                      <Clapperboard className="h-5 w-5" />
-                    </span>
-                    <div className="space-y-1">
-                      <Label className="text-sm font-semibold text-slate-900">Source Video or YouTube URL (Optional)</Label>
-                      <p className="max-w-2xl text-sm leading-6 text-slate-600">
-                        Quick can index an uploaded clip or a YouTube URL, use transcript/captions as the truth layer, and reuse clip-backed proof inside the HTML artifact.
-                      </p>
-                    </div>
-                  </div>
-                  <input
-                    ref={sourceFileInputRef}
-                    type="file"
-                    accept="video/*"
-                    className="hidden"
-                    onChange={handleVideoAssetUpload}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="rounded-full"
-                    onClick={() => sourceFileInputRef.current?.click()}
-                    disabled={isUploadingSource}
-                  >
-                    {isUploadingSource ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Upload className="mr-2 h-4 w-4" />
-                    )}
-                    {uploadedVideoAsset ? 'Replace Video' : 'Upload Video'}
-                  </Button>
-                </div>
-
-                <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
-                  <div className="space-y-2">
-                    <Label htmlFor="sourceVideoUrl">YouTube URL</Label>
-                    <div className="flex gap-3">
-                      <Input
-                        id="sourceVideoUrl"
-                        value={sourceVideoUrl}
-                        onChange={(event) => {
-                          setSourceVideoUrl(event.target.value);
-                          clearIndexedSource();
-                        }}
-                        placeholder="https://www.youtube.com/watch?v=..."
-                        className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                      />
-                      {sourceVideoUrl.trim() ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="shrink-0 rounded-full"
-                          onClick={removeYoutubeSource}
-                        >
-                          Clear
-                        </Button>
-                      ) : null}
-                    </div>
-                    <p className="text-xs leading-5 text-slate-600">
-                      First version: YouTube URLs work only with pasted transcript or subtitles. ExplainFlow does not download the video.
-                    </p>
-                    <Label htmlFor="sourceTranscript">Transcript or Captions</Label>
-                    <Textarea
-                      id="sourceTranscript"
-                      value={sourceTranscript}
-                      onChange={(event) => {
-                        setSourceTranscript(event.target.value);
-                        clearIndexedSource();
-                      }}
-                      placeholder="Paste transcript or captions here. Required for YouTube URLs and for videos longer than 2 minutes."
-                      className="min-h-[148px] bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                    />
-                    <p className="text-xs leading-5 text-slate-600">
-                      ExplainFlow uses transcript text as the main truth layer, then consults video frames only for “this chart,” “as you can see,” clip-worthy moments, and proof playback.
-                    </p>
-                  </div>
-
-                  <div className="space-y-3 rounded-[24px] border border-slate-200 bg-white p-4">
-                    <div className="flex items-center gap-3">
-                      <span className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                        <PlayCircle className="h-5 w-5" />
-                      </span>
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900">Video Constraints</p>
-                        <p className="text-xs uppercase tracking-[0.14em] text-slate-500">Quick v1</p>
-                      </div>
-                    </div>
-                    <div className="space-y-2 text-sm leading-6 text-slate-600">
-                      <p>Uploaded videos up to 2 minutes work without transcript.</p>
-                      <p>Uploaded videos up to 10 minutes require transcript or captions.</p>
-                      <p>YouTube URLs require transcript or subtitles and stay transcript-first.</p>
-                    </div>
-                    {youtubeSourceAsset ? (
-                      <div className="space-y-3 rounded-[20px] border border-slate-200 bg-slate-50 p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                YouTube
-                              </span>
-                            </div>
-                            <p className="text-sm font-medium text-slate-900">{youtubeSourceAsset.title || 'YouTube source'}</p>
-                          </div>
-                        </div>
-                        {youtubeSourceAsset.embed_url ? (
-                          <iframe
-                            title="YouTube source preview"
-                            src={youtubeSourceAsset.embed_url}
-                            className="h-[220px] w-full rounded-2xl border border-slate-200 bg-slate-950"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                            allowFullScreen
-                          />
-                        ) : null}
-                      </div>
-                    ) : uploadedVideoAsset ? (
-                      <div className="space-y-3 rounded-[20px] border border-slate-200 bg-slate-50 p-4">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                Video
-                              </span>
-                              {uploadedVideoAsset.duration_ms ? (
-                                <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                  {formatMilliseconds(uploadedVideoAsset.duration_ms)}
-                                </span>
-                              ) : null}
-                            </div>
-                            <p className="text-sm font-medium text-slate-900">{uploadedVideoAsset.title || 'Uploaded video'}</p>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="rounded-full text-slate-500"
-                            onClick={removeUploadedVideoAsset}
-                          >
-                            Remove
-                          </Button>
-                        </div>
-                        <video
-                          controls
-                          preload="metadata"
-                          className="w-full rounded-2xl border border-slate-200 bg-slate-950"
-                          src={uploadedVideoAsset.uri}
-                        />
-                      </div>
-                    ) : (
-                      <div className="rounded-[20px] border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500">
-                        No source video attached yet. Quick will still work from the prompt alone, or from a YouTube URL plus transcript.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3 md:col-span-2">
-                <Label>Target Audience</Label>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  {QUICK_AUDIENCE_TILES.map((tile) => {
-                    const isSelected = audience === tile.value;
-                    const Icon = tile.icon;
-                    return (
-                      <button
-                        key={tile.value}
-                        type="button"
-                        onClick={() => setAudience(tile.value)}
-                        className={`rounded-[24px] border p-4 text-left transition-all duration-200 ${
-                          tile.baseClassName
-                        } ${isSelected ? tile.selectedClassName : 'hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]'}`}
-                      >
-                        <div className="mb-4 flex items-center gap-3">
-                          <span
-                            className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
-                              isSelected ? tile.selectedIconClassName : tile.iconClassName
-                            }`}
-                          >
-                            <Icon className="h-5 w-5" />
-                          </span>
-                          <div>
-                            <p className="font-semibold">{tile.title}</p>
-                            <p className="text-[11px] uppercase tracking-[0.14em] text-slate-600">
-                              {isSelected ? 'Selected' : 'Tap to select'}
-                            </p>
-                          </div>
-                        </div>
-                        <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {audience === 'Other' && (
-                <div className="space-y-2 md:col-span-2">
-                  <Label htmlFor="customAudience">Specify Audience</Label>
-                  <Input 
-                    id="customAudience" 
-                    value={customAudience} 
-                    onChange={e => setCustomAudience(e.target.value)} 
-                    placeholder="e.g. 5-year old children, investors..." 
-                    required 
-                    className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                  />
-                </div>
-              )}
-
-              <div className="space-y-3 md:col-span-2">
-                <Label>Visual Style</Label>
-                <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-                  {QUICK_VISUAL_TILES.map((tile) => {
-                    const isSelected = visualMode === tile.value;
-                    const Icon = tile.icon;
-                    return (
-                      <button
-                        key={tile.value}
-                        type="button"
-                        onClick={() => setVisualMode(tile.value)}
-                        className={`rounded-[24px] border p-4 text-left transition-all duration-200 ${
-                          tile.baseClassName
-                        } ${isSelected ? tile.selectedClassName : 'hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]'}`}
-                      >
-                        <div className="mb-4 flex items-center gap-3">
-                          <span
-                            className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
-                              isSelected ? tile.selectedIconClassName : tile.iconClassName
-                            }`}
-                          >
-                            <Icon className="h-5 w-5" />
-                          </span>
-                          <div>
-                            <p className="font-semibold">{tile.title}</p>
-                            <p className="text-[11px] uppercase tracking-[0.14em] text-slate-600">
-                              {isSelected ? 'Selected' : 'Tap to select'}
-                            </p>
-                          </div>
-                        </div>
-                        <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="tone">Tone of Voice (Optional)</Label>
-                <Input 
-                  id="tone" 
-                  value={tone} 
-                  onChange={e => setTone(e.target.value)} 
-                  placeholder="e.g. Engaging, Professional, Humorous" 
-                  className="bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                />
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {QUICK_TONE_PRESETS.map((preset) => {
-                    const isSelected = tone.trim().toLowerCase() === preset.toLowerCase();
-                    return (
-                      <button
-                        key={preset}
-                        type="button"
-                        onClick={() => setTone(preset)}
-                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] transition-colors ${
-                          isSelected
-                            ? 'border-slate-900 bg-slate-900 text-white'
-                            : 'border-slate-300 bg-slate-50 text-slate-700 hover:border-slate-400 hover:bg-slate-100'
-                        }`}
-                      >
-                        {preset}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="md:col-span-2 pt-4">
-                <Button
-                  type="submit"
-                  className={QUICK_PRIMARY_ACTION_CARD_CLASS}
-                  disabled={isGenerating || isUploadingSource}
-                  size="lg"
-                >
-                  <span className="flex w-full items-center justify-between gap-4">
-                    <span className="space-y-1 text-left">
-                      <span className={QUICK_PRIMARY_ACTION_LABEL_CLASS}>
-                        Primary Action
-                      </span>
-                      <span className="block text-base font-semibold">
-                        {isGenerating ? 'Generating Quick Artifact...' : 'Generate Quick Artifact'}
-                      </span>
-                    </span>
-                    {isGenerating ? (
-                      <Loader2 className="h-5 w-5 animate-spin text-slate-100" />
-                    ) : null}
-                  </span>
-                </Button>
-              </div>
-
-              {(generationStatus || generationError || isGenerating) && (
-                <div className="md:col-span-2 space-y-2">
-                  {generationStatus && (
-                    <p className="text-sm text-blue-700 font-medium">{generationStatus}</p>
-                  )}
-                  {isGenerating && (
-                    <div className="flex items-center gap-2 text-xs text-slate-600">
-                      <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
-                      <span>
-                        {activeSourceAsset
-                          ? `Indexing transcript-backed ${activeSourceAsset.provider === 'youtube' ? 'YouTube' : 'video'} context, then building lightweight artifact blocks.`
-                          : 'Generating lightweight artifact blocks for immediate rendering.'}
-                      </span>
-                    </div>
-                  )}
-                  {generationError && (
-                    <p className="text-sm text-rose-600 font-medium">{generationError}</p>
-                  )}
-                </div>
-              )}
-            </form>
-          </CardContent>
-        </Card>
+        <QuickSourceForm
+          topic={topic}
+          audience={audience}
+          customAudience={customAudience}
+          visualMode={visualMode}
+          tone={tone}
+          sourceVideoUrl={sourceVideoUrl}
+          sourceTranscript={sourceTranscript}
+          speechError={speechError}
+          isListening={isListening}
+          isUploadingSource={isUploadingSource}
+          isGenerating={isGenerating}
+          generationStatus={generationStatus}
+          generationError={generationError}
+          uploadedVideoAsset={uploadedVideoAsset}
+          youtubeSourceAsset={youtubeSourceAsset}
+          activeSourceAsset={activeSourceAsset}
+          sourceFileInputRef={sourceFileInputRef}
+          onSubmit={handleGenerate}
+          onToggleVoiceInput={toggleVoiceInput}
+          onTopicChange={setTopic}
+          onAudienceChange={setAudience}
+          onCustomAudienceChange={setCustomAudience}
+          onVisualModeChange={setVisualMode}
+          onToneChange={setTone}
+          onSourceVideoUrlChange={(value) => {
+            setSourceVideoUrl(value);
+            clearIndexedSource();
+          }}
+          onSourceTranscriptChange={(value) => {
+            setSourceTranscript(value);
+            clearIndexedSource();
+          }}
+          onVideoAssetUpload={handleVideoAssetUpload}
+          onRemoveYoutubeSource={removeYoutubeSource}
+          onRemoveUploadedVideoAsset={removeUploadedVideoAsset}
+        />
 
         <AgentActivityPanel
           title="Agent Session Notes"
@@ -1697,545 +1138,56 @@ export default function QuickGenerate() {
                 </div>
               </div>
 
-              <Card className="overflow-hidden border-white/15 bg-white/95 text-slate-900 shadow-[0_26px_60px_rgba(15,23,42,0.28)]">
-                <CardContent className="grid gap-6 p-6 lg:grid-cols-[1.25fr_0.75fr]">
-                  <div className="space-y-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge className="rounded-full bg-slate-900 text-white hover:bg-slate-900">
-                          Quick Mode
-                        </Badge>
-                        <Badge variant="outline" className="rounded-full border-slate-300 text-slate-600">
-                          {artifact.visual_style}
-                        </Badge>
-                        {activeSourceAsset ? (
-                          <Badge variant="outline" className="rounded-full border-slate-300 text-slate-600">
-                            {activeSourceAsset.provider === 'youtube' ? 'YouTube Transcript-Backed' : 'Uploaded Video'}
-                          </Badge>
-                        ) : null}
-                      </div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="gap-2 rounded-full"
-                        onClick={() => {
-                          setIsGlobalOverrideOpen(true);
-                          setGlobalOverrideInstruction('');
-                        }}
-                      >
-                        <Wand2 className="h-4 w-4" />
-                        Redirect Whole Artifact
-                      </Button>
-                    </div>
-                    <div className="space-y-2">
-                      <h3 className="text-3xl font-semibold tracking-tight text-slate-950">{artifact.title}</h3>
-                      <p className="text-lg text-slate-600">{artifact.subtitle}</p>
-                    </div>
-                    <p className="max-w-3xl text-base leading-7 text-slate-700">{artifact.summary}</p>
-                  </div>
-                  <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
-                    <div className="flex items-center gap-3">
-                      <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-white">
-                        <PanelTop className="h-5 w-5" />
-                      </span>
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                          {artifact.hero_image_url ? 'Hero Visual' : heroSourceMediaUrl ? 'Hero Clip' : 'Hero Direction'}
-                        </p>
-                        <p className="text-sm font-medium text-slate-900">{artifact.hero_direction}</p>
-                      </div>
-                    </div>
-                    {artifact.hero_image_url ? (
-                      <div className="mt-4 overflow-hidden rounded-[24px] border border-slate-200 bg-slate-950">
-                        <img
-                          src={artifact.hero_image_url}
-                          alt={artifact.title}
-                          className="h-[220px] w-full object-cover"
-                        />
-                      </div>
-                    ) : heroSourceMediaUrl ? (
-                      <div className="mt-4 overflow-hidden rounded-[24px] border border-slate-200 bg-slate-950">
-                        {activeSourceAsset?.provider === 'youtube' ? (
-                          <iframe
-                            title={`${artifact.title} hero clip`}
-                            src={heroSourceMediaUrl}
-                            className="h-[220px] w-full"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                            allowFullScreen
-                          />
-                        ) : (
-                          <video
-                            controls
-                            preload="metadata"
-                            className="h-[220px] w-full object-cover"
-                            src={heroSourceMediaUrl}
-                          />
-                        )}
-                      </div>
-                    ) : null}
-                    <p className="mt-4 text-sm leading-6 text-slate-600">
-                      This Quick artifact is rendered as HTML-first modules so each block can be steered independently without rerunning the whole workflow.
-                      {activeSourceAsset ? ` Source-backed blocks can also carry direct proof clips from the ${activeSourceAsset.provider === 'youtube' ? 'YouTube source' : 'uploaded video'}.` : ''}
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
+              <QuickArtifactSummary
+                artifact={artifact}
+                activeSourceAsset={activeSourceAsset}
+                heroSourceMediaUrl={heroSourceMediaUrl}
+                onOpenGlobalOverride={() => {
+                  setIsGlobalOverrideOpen(true);
+                  setGlobalOverrideInstruction('');
+                }}
+              />
 
               {activeQuickView === 'artifact' ? (
-                <div className="grid gap-5 lg:grid-cols-2">
-                  {artifact.blocks.map((block, index) => {
-                    const primaryBlockMedia = block.source_media[0] ?? null;
-                    const primaryBlockMediaUrl = primaryBlockMedia ? resolveSourceMediaUrl(primaryBlockMedia) : null;
-                    return (
-                      <Card key={block.block_id} className="overflow-hidden border-white/15 bg-white/95 text-slate-900 shadow-[0_20px_44px_rgba(15,23,42,0.18)]">
-                        <CardContent className="space-y-5 p-6">
-                          <div className="flex items-start justify-between gap-4">
-                            <div className="space-y-2">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <Badge variant="outline" className="rounded-full border-slate-300 text-[11px] uppercase tracking-[0.16em] text-slate-500">
-                                  {block.label}
-                                </Badge>
-                                <Badge className="rounded-full bg-slate-100 text-slate-700 hover:bg-slate-100">
-                                  {block.emphasis}
-                                </Badge>
-                              </div>
-                              <h3 className="text-xl font-semibold text-slate-950">
-                                {index + 1}. {block.title}
-                              </h3>
-                            </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="gap-2 rounded-full"
-                          onClick={() => {
-                            setActiveOverrideBlockId(block.block_id);
-                            setOverrideInstruction('');
-                            setOverrideError('');
-                          }}
-                        >
-                          <Wand2 className="h-4 w-4" />
-                          Direct Block
-                            </Button>
-                          </div>
-
-                          {(block.image_url || primaryBlockMediaUrl) ? (
-                            <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-4">
-                              <div className="flex items-center gap-2">
-                                <PanelTop className="h-4 w-4 text-slate-700" />
-                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                                  {block.image_url ? 'Block Visual' : primaryBlockMedia?.modality === 'video' ? 'Source Clip' : 'Source Visual'}
-                                </p>
-                              </div>
-                              {block.image_url ? (
-                                <div className="mt-3 overflow-hidden rounded-[18px] border border-slate-200 bg-slate-950">
-                                  <img
-                                    src={block.image_url}
-                                    alt={block.title}
-                                    className="h-[220px] w-full object-cover"
-                                  />
-                                </div>
-                              ) : primaryBlockMediaUrl && primaryBlockMedia?.modality === 'video' ? (
-                                <div className="mt-3 overflow-hidden rounded-[18px] border border-slate-200 bg-slate-950">
-                                  {activeSourceAsset?.provider === 'youtube' ? (
-                                    <iframe
-                                      title={`${block.title} source visual`}
-                                      src={primaryBlockMediaUrl}
-                                      className="h-[220px] w-full"
-                                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                      allowFullScreen
-                                    />
-                                  ) : (
-                                    <video
-                                      controls
-                                      preload="metadata"
-                                      className="h-[220px] w-full object-cover"
-                                      src={primaryBlockMediaUrl}
-                                    />
-                                  )}
-                                </div>
-                              ) : null}
-                            </div>
-                          ) : null}
-
-                          <p className="text-sm leading-7 text-slate-700">{block.body}</p>
-
-                          {block.bullets.length > 0 && (
-                            <div className="space-y-2">
-                              {block.bullets.map((bullet) => (
-                                <div key={bullet} className="flex items-start gap-2 text-sm leading-6 text-slate-600">
-                                  <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" />
-                                  <span>{bullet}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {(!block.image_url || block.claim_refs.length > 0) ? (
-                            <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-4">
-                              {!block.image_url ? (
-                                <>
-                                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Visual Direction</p>
-                                  <p className="mt-2 text-sm leading-6 text-slate-700">{block.visual_direction}</p>
-                                </>
-                              ) : null}
-                              {block.claim_refs.length > 0 ? (
-                                <div className={block.image_url ? '' : 'mt-3'}>
-                                  <div className="flex flex-wrap gap-2">
-                                    {block.claim_refs.map((claimRef) => (
-                                      <Badge key={claimRef} variant="outline" className="rounded-full border-slate-300 text-slate-600">
-                                        {claimRef}
-                                      </Badge>
-                                    ))}
-                                  </div>
-                                </div>
-                              ) : null}
-                            </div>
-                          ) : null}
-
-                          {block.source_media.length > 0 && (
-                            <div className="rounded-[22px] border border-emerald-200 bg-emerald-50/70 p-4">
-                              <div className="flex items-center gap-2">
-                                <PlayCircle className="h-4 w-4 text-emerald-700" />
-                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-700">
-                                  Source Proof
-                                </p>
-                              </div>
-                              <div className="mt-3 space-y-4">
-                                {block.source_media.map((media) => {
-                                  const mediaUrl = resolveSourceMediaUrl(media);
-                                  const rangeLabel = formatTimeRangeLabel(media.start_ms, media.end_ms);
-                                  return (
-                                    <div key={`${block.block_id}-${media.asset_id}-${media.start_ms ?? 'start'}`} className="space-y-3 rounded-[18px] border border-emerald-200 bg-white p-3">
-                                      <div className="flex flex-wrap items-center gap-2">
-                                        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-700">
-                                          {media.modality === 'video' ? 'Clip' : media.modality}
-                                        </span>
-                                        {rangeLabel ? (
-                                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                                            {rangeLabel}
-                                          </span>
-                                        ) : null}
-                                      </div>
-                                      {media.label ? (
-                                        <p className="text-sm font-medium text-slate-900">{media.label}</p>
-                                      ) : null}
-                                      {media.visual_context ? (
-                                        <p className="text-sm leading-6 text-slate-600">{media.visual_context}</p>
-                                      ) : media.quote_text ? (
-                                        <p className="text-sm leading-6 text-slate-600">{media.quote_text}</p>
-                                      ) : null}
-                                      {media.modality === 'video' && mediaUrl ? (
-                                        activeSourceAsset?.provider === 'youtube' ? (
-                                          <iframe
-                                            title={`${block.title} source clip`}
-                                            src={mediaUrl}
-                                            className="h-[220px] w-full rounded-2xl border border-emerald-200 bg-slate-950"
-                                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                            allowFullScreen
-                                          />
-                                        ) : (
-                                          <video
-                                            controls
-                                            preload="metadata"
-                                            className="w-full rounded-2xl border border-emerald-200 bg-slate-950"
-                                            src={mediaUrl}
-                                          />
-                                        )
-                                      ) : null}
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                    );
-                  })}
-                </div>
+                <QuickArtifactView
+                  artifact={artifact}
+                  activeSourceAsset={activeSourceAsset}
+                  heroSourceMediaUrl={heroSourceMediaUrl}
+                  resolveSourceMediaUrl={resolveSourceMediaUrl}
+                  onOpenGlobalOverride={() => {
+                    setIsGlobalOverrideOpen(true);
+                    setGlobalOverrideInstruction('');
+                  }}
+                  onOpenBlockOverride={(blockId) => {
+                    setActiveOverrideBlockId(blockId);
+                    setOverrideInstruction('');
+                    setOverrideError('');
+                  }}
+                />
               ) : (
-                <div className="space-y-5">
-                  {isBuildingReel ? (
-                    <Card className="border-white/15 bg-white/95 text-slate-900 shadow-[0_20px_44px_rgba(15,23,42,0.18)]">
-                      <CardContent className="flex items-center gap-3 p-6 text-sm text-slate-600">
-                        <Loader2 className="h-5 w-5 animate-spin text-slate-700" />
-                        Building Proof Reel from the current quick blocks.
-                      </CardContent>
-                    </Card>
-                  ) : null}
-
-                  {reelError ? (
-                    <Card className="border-rose-200 bg-rose-50 text-rose-900 shadow-[0_20px_44px_rgba(15,23,42,0.12)]">
-                      <CardContent className="p-6 text-sm font-medium">
-                        {reelError}
-                      </CardContent>
-                    </Card>
-                  ) : null}
-
-                  {videoError ? (
-                    <Card className="border-rose-200 bg-rose-50 text-rose-900 shadow-[0_20px_44px_rgba(15,23,42,0.12)]">
-                      <CardContent className="p-6 text-sm font-medium">
-                        {videoError}
-                      </CardContent>
-                    </Card>
-                  ) : null}
-
-                  {activeReel ? (
-                    <>
-                      <Card className="overflow-hidden border-white/15 bg-white/95 text-slate-900 shadow-[0_20px_44px_rgba(15,23,42,0.18)]">
-                        <CardContent className="space-y-3 p-6">
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Badge className="rounded-full bg-slate-900 text-white hover:bg-slate-900">
-                                Proof Reel v1
-                              </Badge>
-                              <Badge variant="outline" className="rounded-full border-slate-300 text-slate-600">
-                                {activeReel.segments.length} Segments
-                              </Badge>
-                              {activeVideo?.duration_ms ? (
-                                <Badge variant="outline" className="rounded-full border-slate-300 text-slate-600">
-                                  {formatMilliseconds(activeVideo.duration_ms)}
-                                </Badge>
-                              ) : null}
-                              <Badge variant="outline" className="rounded-full border-slate-300 text-slate-600">
-                                Selected {selectedPlaylistSegments.length}/{activeReel.segments.length}
-                              </Badge>
-                              <label className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-xs font-medium ${
-                                activeSourceAsset?.provider === 'upload'
-                                  ? 'border-slate-300 bg-slate-50 text-slate-700'
-                                  : 'border-slate-200 bg-slate-100 text-slate-400'
-                              }`}>
-                                <input
-                                  type="checkbox"
-                                  className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500"
-                                  checked={unmuteLocalSourceClips}
-                                  onChange={(event) => setUnmuteLocalSourceClips(event.target.checked)}
-                                  disabled={activeSourceAsset?.provider !== 'upload'}
-                                />
-                                Unmute Local Source Clips
-                              </label>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Button
-                                type="button"
-                                size="sm"
-                                className="gap-2 rounded-full"
-                                onClick={handleOpenPlaylist}
-                                disabled={isBuildingReel || !playablePlaylistSegments.length}
-                              >
-                                <PlayCircle className="h-4 w-4" />
-                                Play Source Reel ({playablePlaylistSegments.length} items)
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                className="gap-2 rounded-full"
-                                onClick={() => void handleGenerateQuickVideo()}
-                                disabled={isBuildingReel || isRenderingVideo}
-                              >
-                                {isRenderingVideo ? (
-                                  <>
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    Rendering MP4...
-                                  </>
-                                ) : (
-                                  <>
-                                    <Clapperboard className="h-4 w-4" />
-                                    Generate MP4
-                                  </>
-                                )}
-                              </Button>
-                            </div>
-                          </div>
-                          <div>
-                            <h3 className="text-2xl font-semibold text-slate-950">{activeReel.title}</h3>
-                            <p className="mt-2 text-sm leading-6 text-slate-600">{activeReel.summary}</p>
-                            {activeSourceAsset?.provider === 'youtube' ? (
-                              <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                                MP4 export used generated visuals only; source clip intercuts currently support uploaded local video.
-                              </p>
-                            ) : null}
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      {activeVideo?.video_url ? (
-                        <Card className="overflow-hidden border-white/15 bg-white/95 text-slate-900 shadow-[0_20px_44px_rgba(15,23,42,0.18)]">
-                          <CardContent className="space-y-4 p-6">
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                              <div>
-                                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                                  Quick MP4
-                                </p>
-                                <h3 className="text-xl font-semibold text-slate-950">Rendered Explainer</h3>
-                              </div>
-                              <button
-                                type="button"
-                                className="inline-flex items-center gap-2 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-400 hover:text-slate-950"
-                                onClick={() => void handleDownloadQuickVideo()}
-                                disabled={isDownloadingVideo}
-                              >
-                                {isDownloadingVideo ? (
-                                  <>
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    Downloading...
-                                  </>
-                                ) : (
-                                  <>
-                                    <Download className="h-4 w-4" />
-                                    Download MP4
-                                  </>
-                                )}
-                              </button>
-                            </div>
-                            <video
-                              controls
-                              preload="metadata"
-                              className="w-full rounded-[22px] border border-slate-200 bg-slate-950"
-                              src={activeVideo.video_url}
-                            />
-                          </CardContent>
-                        </Card>
-                      ) : null}
-
-                      <div className="space-y-5">
-                        {activeReel.segments.map((segment, index) => {
-                          const segmentMediaUrl = segment.primary_media ? resolveSourceMediaUrl(segment.primary_media) : null;
-                          const segmentRangeLabel = formatTimeRangeLabel(segment.start_ms, segment.end_ms);
-                          return (
-                            <Card key={segment.segment_id} className="overflow-hidden border-white/15 bg-white/95 text-slate-900 shadow-[0_20px_44px_rgba(15,23,42,0.18)]">
-                              <CardContent className="space-y-5 p-6">
-                                <div className="flex flex-wrap items-start justify-between gap-4">
-                                  <div className="space-y-2">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <Badge variant="outline" className="rounded-full border-slate-300 text-[11px] uppercase tracking-[0.16em] text-slate-500">
-                                        Segment {index + 1}
-                                      </Badge>
-                                      <Badge className="rounded-full bg-slate-100 text-slate-700 hover:bg-slate-100">
-                                        {segment.render_mode.replace('_', ' ')}
-                                      </Badge>
-                                      {segmentRangeLabel ? (
-                                        <Badge variant="outline" className="rounded-full border-slate-300 text-slate-600">
-                                          {segmentRangeLabel}
-                                        </Badge>
-                                      ) : null}
-                                      {segment.timing_inferred ? (
-                                        <Badge variant="outline" className="rounded-full border-amber-300 text-amber-700">
-                                          Timing Inferred
-                                        </Badge>
-                                      ) : null}
-                                    </div>
-                                    <h3 className="text-xl font-semibold text-slate-950">{segment.title}</h3>
-                                  </div>
-                                  <label className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700">
-                                    <input
-                                      type="checkbox"
-                                      className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-500"
-                                      checked={selectedPlaylistSegmentIds.includes(segment.segment_id)}
-                                      onChange={() => togglePlaylistSegment(segment.segment_id)}
-                                    />
-                                    Include in Playlist
-                                  </label>
-                                  <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1">
-                                    {([
-                                      { value: 'auto', label: 'Auto', disabled: false },
-                                      { value: 'source', label: 'Source', disabled: !hasPlayableSourceForSegment(segment) },
-                                      { value: 'image', label: 'Image', disabled: !hasGeneratedFrameForSegment(segment) },
-                                    ] satisfies Array<{ value: PlaylistPresentationMode; label: string; disabled: boolean }>).map((option) => {
-                                      const activeMode = playlistPresentationOverrides[segment.segment_id] ?? 'auto';
-                                      return (
-                                        <button
-                                          key={option.value}
-                                          type="button"
-                                          disabled={option.disabled}
-                                          onClick={() => setPlaylistPresentationMode(segment.segment_id, option.value)}
-                                          className={`rounded-full px-3 py-2 text-xs font-semibold transition-colors ${
-                                            activeMode === option.value
-                                              ? 'bg-slate-900 text-white'
-                                              : option.disabled
-                                                ? 'cursor-not-allowed text-slate-300'
-                                                : 'text-slate-600 hover:bg-white hover:text-slate-950'
-                                          }`}
-                                        >
-                                          {option.label}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-
-                                {(segment.render_mode === 'source_clip' || segment.render_mode === 'hybrid') && segment.primary_media ? (
-                                  <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-4">
-                                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                                      Source Clip
-                                    </p>
-                                    {segmentMediaUrl && segment.primary_media.modality === 'video' ? (
-                                      <div className="mt-3 overflow-hidden rounded-[18px] border border-slate-200 bg-slate-950">
-                                        {activeSourceAsset?.provider === 'youtube' ? (
-                                          <iframe
-                                            title={`${segment.title} proof reel clip`}
-                                            src={segmentMediaUrl}
-                                            className="h-[240px] w-full"
-                                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                                            allowFullScreen
-                                          />
-                                        ) : (
-                                          <video
-                                            controls
-                                            preload="metadata"
-                                            className="h-[240px] w-full object-cover"
-                                            src={segmentMediaUrl}
-                                          />
-                                        )}
-                                      </div>
-                                    ) : null}
-                                    {segment.primary_media.label ? (
-                                      <p className="mt-3 text-sm leading-6 text-slate-600">{segment.primary_media.label}</p>
-                                    ) : null}
-                                  </div>
-                                ) : null}
-
-                                {(segment.render_mode === 'generated_image' || segment.render_mode === 'hybrid') && segment.fallback_image_url ? (
-                                  <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-4">
-                                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                                      Generated Frame
-                                    </p>
-                                    <div className="mt-3 overflow-hidden rounded-[18px] border border-slate-200 bg-slate-950">
-                                      <img
-                                        src={segment.fallback_image_url}
-                                        alt={segment.title}
-                                        className="h-[240px] w-full object-cover"
-                                      />
-                                    </div>
-                                  </div>
-                                ) : null}
-
-                                <div className="rounded-[22px] border border-slate-200 bg-slate-50 p-4">
-                                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                                    Caption
-                                  </p>
-                                  <p className="mt-2 text-sm leading-7 text-slate-700">{segment.caption_text}</p>
-                                  {segment.claim_refs.length > 0 ? (
-                                    <div className="mt-3 flex flex-wrap gap-2">
-                                      {segment.claim_refs.map((claimRef) => (
-                                        <Badge key={claimRef} variant="outline" className="rounded-full border-slate-300 text-slate-600">
-                                          {claimRef}
-                                        </Badge>
-                                      ))}
-                                    </div>
-                                  ) : null}
-                                </div>
-                              </CardContent>
-                            </Card>
-                          );
-                        })}
-                      </div>
-                    </>
-                  ) : null}
-                </div>
+                <QuickReelView
+                  activeReel={activeReel}
+                  activeVideo={activeVideo}
+                  activeSourceAsset={activeSourceAsset}
+                  isBuildingReel={isBuildingReel}
+                  reelError={reelError}
+                  videoError={videoError}
+                  selectedPlaylistSegmentIds={selectedPlaylistSegmentIds}
+                  playablePlaylistSegmentsCount={playablePlaylistSegments.length}
+                  unmuteLocalSourceClips={unmuteLocalSourceClips}
+                  isRenderingVideo={isRenderingVideo}
+                  isDownloadingVideo={isDownloadingVideo}
+                  playlistPresentationOverrides={playlistPresentationOverrides}
+                  onTogglePlaylistSegment={togglePlaylistSegment}
+                  onSetPlaylistPresentationMode={setPlaylistPresentationMode}
+                  onSetUnmuteLocalSourceClips={setUnmuteLocalSourceClips}
+                  onOpenPlaylist={handleOpenPlaylist}
+                  onGenerateVideo={() => void handleGenerateQuickVideo()}
+                  onDownloadVideo={() => void handleDownloadQuickVideo()}
+                  resolveSourceMediaUrl={resolveSourceMediaUrl}
+                  hasPlayableSourceForSegment={hasPlayableSourceForSegment}
+                  hasGeneratedFrameForSegment={hasGeneratedFrameForSegment}
+                />
               )}
             </>
           )}

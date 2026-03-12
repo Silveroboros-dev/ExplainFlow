@@ -29,11 +29,13 @@ from app.schemas.requests import (
     ScriptPackScene,
     SignalExtractionRequest,
     SourceMediaRefSchema,
+    WorkflowSceneRegenerateRequest,
 )
 from app.services.gemini_story_agent import GeminiStoryAgent
 from app.services.image_pipeline import (
     asset_path_from_url,
     compose_thumbnail_cover_and_get_url,
+    public_asset_url,
     save_image_and_get_url,
 )
 from app.services.interleaved_parser import (
@@ -174,8 +176,8 @@ def test_extract_anchor_terms_filters_stopwords_and_limits() -> None:
 def test_signal_model_tiering_defaults() -> None:
     with patch.dict(os.environ, {}, clear=True):
         assert GeminiStoryAgent._signal_structural_model() == "gemini-3.1-pro-preview"
-        assert GeminiStoryAgent._signal_source_text_model() == "gemini-3.1-flash-image-preview"
-        assert GeminiStoryAgent._planner_precompute_model() == "gemini-3.1-flash-image-preview"
+        assert GeminiStoryAgent._signal_source_text_model() == "gemini-3-flash-preview"
+        assert GeminiStoryAgent._planner_precompute_model() == "gemini-3-flash-preview"
         assert GeminiStoryAgent._signal_creative_model() == "gemini-3.1-pro-preview"
 
 
@@ -1440,12 +1442,12 @@ def test_evaluate_scene_quality_pass_with_expected_content() -> None:
         visual_prompt="clean diagram",
         claim_refs=["c1"],
         continuity_refs=["previous barrier"],
-        acceptance_checks=["50-100 words"],
+        acceptance_checks=["25-50 words"],
     )
     text = (
-        "Quantum tunneling describes how particles transition through a barrier that would seem "
-        "impossible in classical physics. This scene connects the previous barrier setup to the "
-        "probability wave behavior and highlights why transition rates change with barrier width."
+        "Quantum tunneling lets particles cross a barrier that classical physics would forbid. "
+        "This scene ties the previous barrier setup to wave behavior and shows why thinner barriers "
+        "make transition probabilities rise."
     )
     result = evaluate_scene_quality(
         scene=scene,
@@ -1459,6 +1461,39 @@ def test_evaluate_scene_quality_pass_with_expected_content() -> None:
     assert result["status"] in {"PASS", "WARN"}
     assert result["scene_id"] == "scene-1"
     assert result["attempt"] == 1
+    assert 25 <= result["word_count"] <= 50
+
+
+def test_evaluate_scene_quality_fails_overlong_sequential_scene() -> None:
+    scene = ScriptPackScene(
+        scene_id="scene-2",
+        title="Overlong explanation",
+        scene_goal="Explain the mechanism clearly.",
+        narration_focus="Summarize the mechanism tightly.",
+        visual_prompt="A grounded explanatory visual.",
+        claim_refs=["c1"],
+        continuity_refs=[],
+        acceptance_checks=["25-50 words"],
+        scene_mode="sequential",
+    )
+    text = (
+        "This scene keeps talking well past the desired budget, explaining the mechanism in too many "
+        "clauses, repeating context, layering in extra examples, and generally behaving like a paragraph "
+        "that belongs in notes rather than a compact narrated explainer scene for export. It keeps adding "
+        "qualifiers, side comments, and redundant framing until the pacing feels slow and visibly overpacked."
+    )
+    result = evaluate_scene_quality(
+        scene=scene,
+        generated_text=text,
+        image_url="http://localhost/image.png",
+        must_include=[],
+        must_avoid=[],
+        continuity_hints=[],
+        attempt=1,
+    )
+
+    assert result["status"] == "FAIL"
+    assert any("target 25-50" in reason for reason in result["reasons"])
 
 
 def test_evaluate_scene_quality_allows_shorter_thumbnail_support_copy() -> None:
@@ -1553,6 +1588,7 @@ def test_compose_thumbnail_cover_and_get_url_adds_overlay_elements() -> None:
     composed_path = asset_path_from_url(composed_url)
     assert source_path is not None
     assert composed_path is not None
+
     assert composed_path.exists()
 
     with Image.open(source_path) as original, Image.open(composed_path) as composed:
@@ -1561,6 +1597,46 @@ def test_compose_thumbnail_cover_and_get_url_adds_overlay_elements() -> None:
         assert composed_rgba.size == original_rgba.size
         diff = ImageChops.difference(original_rgba.convert("RGB"), composed_rgba.convert("RGB"))
         assert diff.getbbox() is not None
+
+
+def test_public_asset_url_rebases_local_static_assets_to_current_request_origin() -> None:
+    upload_scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [],
+        "query_string": b"",
+        "client": ("testclient", 50000),
+        "server": ("old-host.example", 80),
+        "scheme": "http",
+    }
+    upload_request = Request(upload_scope)
+
+    image = Image.new("RGB", (64, 64), (24, 32, 72))
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    stale_asset_url = save_image_and_get_url(
+        request=upload_request,
+        scene_id="stale-asset",
+        image_bytes=buffer.getvalue(),
+        prefix="unit_public_asset",
+    )
+
+    current_scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [],
+        "query_string": b"",
+        "client": ("testclient", 50001),
+        "server": ("current-host.example", 443),
+        "scheme": "https",
+    }
+    current_request = Request(current_scope)
+
+    rebased_url = public_asset_url(current_request, stale_asset_url)
+
+    assert rebased_url == f"https://current-host.example/static/assets/{Path(stale_asset_url).name}"
 
 
 def test_build_sse_event_serializes_payload() -> None:
@@ -1823,9 +1899,17 @@ def test_extract_signal_prefers_manifest_embedded_text_before_gemini_recovery() 
                 ],
             }
 
+            one_pass_payload = {
+                **structural_payload,
+                "narrative_beats": creative_payload["narrative_beats"],
+                "visual_candidates": creative_payload["visual_candidates"],
+            }
+
             def response_router(prompt: str, call_count: int) -> str:
                 if "recover clean reading-order source text" in prompt:
                     raise AssertionError("Gemini source-text recovery should be skipped when manifest text exists.")
+                if "ONE RUN" in prompt:
+                    return json.dumps(one_pass_payload)
                 if "structural truth layer" in prompt:
                     return json.dumps(structural_payload)
                 if "creative structuring layer" in prompt:
@@ -1860,8 +1944,9 @@ def test_extract_signal_prefers_manifest_embedded_text_before_gemini_recovery() 
             assert result["source_text_origin"] == "asset_embedded_text"
             assert len(agent.client.files.upload_calls) == 0
             assert agent.client.files.deleted_names == []
-            assert len(agent.client.models.contents) == 2
+            assert len(agent.client.models.contents) == 1
             assert result["trace"]["checkpoints"][-1]["details"]["uploaded_asset_count"] == 0
+            assert result["trace"]["checkpoints"][-1]["details"]["extraction_mode"] == "single_pass_text_backed"
             assert all(
                 "recover clean reading-order source text" not in (
                     item[0] if isinstance(item, list) and item and isinstance(item[0], str) else str(item)
@@ -1870,6 +1955,82 @@ def test_extract_signal_prefers_manifest_embedded_text_before_gemini_recovery() 
             )
         finally:
             asset_path.unlink(missing_ok=True)
+
+    asyncio.run(run())
+
+
+def test_extract_signal_text_only_uses_single_pass_fast_path() -> None:
+    async def run() -> None:
+        one_pass_payload = {
+            "version": "v1.0",
+            "source": {
+                "source_id": "src-1",
+                "source_type": "text",
+                "language": "en",
+                "input_length_tokens": 24,
+            },
+            "thesis": {
+                "one_liner": "Scaling and data changed how software is built.",
+                "expanded_summary": "The excerpt argues that software development is being reshaped by model-centric tooling.",
+            },
+            "key_claims": [
+                {
+                    "claim_id": "c1",
+                    "claim_text": "Software is changing again because of model-centric tooling.",
+                    "supporting_points": ["The speaker frames the change as another platform shift."],
+                    "evidence_snippets": [
+                        {
+                            "evidence_id": "e1",
+                            "type": "text",
+                            "transcript_text": "software is changing again",
+                        }
+                    ],
+                    "confidence": 0.91,
+                }
+            ],
+            "concepts": [],
+            "narrative_beats": [
+                {"beat_id": "b1", "role": "hook", "message": "Software is changing again.", "claim_refs": ["c1"]},
+                {"beat_id": "b2", "role": "mechanism", "message": "Model-centric tooling is the driver.", "claim_refs": ["c1"]},
+                {"beat_id": "b3", "role": "takeaway", "message": "The workflow changes with the interface.", "claim_refs": ["c1"]},
+            ],
+            "visual_candidates": [
+                {
+                    "candidate_id": "v1",
+                    "purpose": "Show the shift in software workflow.",
+                    "recommended_structure": "comparison",
+                    "claim_refs": ["c1"],
+                }
+            ],
+            "open_questions": [],
+            "signal_quality": {
+                "coverage_score": 0.88,
+                "ambiguity_score": 0.18,
+                "hallucination_risk": 0.08,
+            },
+        }
+
+        def response_router(prompt: str, call_count: int) -> str:
+            if "ONE RUN" in prompt:
+                return json.dumps(one_pass_payload)
+            if "structural truth layer" in prompt or "creative structuring layer" in prompt:
+                raise AssertionError("Fast text-backed extraction should skip structural/creative split.")
+            raise AssertionError(f"Unexpected extraction prompt: {prompt[:120]}")
+
+        agent = object.__new__(GeminiStoryAgent)
+        agent.client = ExtractionFakeClient(response_router=response_router)
+
+        result = await agent.extract_signal(
+            SignalExtractionRequest(
+                input_text="Software is changing again because interfaces to models change what developers build.",
+            )
+        )
+
+        assert result["status"] == "success"
+        assert result["content_signal"]["key_claims"][0]["claim_id"] == "c1"
+        assert len(agent.client.models.contents) == 1
+        assert result["trace"]["checkpoints"][-1]["details"]["extraction_mode"] == "single_pass_text_backed"
+        assert result["trace"]["checkpoints"][-1]["details"]["uploaded_asset_count"] == 0
 
     asyncio.run(run())
 
@@ -2409,6 +2570,7 @@ def test_stream_scene_assets_grounds_storyboard_render_prompt_in_claims_and_evid
         prompt = agent.client.models.prompts[0].lower()
         assert "source claims:" in prompt
         assert "source evidence:" in prompt
+        assert "text must be 25-50 words" in prompt
         assert "specific nouns, measurements, environments, and interactions" in prompt
         assert "avoid generic corporate, cosmic, or metaphor-only imagery" in prompt
         assert "benchmark success can mask shallow reasoning" in prompt
@@ -3472,6 +3634,142 @@ def test_resolve_source_media_payloads_includes_pdf_line_locator() -> None:
     assert payloads[0]["line_start"] == 12
     assert payloads[0]["line_end"] == 13
     assert "moral competence" in payloads[0]["matched_excerpt"].lower()
+
+
+def test_regenerate_workflow_scene_uses_locked_context_for_scene_override() -> None:
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/workflow/wf-test/regenerate-scene",
+        "headers": [],
+        "query_string": b"",
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+        "scheme": "http",
+    }
+    request = Request(scope)
+    agent = GeminiStoryAgent()
+    captured: dict[str, Any] = {}
+
+    async def fake_execute_buffered_advanced_scene(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
+        return SimpleNamespace(
+            scene_id="scene-1",
+            scene_trace_id="trace-scene-1",
+            qa_result={
+                "scene_id": "scene-1",
+                "status": "PASS",
+                "score": 0.88,
+                "reasons": [],
+                "attempt": 1,
+                "word_count": 18,
+            },
+            retries_used=0,
+            word_count=18,
+            continuity_tokens=("ATP", "mitochondria"),
+            text="Updated narration text.",
+            image_url="/static/assets/scene-1.png",
+            audio_url="/static/assets/scene-1.mp3",
+        )
+
+    agent._execute_buffered_advanced_scene = fake_execute_buffered_advanced_scene  # type: ignore[method-assign]
+
+    workflow_payload = AdvancedStreamRequest(
+        content_signal={
+            "thesis": {"one_liner": "Cells need ATP"},
+            "key_claims": [
+                {
+                    "claim_id": "c1",
+                    "claim_text": "Mitochondria generate ATP",
+                    "evidence_snippets": [{"text": "ATP production occurs in mitochondria."}],
+                }
+            ],
+        },
+        render_profile={
+            "goal": "teach",
+            "visual_mode": "diagram",
+            "audience": {
+                "level": "beginner",
+                "persona": "General audience",
+                "must_include": ["ATP"],
+                "must_avoid": ["jargon"],
+            },
+            "style": {"descriptors": ["clean", "modern"]},
+            "palette": {"mode": "auto"},
+        },
+        script_pack={
+            "plan_id": "plan-1",
+            "plan_summary": "Summary",
+            "audience_descriptor": "General audience (beginner)",
+            "scene_count": 2,
+            "artifact_type": "storyboard_grid",
+            "scenes": [
+                {
+                    "scene_id": "scene-1",
+                    "title": "Hook",
+                    "scene_goal": "Explain ATP production.",
+                    "narration_focus": "Focus on mitochondria.",
+                    "visual_prompt": "Show ATP generation.",
+                    "claim_refs": ["c1"],
+                    "continuity_refs": ["Maintain continuity from scene-0."],
+                    "acceptance_checks": ["Keep the explanation concrete."],
+                    "source_media": [],
+                },
+                {
+                    "scene_id": "scene-2",
+                    "title": "Payoff",
+                    "scene_goal": "Land the implication.",
+                    "narration_focus": "Show the result.",
+                    "visual_prompt": "Show the cell energized.",
+                    "claim_refs": ["c1"],
+                    "continuity_refs": [],
+                    "acceptance_checks": [],
+                    "source_media": [],
+                },
+            ],
+        },
+        artifact_scope=["story_cards"],
+    )
+
+    result = asyncio.run(
+        agent.regenerate_workflow_scene(
+            request=request,
+            workflow_payload=workflow_payload,
+            payload=WorkflowSceneRegenerateRequest(
+                scene_id="scene-1",
+                instruction="Make the explanation feel more visual and immediate.",
+                current_text="Old narration draft.",
+                prior_scene_context=[
+                    {
+                        "scene_id": "scene-0",
+                        "title": "Setup",
+                        "text": "Prior context establishes the ATP problem.",
+                    }
+                ],
+            ),
+        )
+    )
+
+    assert result["status"] == "success"
+    assert result["scene_id"] == "scene-1"
+    assert result["qa_status"] == "PASS"
+    assert result["imageUrl"] == "/static/assets/scene-1.png"
+    assert captured["scene"].scene_id == "scene-1"
+    assert captured["must_include"] == ["ATP"]
+    assert captured["must_avoid"] == ["jargon"]
+    assert any(
+        "workflow-aware director override" in constraint.lower()
+        for constraint in captured["extra_constraints"]
+    )
+    assert any(
+        "old narration draft" in constraint.lower()
+        for constraint in captured["extra_constraints"]
+    )
+    assert any(
+        continuity.startswith("Setup:")
+        for continuity in captured["active_continuity"]
+    )
+    assert "Maintain continuity from scene-0." in captured["active_continuity"]
 
 
 def test_resolve_source_media_payloads_overwrites_zero_pdf_page_with_locator_match() -> None:

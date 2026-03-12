@@ -17,6 +17,29 @@ class FakeLegacyStreamAgent:
         yield {"event": "done", "data": "{}"}
 
 
+class FakeWorkflowSceneRegenerateAgent:
+    async def regenerate_workflow_scene(self, **kwargs):  # noqa: ANN003
+        workflow_payload = kwargs["workflow_payload"]
+        payload = kwargs["payload"]
+        assert workflow_payload.content_signal["thesis"]["one_liner"] == "Cells need ATP"
+        assert workflow_payload.render_profile["visual_mode"] == "diagram"
+        assert workflow_payload.script_pack["scenes"][0]["scene_id"] == "scene-1"
+        assert payload.scene_id == "scene-1"
+        assert payload.prior_scene_context[0].scene_id == "scene-0"
+        return {
+            "status": "success",
+            "scene_id": payload.scene_id,
+            "text": "Regenerated narration.",
+            "imageUrl": "/static/assets/scene-1.png",
+            "audioUrl": "/static/assets/scene-1.mp3",
+            "qa_status": "PASS",
+            "qa_reasons": [],
+            "qa_score": 0.91,
+            "qa_word_count": 12,
+            "auto_retries": 0,
+        }
+
+
 def _signal_success_result() -> dict:
     return {
         "status": "success",
@@ -141,3 +164,78 @@ def test_workflow_snapshot_route_returns_clean_404_for_unknown_workflow() -> Non
     assert response.status_code == 404
     payload = response.json()
     assert payload["detail"] == "Unknown workflow_id: wf-missing"
+
+
+def test_workflow_scene_regeneration_route_uses_locked_workflow_context() -> None:
+    original_coordinator = workflow_route.coordinator
+    original_agent = workflow_route.agent
+    workflow_route.coordinator = AgentCoordinator()
+    workflow_route.agent = FakeWorkflowSceneRegenerateAgent()
+
+    try:
+        async def seed() -> str:
+            started = await workflow_route.coordinator.start_workflow("Input text")
+            workflow_id = started["workflow_id"]
+            await workflow_route.coordinator.record_signal_result(
+                workflow_id,
+                source_text="Input text",
+                result=_signal_success_result(),
+            )
+            await workflow_route.coordinator.lock_artifacts(workflow_id, ["story_cards"])
+            await workflow_route.coordinator.lock_render_profile(workflow_id, {"visual_mode": "diagram"})
+            await workflow_route.coordinator.record_script_pack_result(
+                workflow_id,
+                {
+                    "status": "success",
+                    "script_pack": {
+                        "plan_id": "plan-1",
+                        "plan_summary": "Summary",
+                        "audience_descriptor": "General audience (beginner)",
+                        "scene_count": 1,
+                        "artifact_type": "storyboard_grid",
+                        "scenes": [
+                            {
+                                "scene_id": "scene-1",
+                                "title": "Hook",
+                                "scene_goal": "Explain ATP.",
+                                "narration_focus": "Focus on ATP.",
+                                "visual_prompt": "Show ATP generation.",
+                                "claim_refs": ["c1"],
+                                "continuity_refs": [],
+                                "acceptance_checks": [],
+                            }
+                        ],
+                    },
+                },
+            )
+            return workflow_id
+
+        workflow_id = asyncio.run(seed())
+
+        client = TestClient(app)
+        response = client.post(
+            f"/api/workflow/{workflow_id}/regenerate-scene",
+            json={
+                "scene_id": "scene-1",
+                "instruction": "Make it more visual.",
+                "current_text": "Old narration.",
+                "prior_scene_context": [
+                    {
+                        "scene_id": "scene-0",
+                        "title": "Setup",
+                        "text": "Prior context.",
+                    }
+                ],
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "success"
+        assert payload["workflow_id"] == workflow_id
+        assert payload["scene_id"] == "scene-1"
+        assert payload["qa_status"] == "PASS"
+        assert payload["imageUrl"] == "/static/assets/scene-1.png"
+    finally:
+        workflow_route.coordinator = original_coordinator
+        workflow_route.agent = original_agent

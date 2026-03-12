@@ -71,6 +71,19 @@ class RegenerateSceneRequest(BaseModel):
     visual_mode: str = "illustration"
 
 
+class WorkflowSceneContextRequest(BaseModel):
+    scene_id: str
+    title: str = ""
+    text: str = ""
+
+
+class WorkflowSceneRegenerateRequest(BaseModel):
+    scene_id: str
+    instruction: str
+    current_text: str = ""
+    prior_scene_context: list[WorkflowSceneContextRequest] = Field(default_factory=list)
+
+
 class QuickArtifactBlockSchema(BaseModel):
     block_id: str
     label: str
@@ -380,11 +393,17 @@ class FinalBundleSceneAsset(BaseModel):
     scene_id: str
     title: str | None = None
     text: str = ""
+    overlay_text: str | None = None
     image_url: str | None = None
     audio_url: str | None = None
 
 
 class FinalBundleExportRequest(BaseModel):
+    topic: str = ""
+    scenes: list[FinalBundleSceneAsset] = Field(default_factory=list)
+
+
+class AdvancedVideoExportRequest(BaseModel):
     topic: str = ""
     scenes: list[FinalBundleSceneAsset] = Field(default_factory=list)
 
@@ -471,6 +490,7 @@ class WorkflowAgentChatResponse(BaseModel):
     status: Literal["success", "error"] = "success"
     assistant_message: str
     selected_action: WorkflowAgentAction = "respond"
+    requires_confirmation: bool = False
     workflow_id: str | None = None
     workflow: dict[str, Any] | None = None
     content_signal: dict[str, Any] | None = None

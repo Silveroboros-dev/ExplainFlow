@@ -57,6 +57,35 @@ def normalized_scene_id(raw: str, default_idx: int) -> str:
     return candidate
 
 
+def scene_narration_word_budget(
+    *,
+    scene_mode: str = "sequential",
+    layout_template: str | None = None,
+    artifact_type: str | None = None,
+) -> tuple[int, int]:
+    min_words = 25 if scene_mode == "sequential" else 50
+    max_words = 50 if scene_mode == "sequential" else 100
+
+    resolved_layout = layout_template
+    if not resolved_layout:
+        if artifact_type == "slide_thumbnail":
+            resolved_layout = "hero_thumbnail"
+        elif artifact_type == "comparison_one_pager":
+            resolved_layout = "modular_poster"
+        elif artifact_type == "technical_infographic":
+            resolved_layout = "layered_mechanism"
+        elif artifact_type == "process_diagram":
+            resolved_layout = "process_flow"
+
+    if resolved_layout in {"hero_thumbnail", "thumbnail_variant"}:
+        return 18, 40
+    if resolved_layout == "modular_poster":
+        return 60, 90
+    if resolved_layout in {"layered_mechanism", "detail_callout", "process_flow", "zoom_detail"}:
+        return 40, 85
+    return min_words, max_words
+
+
 def evaluate_scene_quality(
     *,
     scene: ScriptPackScene,
@@ -83,32 +112,21 @@ def evaluate_scene_quality(
         hard_fail = True
         reasons.append("No inline image returned.")
 
-    min_words = 50
-    max_words = 100
-    layout_template = scene.layout_template
-    if not layout_template:
-        if artifact_type == "slide_thumbnail":
-            layout_template = "hero_thumbnail"
-        elif artifact_type == "comparison_one_pager":
-            layout_template = "modular_poster"
-        elif artifact_type == "technical_infographic":
-            layout_template = "layered_mechanism"
-        elif artifact_type == "process_diagram":
-            layout_template = "process_flow"
+    min_words, max_words = scene_narration_word_budget(
+        scene_mode=scene.scene_mode,
+        layout_template=scene.layout_template,
+        artifact_type=artifact_type,
+    )
 
-    if layout_template in {"hero_thumbnail", "thumbnail_variant"}:
-        min_words = 18
-        max_words = 40
-    elif layout_template == "modular_poster":
-        min_words = 60
-        max_words = 90
-    elif layout_template in {"layered_mechanism", "detail_callout", "process_flow", "zoom_detail"}:
-        min_words = 40
-        max_words = 85
-
-    if word_count and (word_count < min_words or word_count > max_words):
-        score -= 0.3
-        reasons.append(f"Narration length is {word_count} words (target {min_words}-{max_words}).")
+    if word_count:
+        if word_count > max_words:
+            score -= 0.35
+            reasons.append(f"Narration length is {word_count} words (target {min_words}-{max_words}).")
+            if scene.scene_mode == "sequential":
+                hard_fail = True
+        elif word_count < min_words:
+            score -= 0.2
+            reasons.append(f"Narration length is {word_count} words (target {min_words}-{max_words}).")
 
     focus_tokens = extract_anchor_terms(scene.narration_focus, limit=5)
     if focus_tokens and not any(token in text_lower for token in focus_tokens):

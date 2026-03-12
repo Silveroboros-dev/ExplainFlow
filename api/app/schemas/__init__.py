@@ -1,5 +1,6 @@
 from .requests import (
     AdvancedStreamRequest,
+    AdvancedVideoExportRequest,
     ArtifactName,
     CheckpointName,
     CheckpointRecord,
@@ -23,6 +24,8 @@ from .requests import (
     SignalExtractionRequest,
     TraceEnvelope,
     WorkflowArtifactLockRequest,
+    WorkflowSceneContextRequest,
+    WorkflowSceneRegenerateRequest,
     WorkflowRenderLockRequest,
     WorkflowStartRequest,
     WorkflowStreamRequest,
@@ -30,6 +33,7 @@ from .requests import (
 
 __all__ = [
     "AdvancedStreamRequest",
+    "AdvancedVideoExportRequest",
     "ArtifactName",
     "CheckpointName",
     "CheckpointRecord",
@@ -53,6 +57,8 @@ __all__ = [
     "SignalExtractionRequest",
     "TraceEnvelope",
     "WorkflowArtifactLockRequest",
+    "WorkflowSceneContextRequest",
+    "WorkflowSceneRegenerateRequest",
     "WorkflowRenderLockRequest",
     "WorkflowStartRequest",
     "WorkflowStreamRequest",

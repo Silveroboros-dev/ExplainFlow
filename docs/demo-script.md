@@ -122,6 +122,7 @@ If Quick is more stable or more visually impressive in the live build, replace t
 **Say**
 - "We also built a fast path called Quick."
 - "Instead of running the full staged studio, Quick derives three layers from the same grounded blocks: an artifact, a Proof Reel, and then an MP4."
+- "Quick is not one fixed template. It adapts both to how the user wants the explanation framed and how they want it visually presented."
 - "That gives us a much faster publish path while preserving source-aware structure."
 
 ## Recommended Inputs for Demo

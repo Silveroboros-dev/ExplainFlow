@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from io import BytesIO
 from pathlib import Path
+import re
 from typing import Any
 
 from fastapi import Request
@@ -10,6 +11,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from app.config import ASSET_DIR
 from app.schemas.requests import (
+    FinalBundleSceneAsset,
     QuickArtifactSchema,
     QuickVideoSchema,
     QuickVideoSegmentSchema,
@@ -28,6 +30,9 @@ DEFAULT_MIN_SEGMENT_SEC = 2.5
 MAX_SEGMENT_PROOF_SEC = 5.0
 MIN_SEGMENT_PROOF_SEC = 3.0
 QUICK_VIDEO_PLAYBACK_RATE = 1.1
+ADVANCED_TITLE_CARD_MIN_SEC = 2.8
+ADVANCED_TITLE_CARD_MAX_SEC = 4.2
+ADVANCED_PAN_SCALE = 1.06
 
 _BOLD_FONT_CANDIDATES = (
     "/System/Library/Fonts/HelveticaNeue.ttc",
@@ -148,6 +153,7 @@ def _render_placeholder_image_url(
     segment_id: str,
     title: str,
     caption_text: str,
+    badge_label: str = "Quick MP4",
 ) -> str:
     canvas = Image.new("RGB", VIDEO_SIZE, (10, 14, 24))
     draw = ImageDraw.Draw(canvas)
@@ -157,7 +163,7 @@ def _render_placeholder_image_url(
     badge_font = _load_font(size=20, bold=True)
 
     draw.rounded_rectangle((80, 72, 360, 122), radius=26, fill=(30, 41, 59))
-    draw.text((110, 87), "Quick MP4", fill=(226, 232, 240), font=badge_font)
+    draw.text((110, 87), badge_label, fill=(226, 232, 240), font=badge_font)
     draw.text((80, 170), title.strip() or "Proof Segment", fill=(248, 250, 252), font=title_font)
 
     wrapped_caption = _wrap_text(
@@ -183,6 +189,196 @@ def _render_placeholder_image_url(
         image_bytes=buffer.getvalue(),
         prefix="quick_video_placeholder",
     )
+
+
+def _render_scene_title_overlay_url(
+    *,
+    request: Request,
+    scene_id: str,
+    title: str,
+    overlay_text: str,
+) -> str:
+    overlay_width = min(VIDEO_SIZE[0] - 120, 980)
+    overlay_height = 168
+    canvas = Image.new("RGBA", (overlay_width, overlay_height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+
+    panel_bounds = (0, 0, overlay_width, overlay_height)
+    draw.rounded_rectangle(panel_bounds, radius=28, fill=(8, 12, 22, 210))
+    draw.rounded_rectangle((0, 0, 10, overlay_height), radius=5, fill=(59, 130, 246, 255))
+
+    title_font = _load_font(size=38, bold=True)
+    body_font = _load_font(size=24, bold=False)
+    badge_font = _load_font(size=18, bold=True)
+
+    draw.text((34, 22), "Advanced Export", fill=(148, 163, 184, 255), font=badge_font)
+    draw.text((34, 52), title.strip() or "Scene", fill=(248, 250, 252, 255), font=title_font)
+
+    wrapped_body = _wrap_text(
+        draw,
+        text=overlay_text.strip() or title.strip() or "ExplainFlow Studio scene",
+        font=body_font,
+        max_width=overlay_width - 68,
+        max_lines=2,
+    )
+    y = 104
+    for line in wrapped_body:
+        draw.text((34, y), line, fill=(203, 213, 225, 255), font=body_font)
+        y += 30
+
+    buffer = BytesIO()
+    canvas.save(buffer, format="PNG", optimize=True)
+    return save_image_and_get_url(
+        request=request,
+        scene_id=scene_id,
+        image_bytes=buffer.getvalue(),
+        prefix="advanced_video_overlay",
+    )
+
+
+def _slugify(value: str, fallback: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
+    return slug or fallback
+
+
+def _scene_sort_key(scene: FinalBundleSceneAsset) -> tuple[int, str]:
+    match = re.search(r"scene-(\d+)", scene.scene_id, flags=re.IGNORECASE)
+    if match:
+        return int(match.group(1)), scene.scene_id
+    return (10**9), scene.scene_id
+
+
+def _estimate_scene_duration_sec(text: str) -> float:
+    words = max(1, len(str(text or "").strip().split()))
+    return max(5.0, words / 3.0)
+
+
+def _derive_advanced_overlay_text(*, title: str, narration_text: str, supplied_overlay_text: str | None = None) -> str:
+    candidate = str(supplied_overlay_text or "").strip()
+    if candidate:
+        words = candidate.split()
+        if 8 <= len(words) <= 15:
+            return candidate
+        if len(words) > 15:
+            shortened = " ".join(words[:15]).rstrip(".,;:!?")
+            return f"{shortened}."
+
+    title_text = str(title or "").strip()
+    if title_text:
+        title_words = title_text.split()
+        if 8 <= len(title_words) <= 15:
+            return title_text
+
+    cleaned = re.sub(r"\s+", " ", str(narration_text or "").strip())
+    if not cleaned:
+        return title_text or "ExplainFlow Studio scene."
+
+    first_sentence = re.split(r"(?<=[.!?])\s+", cleaned, maxsplit=1)[0].strip() or cleaned
+    sentence_words = first_sentence.split()
+    if len(sentence_words) < 8 and title_text:
+        merged = f"{title_text}. {first_sentence}".strip()
+        sentence_words = merged.split()
+        first_sentence = merged
+
+    if len(sentence_words) > 15:
+        clipped = " ".join(sentence_words[:15]).rstrip(".,;:!?")
+        return f"{clipped}."
+    return first_sentence
+
+
+def _image_clip_for_advanced_scene(
+    *,
+    image_path: Path,
+    duration_sec: float,
+    scene_index: int,
+    CompositeVideoClip: Any,
+    ImageClip: Any,
+    vfx: Any,
+    created_clips: list[Any],
+) -> Any:
+    base_clip = ImageClip(str(image_path))
+    created_clips.append(base_clip)
+    width = float(getattr(base_clip, "w", VIDEO_SIZE[0]) or VIDEO_SIZE[0])
+    height = float(getattr(base_clip, "h", VIDEO_SIZE[1]) or VIDEO_SIZE[1])
+    base_scale = max(VIDEO_SIZE[0] / max(width, 1.0), VIDEO_SIZE[1] / max(height, 1.0)) * ADVANCED_PAN_SCALE
+    scaled_clip = base_clip.with_duration(duration_sec).with_effects([vfx.Resize(base_scale)])
+    created_clips.append(scaled_clip)
+
+    scaled_width = float(getattr(scaled_clip, "w", VIDEO_SIZE[0]) or VIDEO_SIZE[0])
+    scaled_height = float(getattr(scaled_clip, "h", VIDEO_SIZE[1]) or VIDEO_SIZE[1])
+    overflow_x = max(0.0, scaled_width - VIDEO_SIZE[0])
+    overflow_y = max(0.0, scaled_height - VIDEO_SIZE[1])
+    center_x = -(overflow_x / 2.0)
+    center_y = -(overflow_y / 2.0)
+
+    variant = scene_index % 4
+    delta_x = min(overflow_x * 0.45, 56.0)
+    delta_y = min(overflow_y * 0.45, 36.0)
+    if variant == 0:
+        start_x, end_x = center_x, center_x - delta_x
+        start_y, end_y = center_y, center_y
+    elif variant == 1:
+        start_x, end_x = center_x - delta_x, center_x + delta_x
+        start_y, end_y = center_y, center_y
+    elif variant == 2:
+        start_x, end_x = center_x, center_x
+        start_y, end_y = center_y - delta_y, center_y + delta_y
+    else:
+        start_x, end_x = center_x + delta_x, center_x - delta_x
+        start_y, end_y = center_y + delta_y, center_y - delta_y
+
+    def motion_position(t: float) -> tuple[float, float]:
+        progress = 0.0 if duration_sec <= 0 else max(0.0, min(1.0, t / duration_sec))
+        return (
+            start_x + ((end_x - start_x) * progress),
+            start_y + ((end_y - start_y) * progress),
+        )
+
+    motion_clip = scaled_clip.with_position(motion_position)
+    created_clips.append(motion_clip)
+    composed = CompositeVideoClip([motion_clip], size=VIDEO_SIZE).with_duration(duration_sec)
+    created_clips.append(composed)
+    return composed
+
+
+def _scene_title_overlay_clip(
+    *,
+    request: Request,
+    scene_id: str,
+    title: str,
+    overlay_text: str,
+    duration_sec: float,
+    ImageClip: Any,
+    created_clips: list[Any],
+) -> Any | None:
+    overlay_url = _render_scene_title_overlay_url(
+        request=request,
+        scene_id=scene_id,
+        title=title,
+        overlay_text=overlay_text,
+    )
+    overlay_path = asset_path_from_reference(overlay_url)
+    if overlay_path is None:
+        return None
+
+    overlay_duration = min(
+        ADVANCED_TITLE_CARD_MAX_SEC,
+        max(ADVANCED_TITLE_CARD_MIN_SEC, duration_sec * 0.45),
+    )
+    overlay_clip = ImageClip(str(overlay_path)).with_duration(overlay_duration)
+    created_clips.append(overlay_clip)
+    overlay_height = float(getattr(overlay_clip, "h", 0.0) or 0.0)
+    target_x = 56.0
+    start_y = VIDEO_SIZE[1] - overlay_height - 34.0
+    end_y = start_y - 18.0
+
+    def overlay_position(t: float) -> tuple[float, float]:
+        progress = 0.0 if overlay_duration <= 0 else max(0.0, min(1.0, t / overlay_duration))
+        return (target_x, start_y + ((end_y - start_y) * progress))
+
+    positioned_overlay = overlay_clip.with_position(overlay_position)
+    created_clips.append(positioned_overlay)
+    return positioned_overlay
 
 
 def _proof_image_url(
@@ -603,3 +799,136 @@ def build_quick_video(
         video=video,
     )
     return video.model_copy(update={"video_url": video_url, "duration_ms": duration_ms})
+
+
+def render_advanced_video_mp4(
+    *,
+    request: Request,
+    topic: str,
+    scenes: list[FinalBundleSceneAsset],
+) -> tuple[str, int]:
+    try:
+        from moviepy import (
+            AudioClip,
+            AudioFileClip,
+            CompositeVideoClip,
+            ImageClip,
+            concatenate_videoclips,
+            vfx,
+        )
+    except Exception as exc:
+        raise RuntimeError(f"MoviePy is unavailable: {exc}") from exc
+
+    ordered_scenes = sorted(scenes, key=_scene_sort_key)
+    scene_clips: list[Any] = []
+    created_clips: list[Any] = []
+
+    try:
+        for scene_index, scene in enumerate(ordered_scenes):
+            scene_id = scene.scene_id or f"scene-{len(scene_clips) + 1}"
+            overlay_text = _derive_advanced_overlay_text(
+                title=(scene.title or "").strip(),
+                narration_text=scene.text,
+                supplied_overlay_text=scene.overlay_text,
+            )
+            audio_path = asset_path_from_reference(scene.audio_url)
+            audio_clip = None
+            duration_sec = _estimate_scene_duration_sec(scene.text)
+            if audio_path is not None:
+                try:
+                    audio_clip = AudioFileClip(str(audio_path))
+                    created_clips.append(audio_clip)
+                    if getattr(audio_clip, "duration", 0):
+                        duration_sec = max(DEFAULT_MIN_SEGMENT_SEC, float(audio_clip.duration))
+                except Exception:
+                    audio_clip = None
+
+            image_path = asset_path_from_reference(scene.image_url)
+            if image_path is None:
+                placeholder_url = _render_placeholder_image_url(
+                    request=request,
+                    segment_id=scene_id,
+                    title=(scene.title or "").strip() or "Advanced Scene",
+                    caption_text=scene.text,
+                    badge_label="Advanced MP4",
+                )
+                image_path = asset_path_from_reference(placeholder_url)
+
+            if image_path is None:
+                raise RuntimeError(f"Advanced video scene {scene_id} has no renderable image asset.")
+
+            image_clip = _image_clip_for_advanced_scene(
+                image_path=image_path,
+                duration_sec=duration_sec,
+                scene_index=scene_index,
+                CompositeVideoClip=CompositeVideoClip,
+                ImageClip=ImageClip,
+                vfx=vfx,
+                created_clips=created_clips,
+            )
+
+            overlay_clip = _scene_title_overlay_clip(
+                request=request,
+                scene_id=scene_id,
+                title=(scene.title or "").strip() or f"Scene {scene_index + 1}",
+                overlay_text=overlay_text,
+                duration_sec=duration_sec,
+                ImageClip=ImageClip,
+                created_clips=created_clips,
+            )
+            if overlay_clip is not None:
+                image_clip = CompositeVideoClip([image_clip, overlay_clip], size=VIDEO_SIZE).with_duration(duration_sec)
+                created_clips.append(image_clip)
+
+            if audio_clip is not None:
+                scene_clip = image_clip.with_audio(audio_clip)
+            else:
+                silent_audio = AudioClip(lambda t: 0.0, duration=duration_sec, fps=44100)
+                created_clips.append(silent_audio)
+                scene_clip = image_clip.with_audio(silent_audio)
+            created_clips.append(scene_clip)
+            scene_clips.append(scene_clip)
+
+        if not scene_clips:
+            raise RuntimeError("No renderable Advanced video scenes were produced.")
+
+        final_clip = concatenate_videoclips(
+            scene_clips,
+            method="compose",
+            padding=-VIDEO_CROSSFADE_SEC,
+        )
+        created_clips.append(final_clip)
+
+        ts = int(time.time() * 1000)
+        output_name = f"advanced_video_{_slugify(topic, 'explainflow-studio')}_{ts}.mp4"
+        output_path = ASSET_DIR / output_name
+        final_clip.write_videofile(
+            str(output_path),
+            fps=VIDEO_FPS,
+            codec="libx264",
+            audio_codec="aac",
+            logger=None,
+        )
+        duration_ms = int(round(float(getattr(final_clip, "duration", 0.0) or 0.0) * 1000))
+        return f"{base_url(request)}/static/assets/{output_name}", duration_ms
+    finally:
+        for clip in reversed(created_clips):
+            try:
+                clip.close()
+            except Exception:
+                continue
+
+
+def build_advanced_video(
+    *,
+    request: Request,
+    topic: str,
+    scenes: list[FinalBundleSceneAsset],
+) -> tuple[str, int]:
+    if not scenes:
+        raise ValueError("At least one scene is required to export an Advanced MP4.")
+    return render_advanced_video_mp4(
+        request=request,
+        topic=topic,
+        scenes=scenes,
+    )

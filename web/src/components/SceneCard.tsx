@@ -6,8 +6,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Wand2, Link as LinkIcon } from "lucide-react";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
 interface SceneCardProps {
   sceneId: string;
   title?: string;
@@ -22,7 +20,6 @@ interface SceneCardProps {
   }>;
   audioStatus: string;
   audioUrl?: string;
-  visualMode?: string;
   claimRefs?: string[];
   status?: string;
   qaStatus?: 'PASS' | 'WARN' | 'FAIL';
@@ -31,7 +28,9 @@ interface SceneCardProps {
   qaWordCount?: number;
   autoRetryCount?: number;
   sourceProofWarning?: string;
-  onRegenerate?: (sceneId: string, newText: string, newImageUrl: string, newAudioUrl: string) => void;
+  regenerationDisabled?: boolean;
+  isRegenerating?: boolean;
+  onRegenerate?: (sceneId: string, instruction: string) => Promise<void>;
   onOpenEvidence?: (sceneId: string, claimRef?: string) => void;
 }
 
@@ -44,7 +43,6 @@ export default function SceneCard({
   sourceMedia,
   audioStatus,
   audioUrl,
-  visualMode,
   claimRefs,
   status = 'ready',
   qaStatus,
@@ -53,12 +51,14 @@ export default function SceneCard({
   qaWordCount,
   autoRetryCount,
   sourceProofWarning,
+  regenerationDisabled = false,
+  isRegenerating = false,
   onRegenerate,
   onOpenEvidence,
 }: SceneCardProps) {
-  const [isRegenerating, setIsRegenerating] = useState(false);
   const [instruction, setInstruction] = useState('');
   const [isOpen, setIsOpen] = useState(false);
+  const [regenerationError, setRegenerationError] = useState('');
   const [imageFitClass, setImageFitClass] = useState<'w-full h-auto' | 'w-auto h-full'>('w-full h-auto');
   const imageViewportRef = useRef<HTMLDivElement | null>(null);
   const showAudio = artifactType !== 'slide_thumbnail';
@@ -81,31 +81,17 @@ export default function SceneCard({
       : 'bg-rose-100 text-rose-700 border-rose-200';
 
   const handleRegenSubmit = async () => {
-    if (!instruction) return;
-    setIsRegenerating(true);
-    
+    const nextInstruction = instruction.trim();
+    if (!nextInstruction || regenerationDisabled || !onRegenerate) return;
+
+    setRegenerationError('');
     try {
-      const response = await fetch(`${API_BASE}/api/regenerate-scene`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scene_id: sceneId,
-          current_text: text,
-          instruction: instruction,
-          visual_mode: visualMode || 'illustration'
-        })
-      });
-      
-      const data = await response.json();
-      if (data.status === 'success' && onRegenerate) {
-        onRegenerate(sceneId, data.text, data.imageUrl, data.audioUrl);
-        setIsOpen(false);
-        setInstruction('');
-      }
+      await onRegenerate(sceneId, nextInstruction);
+      setIsOpen(false);
+      setInstruction('');
     } catch (err) {
       console.error("Regen failed:", err);
-    } finally {
-      setIsRegenerating(false);
+      setRegenerationError(err instanceof Error ? err.message : 'Unable to regenerate scene.');
     }
   };
 
@@ -228,9 +214,18 @@ export default function SceneCard({
               )
             ) : null}
 
-            <Dialog open={isOpen} onOpenChange={setIsOpen}>
+            <Dialog
+              open={isOpen}
+              onOpenChange={(nextOpen) => {
+                if (!nextOpen && isRegenerating) return;
+                setIsOpen(nextOpen);
+                if (!nextOpen) {
+                  setRegenerationError('');
+                }
+              }}
+            >
               <DialogTrigger asChild>
-                <Button variant="outline" size="sm" className="mt-4 gap-2">
+                <Button variant="outline" size="sm" className="mt-4 gap-2" disabled={regenerationDisabled || isRegenerating}>
                   <Wand2 className="h-4 w-4" />
                   Regenerate Scene
                 </Button>
@@ -246,13 +241,21 @@ export default function SceneCard({
                   <Textarea 
                     placeholder="Instruction for regeneration..." 
                     value={instruction}
-                    onChange={(e) => setInstruction(e.target.value)}
+                    onChange={(e) => {
+                      setInstruction(e.target.value);
+                      if (regenerationError) {
+                        setRegenerationError('');
+                      }
+                    }}
                     className="min-h-[100px]"
                   />
+                  {regenerationError ? (
+                    <p className="mt-3 text-sm text-rose-600">{regenerationError}</p>
+                  ) : null}
                 </div>
                 <DialogFooter>
-                  <Button variant="ghost" onClick={() => setIsOpen(false)}>Cancel</Button>
-                  <Button onClick={handleRegenSubmit} disabled={isRegenerating || !instruction}>
+                  <Button variant="ghost" onClick={() => setIsOpen(false)} disabled={isRegenerating}>Cancel</Button>
+                  <Button onClick={handleRegenSubmit} disabled={isRegenerating || regenerationDisabled || !instruction.trim()}>
                     {isRegenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
                     Apply Edit
                   </Button>
