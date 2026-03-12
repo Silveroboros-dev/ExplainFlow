@@ -47,6 +47,7 @@ from app.schemas.requests import (
     WorkflowSceneRegenerateRequest,
 )
 from app.services.audio_pipeline import generate_audio_and_get_url
+from app.services.story_agent_buffered_scene import execute_buffered_scene_pass
 from app.services.image_pipeline import (
     asset_path_from_reference,
     build_thumbnail_cover_cues,
@@ -1254,20 +1255,20 @@ class GeminiStoryAgent:
         qa_result: dict[str, Any] = {
             **self._default_scene_qa_result(scene_id),
         }
-        scene_result: dict[str, Any] = {}
+        latest_pass = None
         retry_constraints = list(retry_reason_constraints or [])
         override_constraints = list(extra_constraints or [])
 
         for attempt_index in range(2):
-            scene_result = {}
             attempt_constraints = self._build_scene_attempt_constraints(
                 acceptance_checks=list(scene.acceptance_checks),
                 override_constraints=override_constraints,
                 retry_constraints=retry_constraints,
             )
 
+            prelude_events: list[dict[str, str]] = []
             if attempt_index > 0:
-                events.append(
+                prelude_events.append(
                     build_sse_event(
                         "scene_retry_reset",
                         {
@@ -1278,40 +1279,43 @@ class GeminiStoryAgent:
                     )
                 )
 
-            async for event in self._stream_scene_assets(
+            latest_pass = await execute_buffered_scene_pass(
+                stream_scene_assets=self._stream_scene_assets,
                 request=request,
-                scene_id=scene_id,
-                topic=thesis,
-                audience=audience_descriptor,
-                tone=goal,
-                scene_title=scene.title,
-                narration_focus=scene.narration_focus,
-                scene_goal=scene.scene_goal,
-                style_guide=style_guide,
-                visual_prompt=scene.visual_prompt,
-                image_prefix="advanced_interleaved",
-                audio_prefix="advanced_audio",
-                artifact_type=script_pack.artifact_type,
-                scene_mode=scene.scene_mode,
-                layout_template=scene.layout_template,
-                focal_subject=scene.focal_subject,
-                visual_hierarchy=scene.visual_hierarchy,
-                modules=scene.modules,
-                claim_refs=scene.claim_refs,
-                claim_text_snippets=claim_text_snippets,
-                evidence_text_snippets=evidence_text_snippets,
-                crop_safe_regions=scene.crop_safe_regions,
-                continuity_hints=active_continuity,
-                extra_constraints=attempt_constraints,
-                result_collector=scene_result,
-                trace_payload=scene_trace_payload,
-            ):
-                events.append(event)
+                prelude_events=prelude_events,
+                stream_kwargs={
+                    "scene_id": scene_id,
+                    "topic": thesis,
+                    "audience": audience_descriptor,
+                    "tone": goal,
+                    "scene_title": scene.title,
+                    "narration_focus": scene.narration_focus,
+                    "scene_goal": scene.scene_goal,
+                    "style_guide": style_guide,
+                    "visual_prompt": scene.visual_prompt,
+                    "image_prefix": "advanced_interleaved",
+                    "audio_prefix": "advanced_audio",
+                    "artifact_type": script_pack.artifact_type,
+                    "scene_mode": scene.scene_mode,
+                    "layout_template": scene.layout_template,
+                    "focal_subject": scene.focal_subject,
+                    "visual_hierarchy": scene.visual_hierarchy,
+                    "modules": scene.modules,
+                    "claim_refs": scene.claim_refs,
+                    "claim_text_snippets": claim_text_snippets,
+                    "evidence_text_snippets": evidence_text_snippets,
+                    "crop_safe_regions": scene.crop_safe_regions,
+                    "continuity_hints": active_continuity,
+                    "extra_constraints": attempt_constraints,
+                    "trace_payload": scene_trace_payload,
+                },
+            )
+            events.extend(latest_pass.events)
 
             qa_result = evaluate_scene_quality(
                 scene=scene,
-                generated_text=str(scene_result.get("text", "")),
-                image_url=str(scene_result.get("image_url", "")),
+                generated_text=latest_pass.text,
+                image_url=latest_pass.image_url,
                 must_include=must_include,
                 must_avoid=must_avoid,
                 continuity_hints=active_continuity,
@@ -1364,11 +1368,11 @@ class GeminiStoryAgent:
             events=tuple(events),
             qa_result=qa_result,
             retries_used=retries_used,
-            word_count=int(scene_result.get("word_count", 0)),
-            continuity_tokens=tuple(extract_anchor_terms(str(scene_result.get("text", "")), limit=4)),
-            text=str(scene_result.get("text", "")),
-            image_url=str(scene_result.get("image_url", "")),
-            audio_url=str(scene_result.get("audio_url", "")),
+            word_count=latest_pass.word_count if latest_pass is not None else 0,
+            continuity_tokens=tuple(extract_anchor_terms(latest_pass.text if latest_pass is not None else "", limit=4)),
+            text=latest_pass.text if latest_pass is not None else "",
+            image_url=latest_pass.image_url if latest_pass is not None else "",
+            audio_url=latest_pass.audio_url if latest_pass is not None else "",
         )
 
     async def _extract_signal_one_pass(

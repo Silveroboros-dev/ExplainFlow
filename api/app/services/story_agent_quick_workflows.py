@@ -7,6 +7,7 @@ from uuid import uuid4
 from fastapi import Request
 from google.genai import types
 
+from app.services.story_agent_buffered_scene import execute_buffered_scene_pass
 from app.schemas.events import (
     add_checkpoint,
     add_or_update_scene_trace,
@@ -73,36 +74,35 @@ async def execute_buffered_quick_scene(
     visual_prompt: str,
     scene_trace_payload: dict[str, Any],
 ) -> BufferedQuickSceneExecutionResult:
-    events: list[dict[str, str]] = [
-        build_sse_event(
-            "scene_start",
-            agent._build_quick_scene_start_payload(
-                scene_id=scene_id,
-                title=title,
-                claim_refs=claim_refs,
-                scene_trace_payload=scene_trace_payload,
-            ),
-        )
-    ]
-    scene_result: dict[str, Any] = {}
-
-    async for event in agent._stream_scene_assets(
+    pass_result = await execute_buffered_scene_pass(
+        stream_scene_assets=agent._stream_scene_assets,
         request=request,
-        scene_id=scene_id,
-        topic=topic,
-        audience=audience,
-        tone=tone,
-        scene_title=title,
-        narration_focus=narration_focus,
-        style_guide=style_guide,
-        visual_prompt=visual_prompt,
-        image_prefix="interleaved",
-        audio_prefix="audio",
-        result_collector=scene_result,
-        trace_payload=scene_trace_payload,
-    ):
-        events.append(event)
-
+        prelude_events=[
+            build_sse_event(
+                "scene_start",
+                agent._build_quick_scene_start_payload(
+                    scene_id=scene_id,
+                    title=title,
+                    claim_refs=claim_refs,
+                    scene_trace_payload=scene_trace_payload,
+                ),
+            )
+        ],
+        stream_kwargs={
+            "scene_id": scene_id,
+            "topic": topic,
+            "audience": audience,
+            "tone": tone,
+            "scene_title": title,
+            "narration_focus": narration_focus,
+            "style_guide": style_guide,
+            "visual_prompt": visual_prompt,
+            "image_prefix": "interleaved",
+            "audio_prefix": "audio",
+            "trace_payload": scene_trace_payload,
+        },
+    )
+    events = list(pass_result.events)
     events.append(
         build_sse_event(
             "scene_done",
@@ -114,7 +114,7 @@ async def execute_buffered_quick_scene(
         scene_id=scene_id,
         scene_trace_id=str(scene_trace_payload.get("scene_trace_id", "")),
         events=tuple(events),
-        word_count=int(scene_result.get("word_count", 0)),
+        word_count=pass_result.word_count,
     )
 
 
