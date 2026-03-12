@@ -14,12 +14,9 @@ import AdvancedSourcePanel from '@/components/AdvancedSourcePanel';
 import AgentActivityPanel, { AgentNote, AgentNoteType } from '@/components/AgentActivityPanel';
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import useAdvancedWorkflowStorage from "@/hooks/useAdvancedWorkflowStorage";
+import useAdvancedWorkflowSession from "@/hooks/useAdvancedWorkflowSession";
 import {
   extractAdvancedWorkflowSignal,
-  fetchAdvancedWorkflowScriptPack as requestAdvancedWorkflowScriptPack,
-  fetchAdvancedWorkflowSignal as requestAdvancedWorkflowSignal,
-  fetchAdvancedWorkflowSnapshot as requestAdvancedWorkflowSnapshot,
   generateAdvancedWorkflowScriptPack,
   lockAdvancedWorkflowArtifacts,
   lockAdvancedWorkflowRender,
@@ -32,12 +29,10 @@ import {
 import { Toaster, toast } from "sonner";
 import {
   ADVANCED_API_BASE as API_BASE,
-  ADVANCED_WORKFLOW_STORAGE_KEY,
   ARTIFACT_SELECTION_TILES,
   AUDIENCE_LEVEL_TILES,
   CHECKPOINT_LABELS,
   DENSITY_TILES,
-  EXPIRED_WORKFLOW_MESSAGE,
   PRIMARY_ACTION_CARD_CLASS,
   PRIMARY_ACTION_LABEL_CLASS,
   RENDER_PROFILE_STEPS,
@@ -65,7 +60,6 @@ import {
   buildAdvancedSourceManifest,
   deriveSceneCount,
   formatMilliseconds,
-  isUnknownWorkflowError,
   isUnknownWorkflowMessage,
   mapArtifactScope,
   readVideoDurationMs,
@@ -225,73 +219,44 @@ export default function AdvancedStudio() {
     }
   };
 
-  const clearPersistedWorkflowId = () => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    window.localStorage.removeItem(ADVANCED_WORKFLOW_STORAGE_KEY);
-  };
-
-  const resetWorkflowSession = (
-    options: {
-      silent?: boolean;
-      noteStage?: string;
-      noteMessage?: string;
-      statusMessage?: string;
-    } = {},
-  ) => {
-    const {
-      silent = false,
-      noteStage = 'Recovery',
-      noteMessage = EXPIRED_WORKFLOW_MESSAGE,
-      statusMessage = EXPIRED_WORKFLOW_MESSAGE,
-    } = options;
-    clearPersistedWorkflowId();
-    setWorkflowId(null);
-    setWorkflowSnapshot(null);
-    setExtractedSignal(null);
-    setSignalStage('idle');
-    setExtractProgress(0);
-    setScriptPack(null);
-    setScriptPackStage('idle');
-    setScriptPackProgress(0);
-    setScenes({});
-    setExpectedSceneCount(0);
-    setEvidenceViewer(null);
-    setError('');
-    setGenerationError('');
-    setGenerationStatus(statusMessage);
-    setIsExtracting(false);
-    setIsApplyingProfile(false);
-    setIsGeneratingScriptPack(false);
-    setIsGenerating(false);
-    setActionDialogStage(null);
-    setShowAmendHelp(false);
-    setActivePanel('source');
-    fullTextBuffer.current = {};
-    resetSignalPreviewRun();
-    resetScriptPreviewRun();
-    resetStreamPreviewRun();
-    if (!silent) {
-      pushAgentNote('error', noteStage, noteMessage);
-    }
-  };
-
-  const handleUnknownWorkflowError = (
-    error: unknown,
-    options: {
-      silent?: boolean;
-      noteStage?: string;
-      noteMessage?: string;
-      statusMessage?: string;
-    } = {},
-  ): boolean => {
-    if (!isUnknownWorkflowError(error)) {
-      return false;
-    }
-    resetWorkflowSession(options);
-    return true;
-  };
+  const {
+    fetchWorkflowSignal,
+    fetchWorkflowSnapshot,
+    handleUnknownWorkflowError,
+    recoverWorkflowState,
+    resetWorkflowSession,
+    syncWorkflowUiFromSnapshot,
+    updateWorkflowSnapshot,
+  } = useAdvancedWorkflowSession({
+    apiBase: API_BASE,
+    workflowId,
+    setWorkflowId,
+    setWorkflowSnapshot,
+    setExtractedSignal,
+    setSignalStage,
+    setExtractProgress,
+    setError,
+    setGenerationError,
+    setGenerationStatus,
+    setIsExtracting,
+    setIsApplyingProfile,
+    setIsGeneratingScriptPack,
+    setIsGenerating,
+    setActionDialogStage,
+    setShowAmendHelp,
+    setActivePanel,
+    setScriptPack,
+    setScriptPackStage,
+    setScriptPackProgress,
+    setScenes,
+    setExpectedSceneCount,
+    setEvidenceViewer,
+    fullTextBufferRef: fullTextBuffer,
+    resetSignalPreviewRun,
+    resetScriptPreviewRun,
+    resetStreamPreviewRun,
+    pushAgentNote,
+  });
 
   const pushPlannerQaNote = (summary: PlannerQaSummary | null | undefined) => {
     if (!summary?.summary) return;
@@ -309,38 +274,6 @@ export default function AdvancedStudio() {
   React.useEffect(() => {
     chatScrollAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [chatMessages.length]);
-
-  const updateWorkflowSnapshot = (snapshot: unknown) => {
-    if (!snapshot || typeof snapshot !== 'object') return;
-    const candidate = snapshot as WorkflowSnapshot;
-    if (!candidate.workflow_id || typeof candidate.workflow_id !== 'string') return;
-    setWorkflowSnapshot(candidate);
-    setWorkflowId(candidate.workflow_id);
-  };
-
-  const syncWorkflowUiFromSnapshot = (snapshot: WorkflowSnapshot) => {
-    const checkpoints = snapshot.checkpoint_state ?? {};
-    if (checkpoints.CP1_SIGNAL_READY === 'passed' || snapshot.has_signal) {
-      setSignalStage('ready');
-      setExtractProgress(100);
-      setError('');
-    } else if (checkpoints.CP1_SIGNAL_READY === 'failed') {
-      setSignalStage('error');
-      setExtractProgress(0);
-    }
-
-    if (checkpoints.CP6_BUNDLE_FINALIZED === 'passed' || checkpoints.CP5_STREAM_COMPLETE === 'passed') {
-      setActivePanel('stream');
-    } else if (snapshot.has_script_pack) {
-      setActivePanel('script');
-    } else if (snapshot.ready_for_script_pack || snapshot.has_render_profile || snapshot.render_profile_queued) {
-      setActivePanel('signal');
-    } else if (snapshot.workflow_id) {
-      setActivePanel('profile');
-    }
-
-    setGenerationStatus(snapshotStatusSummary(snapshot));
-  };
 
   const hasSourceInput = sourceDoc.trim().length > 0 || uploadedSourceAssets.length > 0;
   const clearGeneratedOutputs = () => {
@@ -511,84 +444,6 @@ export default function AdvancedStudio() {
       media,
     });
   };
-
-  const fetchWorkflowSnapshot = async (workflowIdValue: string): Promise<WorkflowSnapshot> => {
-    const snapshot = await requestAdvancedWorkflowSnapshot(API_BASE, workflowIdValue);
-    updateWorkflowSnapshot(snapshot);
-    syncWorkflowUiFromSnapshot(snapshot);
-    const streamFailed = snapshot.checkpoint_state?.CP5_STREAM_COMPLETE === 'failed'
-      || snapshot.checkpoint_state?.CP6_BUNDLE_FINALIZED === 'failed';
-    if (streamFailed && typeof snapshot.last_error === 'string' && snapshot.last_error.trim()) {
-      setGenerationError(snapshot.last_error);
-    } else if (
-      snapshot.checkpoint_state?.CP5_STREAM_COMPLETE === 'passed'
-      || snapshot.checkpoint_state?.CP6_BUNDLE_FINALIZED === 'passed'
-    ) {
-      setGenerationError('');
-    }
-    return snapshot;
-  };
-
-  const fetchWorkflowSignal = async (workflowIdValue: string): Promise<ExtractedSignal> => {
-    return requestAdvancedWorkflowSignal(API_BASE, workflowIdValue);
-  };
-
-  const fetchWorkflowScriptPack = async (workflowIdValue: string): Promise<ScriptPackPayload> => {
-    return requestAdvancedWorkflowScriptPack(API_BASE, workflowIdValue);
-  };
-
-  const recoverWorkflowState = async (
-    workflowIdValue: string,
-    options: { silent?: boolean } = {},
-  ): Promise<WorkflowSnapshot | null> => {
-    const { silent = false } = options;
-
-    try {
-      const snapshot = await fetchWorkflowSnapshot(workflowIdValue);
-      if (snapshot.has_signal) {
-        try {
-          const recoveredSignal = await fetchWorkflowSignal(workflowIdValue);
-          setExtractedSignal(recoveredSignal);
-        } catch (signalError) {
-          console.warn('Signal recovery error:', signalError);
-        }
-      }
-      if (snapshot.has_script_pack) {
-        try {
-          const recoveredScriptPack = await fetchWorkflowScriptPack(workflowIdValue);
-          setScriptPack(recoveredScriptPack);
-          setExpectedSceneCount(deriveSceneCount(recoveredScriptPack));
-          setScriptPackStage('ready');
-          setScriptPackProgress(100);
-        } catch (scriptPackError) {
-          console.warn('Script pack recovery error:', scriptPackError);
-        }
-      } else {
-        setExpectedSceneCount(0);
-        setScriptPackStage('idle');
-        setScriptPackProgress(0);
-      }
-      if (!silent) {
-        pushAgentNote('info', 'Recovery', 'Recovered workflow state from the latest saved checkpoint.');
-      }
-      return snapshot;
-    } catch (recoveryError) {
-      if (handleUnknownWorkflowError(recoveryError, { silent, noteStage: 'Recovery' })) {
-        return null;
-      }
-      console.error('Workflow recovery error:', recoveryError);
-      if (!silent) {
-        pushAgentNote('error', 'Recovery', 'Unable to recover saved workflow state.');
-      }
-      return null;
-    }
-  };
-
-  useAdvancedWorkflowStorage({
-    workflowId,
-    storageKey: ADVANCED_WORKFLOW_STORAGE_KEY,
-    recoverWorkflow: (storedWorkflowId) => recoverWorkflowState(storedWorkflowId, { silent: true }),
-  });
 
   // Typewriter effect loop
   React.useEffect(() => {
