@@ -67,15 +67,15 @@ def public_asset_url(request: Request, asset_uri: str | None) -> str:
     if not candidate:
         return ""
 
+    local_path = asset_path_from_reference(candidate)
+    if local_path is not None:
+        return f"{base_url(request)}/static/assets/{local_path.name}"
+
     if candidate.startswith("http://") or candidate.startswith("https://"):
         return candidate
 
     if candidate.startswith("/static/"):
         return f"{base_url(request)}{candidate}"
-
-    local_path = asset_path_from_reference(candidate)
-    if local_path is not None:
-        return f"{base_url(request)}/static/assets/{local_path.name}"
 
     return candidate
 

@@ -34,6 +34,7 @@ from app.services.gemini_story_agent import GeminiStoryAgent
 from app.services.image_pipeline import (
     asset_path_from_url,
     compose_thumbnail_cover_and_get_url,
+    public_asset_url,
     save_image_and_get_url,
 )
 from app.services.interleaved_parser import (
@@ -1586,6 +1587,7 @@ def test_compose_thumbnail_cover_and_get_url_adds_overlay_elements() -> None:
     composed_path = asset_path_from_url(composed_url)
     assert source_path is not None
     assert composed_path is not None
+
     assert composed_path.exists()
 
     with Image.open(source_path) as original, Image.open(composed_path) as composed:
@@ -1594,6 +1596,46 @@ def test_compose_thumbnail_cover_and_get_url_adds_overlay_elements() -> None:
         assert composed_rgba.size == original_rgba.size
         diff = ImageChops.difference(original_rgba.convert("RGB"), composed_rgba.convert("RGB"))
         assert diff.getbbox() is not None
+
+
+def test_public_asset_url_rebases_local_static_assets_to_current_request_origin() -> None:
+    upload_scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [],
+        "query_string": b"",
+        "client": ("testclient", 50000),
+        "server": ("old-host.example", 80),
+        "scheme": "http",
+    }
+    upload_request = Request(upload_scope)
+
+    image = Image.new("RGB", (64, 64), (24, 32, 72))
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    stale_asset_url = save_image_and_get_url(
+        request=upload_request,
+        scene_id="stale-asset",
+        image_bytes=buffer.getvalue(),
+        prefix="unit_public_asset",
+    )
+
+    current_scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [],
+        "query_string": b"",
+        "client": ("testclient", 50001),
+        "server": ("current-host.example", 443),
+        "scheme": "https",
+    }
+    current_request = Request(current_scope)
+
+    rebased_url = public_asset_url(current_request, stale_asset_url)
+
+    assert rebased_url == f"https://current-host.example/static/assets/{Path(stale_asset_url).name}"
 
 
 def test_build_sse_event_serializes_payload() -> None:
