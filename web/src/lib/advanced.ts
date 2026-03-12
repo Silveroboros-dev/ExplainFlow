@@ -496,6 +496,24 @@ export type ScriptPackPayload = {
   }>;
 };
 
+export type WorkflowSceneContext = {
+  scene_id: string;
+  title: string;
+  text: string;
+};
+
+export type RegeneratedScenePayload = {
+  sceneId: string;
+  text: string;
+  imageUrl?: string;
+  audioUrl?: string;
+  qaStatus?: "PASS" | "WARN" | "FAIL";
+  qaReasons: string[];
+  qaScore?: number;
+  qaWordCount?: number;
+  autoRetries?: number;
+};
+
 export type EvidenceViewerState = {
   sceneId: string;
   sceneTitle?: string;
@@ -840,6 +858,60 @@ export const selectAdvancedEvidenceMedia = (
   }
 
   return [...candidates].sort((left, right) => scoreEvidenceMedia(right) - scoreEvidenceMedia(left))[0] ?? null;
+};
+
+export const asRegeneratedScenePayload = (value: unknown): RegeneratedScenePayload | null => {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.scene_id !== "string" || typeof candidate.text !== "string") {
+    return null;
+  }
+  const qaStatus = candidate.qa_status;
+  return {
+    sceneId: candidate.scene_id,
+    text: candidate.text,
+    imageUrl: typeof candidate.imageUrl === "string" && candidate.imageUrl.trim()
+      ? candidate.imageUrl
+      : undefined,
+    audioUrl: typeof candidate.audioUrl === "string" && candidate.audioUrl.trim()
+      ? candidate.audioUrl
+      : undefined,
+    qaStatus: qaStatus === "PASS" || qaStatus === "WARN" || qaStatus === "FAIL"
+      ? qaStatus
+      : undefined,
+    qaReasons: asStringArray(candidate.qa_reasons),
+    qaScore: typeof candidate.qa_score === "number" ? candidate.qa_score : undefined,
+    qaWordCount: typeof candidate.qa_word_count === "number" ? candidate.qa_word_count : undefined,
+    autoRetries: typeof candidate.auto_retries === "number" ? candidate.auto_retries : undefined,
+  };
+};
+
+export const buildAdvancedSceneRegenerationContext = (
+  sceneId: string,
+  scriptPack: ScriptPackPayload | null | undefined,
+  scenes: Record<string, SceneViewModel>,
+  fullTextBuffer: Record<string, string>,
+): WorkflowSceneContext[] => {
+  if (!scriptPack?.scenes?.length) {
+    return [];
+  }
+
+  const targetIndex = scriptPack.scenes.findIndex((scene) => scene.scene_id === sceneId);
+  if (targetIndex <= 0) {
+    return [];
+  }
+
+  return scriptPack.scenes
+    .slice(Math.max(0, targetIndex - 3), targetIndex)
+    .map((scene) => {
+      const currentText = (fullTextBuffer[scene.scene_id] || scenes[scene.scene_id]?.text || "").trim();
+      return {
+        scene_id: scene.scene_id,
+        title: scene.title,
+        text: currentText,
+      };
+    })
+    .filter((scene) => scene.text.length > 0);
 };
 
 export const asUploadedSourceAsset = (value: unknown): UploadedSourceAsset | null => {

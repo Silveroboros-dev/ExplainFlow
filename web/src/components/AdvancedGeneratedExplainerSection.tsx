@@ -35,29 +35,29 @@ type AdvancedGeneratedScene = {
 type AdvancedGeneratedExplainerSectionProps = {
   scenes: Record<string, AdvancedGeneratedScene>;
   artifactType: string;
-  visualMode: string;
   generationError: string;
   bundleImageMode: "preview" | "high";
   isApplyingProfile: boolean;
   isGenerating: boolean;
   isGeneratingScriptPack: boolean;
   isUpscalingBundle: boolean;
+  regeneratingSceneId?: string | null;
   topic: string;
   onEnableHighFidelity: () => void;
-  onRegenerate: (sceneId: string, newText: string, newImageUrl: string, newAudioUrl: string) => void;
+  onRegenerate: (sceneId: string, instruction: string) => Promise<void>;
   onOpenEvidence: (sceneId: string, claimRef?: string) => void;
 };
 
 export default function AdvancedGeneratedExplainerSection({
   scenes,
   artifactType,
-  visualMode,
   generationError,
   bundleImageMode,
   isApplyingProfile,
   isGenerating,
   isGeneratingScriptPack,
   isUpscalingBundle,
+  regeneratingSceneId,
   topic,
   onEnableHighFidelity,
   onRegenerate,
@@ -65,6 +65,7 @@ export default function AdvancedGeneratedExplainerSection({
 }: AdvancedGeneratedExplainerSectionProps) {
   const sceneList = Object.values(scenes);
   const hasScenes = sceneList.length > 0;
+  const isRegeneratingScene = Boolean(regeneratingSceneId);
 
   return (
     <div className="space-y-6 mt-12">
@@ -89,7 +90,6 @@ export default function AdvancedGeneratedExplainerSection({
             imageUrl={scene.imageUrl}
             artifactType={artifactType}
             audioUrl={scene.audioUrl}
-            visualMode={visualMode}
             onRegenerate={onRegenerate}
             onOpenEvidence={onOpenEvidence}
             claimRefs={scene.claim_refs}
@@ -101,8 +101,9 @@ export default function AdvancedGeneratedExplainerSection({
             qaWordCount={scene.qa_word_count}
             autoRetryCount={scene.auto_retry_count}
             sourceProofWarning={scene.source_proof_warning}
-            audioStatus={isGenerating && !scene.audioUrl ? "Generating..." : "Ready"}
-            regenerationDisabled={isUpscalingBundle}
+            audioStatus={(isGenerating || regeneratingSceneId === scene.id) && !scene.audioUrl ? "Generating..." : "Ready"}
+            regenerationDisabled={isUpscalingBundle || isGenerating || isGeneratingScriptPack}
+            isRegenerating={regeneratingSceneId === scene.id}
           />
         ))}
       </div>
@@ -121,7 +122,7 @@ export default function AdvancedGeneratedExplainerSection({
                 <Button
                   type="button"
                   onClick={onEnableHighFidelity}
-                  disabled={isApplyingProfile || isGenerating || isGeneratingScriptPack || isUpscalingBundle}
+                  disabled={isApplyingProfile || isGenerating || isGeneratingScriptPack || isUpscalingBundle || isRegeneratingScene}
                 >
                   {isUpscalingBundle ? (
                     <>
@@ -142,7 +143,7 @@ export default function AdvancedGeneratedExplainerSection({
           <FinalBundle
             scenes={scenes}
             topic={topic}
-            disabled={isGenerating || isUpscalingBundle}
+            disabled={isGenerating || isUpscalingBundle || isRegeneratingScene}
           />
         </>
       ) : null}

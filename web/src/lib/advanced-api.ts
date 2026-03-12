@@ -2,6 +2,7 @@ import {
   asUploadedSourceAsset,
   createApiRequestError,
   type AdvancedPanel,
+  type WorkflowSceneContext,
   type AdvancedSourceManifest,
   type ExtractedSignal,
   type ScriptPackPayload,
@@ -86,6 +87,29 @@ export type AdvancedAgentChatPayload = {
     script_presentation_mode: "review" | "auto";
   };
   conversation: WorkflowAgentApiTurn[];
+};
+
+export type AdvancedWorkflowSceneRegeneratePayload = {
+  scene_id: string;
+  instruction: string;
+  current_text?: string;
+  prior_scene_context?: WorkflowSceneContext[];
+};
+
+export type AdvancedWorkflowSceneRegenerateResponse = {
+  workflow_id?: string;
+  status?: string;
+  scene_id?: string;
+  text?: string;
+  imageUrl?: string;
+  audioUrl?: string;
+  qa_status?: "PASS" | "WARN" | "FAIL";
+  qa_reasons?: string[];
+  qa_score?: number;
+  qa_word_count?: number;
+  auto_retries?: number;
+  detail?: string;
+  message?: string;
 };
 
 const requestJson = async <T>(url: string, init?: RequestInit): Promise<JsonApiResult<T>> => {
@@ -238,6 +262,17 @@ export const openAdvancedWorkflowStream = async (
       script_pack: scriptPack ?? undefined,
     }),
   })
+);
+
+export const regenerateAdvancedWorkflowScene = async (
+  apiBase: string,
+  workflowId: string,
+  payload: AdvancedWorkflowSceneRegeneratePayload,
+): Promise<JsonApiResult<AdvancedWorkflowSceneRegenerateResponse>> => (
+  postJson<AdvancedWorkflowSceneRegenerateResponse>(
+    `${apiBase}/api/workflow/${workflowId}/regenerate-scene`,
+    payload,
+  )
 );
 
 export const submitAdvancedWorkflowChat = async (

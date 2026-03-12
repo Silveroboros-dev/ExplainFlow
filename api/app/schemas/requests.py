@@ -71,6 +71,19 @@ class RegenerateSceneRequest(BaseModel):
     visual_mode: str = "illustration"
 
 
+class WorkflowSceneContextRequest(BaseModel):
+    scene_id: str
+    title: str = ""
+    text: str = ""
+
+
+class WorkflowSceneRegenerateRequest(BaseModel):
+    scene_id: str
+    instruction: str
+    current_text: str = ""
+    prior_scene_context: list[WorkflowSceneContextRequest] = Field(default_factory=list)
+
+
 class QuickArtifactBlockSchema(BaseModel):
     block_id: str
     label: str

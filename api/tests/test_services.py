@@ -29,6 +29,7 @@ from app.schemas.requests import (
     ScriptPackScene,
     SignalExtractionRequest,
     SourceMediaRefSchema,
+    WorkflowSceneRegenerateRequest,
 )
 from app.services.gemini_story_agent import GeminiStoryAgent
 from app.services.image_pipeline import (
@@ -3633,6 +3634,142 @@ def test_resolve_source_media_payloads_includes_pdf_line_locator() -> None:
     assert payloads[0]["line_start"] == 12
     assert payloads[0]["line_end"] == 13
     assert "moral competence" in payloads[0]["matched_excerpt"].lower()
+
+
+def test_regenerate_workflow_scene_uses_locked_context_for_scene_override() -> None:
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/workflow/wf-test/regenerate-scene",
+        "headers": [],
+        "query_string": b"",
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+        "scheme": "http",
+    }
+    request = Request(scope)
+    agent = GeminiStoryAgent()
+    captured: dict[str, Any] = {}
+
+    async def fake_execute_buffered_advanced_scene(**kwargs):  # noqa: ANN003
+        captured.update(kwargs)
+        return SimpleNamespace(
+            scene_id="scene-1",
+            scene_trace_id="trace-scene-1",
+            qa_result={
+                "scene_id": "scene-1",
+                "status": "PASS",
+                "score": 0.88,
+                "reasons": [],
+                "attempt": 1,
+                "word_count": 18,
+            },
+            retries_used=0,
+            word_count=18,
+            continuity_tokens=("ATP", "mitochondria"),
+            text="Updated narration text.",
+            image_url="/static/assets/scene-1.png",
+            audio_url="/static/assets/scene-1.mp3",
+        )
+
+    agent._execute_buffered_advanced_scene = fake_execute_buffered_advanced_scene  # type: ignore[method-assign]
+
+    workflow_payload = AdvancedStreamRequest(
+        content_signal={
+            "thesis": {"one_liner": "Cells need ATP"},
+            "key_claims": [
+                {
+                    "claim_id": "c1",
+                    "claim_text": "Mitochondria generate ATP",
+                    "evidence_snippets": [{"text": "ATP production occurs in mitochondria."}],
+                }
+            ],
+        },
+        render_profile={
+            "goal": "teach",
+            "visual_mode": "diagram",
+            "audience": {
+                "level": "beginner",
+                "persona": "General audience",
+                "must_include": ["ATP"],
+                "must_avoid": ["jargon"],
+            },
+            "style": {"descriptors": ["clean", "modern"]},
+            "palette": {"mode": "auto"},
+        },
+        script_pack={
+            "plan_id": "plan-1",
+            "plan_summary": "Summary",
+            "audience_descriptor": "General audience (beginner)",
+            "scene_count": 2,
+            "artifact_type": "storyboard_grid",
+            "scenes": [
+                {
+                    "scene_id": "scene-1",
+                    "title": "Hook",
+                    "scene_goal": "Explain ATP production.",
+                    "narration_focus": "Focus on mitochondria.",
+                    "visual_prompt": "Show ATP generation.",
+                    "claim_refs": ["c1"],
+                    "continuity_refs": ["Maintain continuity from scene-0."],
+                    "acceptance_checks": ["Keep the explanation concrete."],
+                    "source_media": [],
+                },
+                {
+                    "scene_id": "scene-2",
+                    "title": "Payoff",
+                    "scene_goal": "Land the implication.",
+                    "narration_focus": "Show the result.",
+                    "visual_prompt": "Show the cell energized.",
+                    "claim_refs": ["c1"],
+                    "continuity_refs": [],
+                    "acceptance_checks": [],
+                    "source_media": [],
+                },
+            ],
+        },
+        artifact_scope=["story_cards"],
+    )
+
+    result = asyncio.run(
+        agent.regenerate_workflow_scene(
+            request=request,
+            workflow_payload=workflow_payload,
+            payload=WorkflowSceneRegenerateRequest(
+                scene_id="scene-1",
+                instruction="Make the explanation feel more visual and immediate.",
+                current_text="Old narration draft.",
+                prior_scene_context=[
+                    {
+                        "scene_id": "scene-0",
+                        "title": "Setup",
+                        "text": "Prior context establishes the ATP problem.",
+                    }
+                ],
+            ),
+        )
+    )
+
+    assert result["status"] == "success"
+    assert result["scene_id"] == "scene-1"
+    assert result["qa_status"] == "PASS"
+    assert result["imageUrl"] == "/static/assets/scene-1.png"
+    assert captured["scene"].scene_id == "scene-1"
+    assert captured["must_include"] == ["ATP"]
+    assert captured["must_avoid"] == ["jargon"]
+    assert any(
+        "workflow-aware director override" in constraint.lower()
+        for constraint in captured["extra_constraints"]
+    )
+    assert any(
+        "old narration draft" in constraint.lower()
+        for constraint in captured["extra_constraints"]
+    )
+    assert any(
+        continuity.startswith("Setup:")
+        for continuity in captured["active_continuity"]
+    )
+    assert "Maintain continuity from scene-0." in captured["active_continuity"]
 
 
 def test_resolve_source_media_payloads_overwrites_zero_pdf_page_with_locator_match() -> None:

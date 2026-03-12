@@ -3,14 +3,21 @@
 import React from "react";
 
 import { type AgentNoteType } from "@/components/AgentActivityPanel";
-import { openAdvancedWorkflowStream } from "@/lib/advanced-api";
+import {
+  openAdvancedWorkflowStream,
+  regenerateAdvancedWorkflowScene,
+} from "@/lib/advanced-api";
 import {
   CHECKPOINT_LABELS,
+  asRegeneratedScenePayload,
   asPlannerQaSummary,
   asSourceMedia,
   asSourceMediaList,
   asStringArray,
+  buildAdvancedSceneRegenerationContext,
+  createApiRequestError,
   deriveSceneCount,
+  type RegeneratedScenePayload,
   type SceneQaPayload,
   type SceneQueueItem,
   type SceneViewModel,
@@ -33,10 +40,12 @@ type UseAdvancedGenerationStreamOptions = {
   workflowId: string | null;
   workflowSnapshot: WorkflowSnapshot | null;
   scriptPack: ScriptPackPayload | null;
+  scenes: Record<string, SceneViewModel>;
   setIsGenerating: React.Dispatch<React.SetStateAction<boolean>>;
   setGenerationError: React.Dispatch<React.SetStateAction<string>>;
   setGenerationStatus: React.Dispatch<React.SetStateAction<string>>;
   setExpectedSceneCount: React.Dispatch<React.SetStateAction<number>>;
+  setRegeneratingSceneId: React.Dispatch<React.SetStateAction<string | null>>;
   setScenes: React.Dispatch<React.SetStateAction<Record<string, SceneViewModel>>>;
   setScriptPack: React.Dispatch<React.SetStateAction<ScriptPackPayload | null>>;
   fullTextBufferRef: React.MutableRefObject<Record<string, string>>;
@@ -60,10 +69,12 @@ export default function useAdvancedGenerationStream({
   workflowId,
   workflowSnapshot,
   scriptPack,
+  scenes,
   setIsGenerating,
   setGenerationError,
   setGenerationStatus,
   setExpectedSceneCount,
+  setRegeneratingSceneId,
   setScenes,
   setScriptPack,
   fullTextBufferRef,
@@ -135,22 +146,96 @@ export default function useAdvancedGenerationStream({
   };
 
   const handleRegenerateScene = (
-    sceneId: string,
-    newText: string,
-    newImageUrl: string,
-    newAudioUrl: string,
+    regeneratedScene: RegeneratedScenePayload,
   ) => {
-    fullTextBufferRef.current[sceneId] = newText;
+    const {
+      sceneId,
+      text,
+      imageUrl,
+      audioUrl,
+      qaStatus,
+      qaReasons,
+      qaScore,
+      qaWordCount,
+      autoRetries,
+    } = regeneratedScene;
+    fullTextBufferRef.current[sceneId] = text;
     setScenes((prev) => ({
       ...prev,
       [sceneId]: {
         ...prev[sceneId],
-        text: "",
-        imageUrl: newImageUrl,
-        audioUrl: newAudioUrl,
-        status: "ready",
+        text,
+        imageUrl: imageUrl ?? prev[sceneId]?.imageUrl,
+        audioUrl: audioUrl ?? prev[sceneId]?.audioUrl,
+        status: qaStatus === "FAIL" ? "qa-failed" : "ready",
+        qa_status: qaStatus,
+        qa_reasons: qaReasons,
+        qa_score: qaScore,
+        qa_word_count: qaWordCount,
+        auto_retry_count: autoRetries,
       },
     }));
+  };
+
+  const handleWorkflowSceneRegenerate = async (
+    sceneId: string,
+    instruction: string,
+  ) => {
+    if (!workflowId) {
+      throw new Error("Run extraction first to initialize workflow.");
+    }
+    if (!scriptPack) {
+      throw new Error("Generate and lock the script pack before regenerating a scene.");
+    }
+
+    const sceneTitle = scenes[sceneId]?.title
+      || scriptPack.scenes.find((scene) => scene.scene_id === sceneId)?.title
+      || sceneId;
+
+    setRegeneratingSceneId(sceneId);
+    setGenerationStatus(`Regenerating ${sceneTitle} with the locked workflow context...`);
+    pushAgentNote("info", "Scene Override", `Workflow-aware override started for ${sceneTitle}.`);
+
+    try {
+      const currentText = (fullTextBufferRef.current[sceneId] || scenes[sceneId]?.text || "").trim();
+      const response = await regenerateAdvancedWorkflowScene(apiBase, workflowId, {
+        scene_id: sceneId,
+        instruction,
+        current_text: currentText,
+        prior_scene_context: buildAdvancedSceneRegenerationContext(
+          sceneId,
+          scriptPack,
+          scenes,
+          fullTextBufferRef.current,
+        ),
+      });
+      if (!response.ok || response.data?.status !== "success") {
+        throw createApiRequestError(
+          response.data,
+          "Unable to regenerate this scene.",
+          response.statusCode,
+        );
+      }
+      const regeneratedScene = asRegeneratedScenePayload(response.data);
+      if (!regeneratedScene) {
+        throw createApiRequestError(
+          response.data,
+          "Scene regeneration returned an invalid payload.",
+          response.statusCode,
+        );
+      }
+
+      handleRegenerateScene(regeneratedScene);
+      setGenerationStatus(`Scene override applied to ${sceneTitle}.`);
+      pushAgentNote("checkpoint", "Scene Override", `Workflow-aware override applied to ${sceneTitle}.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to regenerate this scene.";
+      setGenerationStatus("");
+      pushAgentNote("error", "Scene Override", message);
+      throw error;
+    } finally {
+      setRegeneratingSceneId(null);
+    }
   };
 
   const refreshWorkflowSnapshot = async () => {
@@ -446,6 +531,6 @@ export default function useAdvancedGenerationStream({
 
   return {
     handleGenerateStream,
-    handleRegenerateScene,
+    handleWorkflowSceneRegenerate,
   };
 }

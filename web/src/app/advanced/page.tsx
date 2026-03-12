@@ -109,6 +109,7 @@ export default function AdvancedStudio() {
   const [isGeneratingScriptPack, setIsGeneratingScriptPack] = useState(false);
   const [isApplyingProfile, setIsApplyingProfile] = useState(false);
   const [isUpscalingBundle, setIsUpscalingBundle] = useState(false);
+  const [regeneratingSceneId, setRegeneratingSceneId] = useState<string | null>(null);
   const [scenes, setScenes] = useState<Record<string, SceneViewModel>>({});
   const [expectedSceneCount, setExpectedSceneCount] = useState(0);
   const [scriptPack, setScriptPack] = useState<ScriptPackPayload | null>(null);
@@ -240,16 +241,18 @@ export default function AdvancedStudio() {
 
   const {
     handleGenerateStream,
-    handleRegenerateScene,
+    handleWorkflowSceneRegenerate,
   } = useAdvancedGenerationStream({
     apiBase: API_BASE,
     workflowId,
     workflowSnapshot,
     scriptPack,
+    scenes,
     setIsGenerating,
     setGenerationError,
     setGenerationStatus,
     setExpectedSceneCount,
+    setRegeneratingSceneId,
     setScenes,
     setScriptPack,
     fullTextBufferRef: fullTextBuffer,
@@ -265,6 +268,7 @@ export default function AdvancedStudio() {
   }, [chatMessages.length]);
 
   const hasSourceInput = sourceDoc.trim().length > 0 || uploadedSourceAssets.length > 0;
+  const isSceneRegenerating = regeneratingSceneId !== null;
   const resetBundleImageMode = () => {
     setBundleImageMode('preview');
   };
@@ -352,6 +356,11 @@ export default function AdvancedStudio() {
     if (isUpscalingBundle) {
       setGenerationStatus('Wait for bundle image upscale to finish before starting another generation run.');
       pushAgentNote('error', 'Final Bundle', 'Wait for bundle image upscale to finish before regenerating the bundle.');
+      return;
+    }
+    if (isSceneRegenerating) {
+      setGenerationStatus('Wait for the current scene override to finish before starting another generation run.');
+      pushAgentNote('error', 'Scene Override', 'Wait for the current scene override to finish before regenerating the bundle.');
       return;
     }
     resetBundleImageMode();
@@ -700,18 +709,27 @@ export default function AdvancedStudio() {
     setShowAmendHelp(false);
   };
 
-  const blockBundleMutationDuringUpscale = (message: string) => {
-    if (!isUpscalingBundle) {
-      return false;
+  const blockWorkflowMutationWhileOutputBusy = (upscaleMessage: string, sceneMessage?: string) => {
+    if (isUpscalingBundle) {
+      setGenerationStatus(upscaleMessage);
+      return true;
     }
-    setGenerationStatus(message);
-    return true;
+    if (isSceneRegenerating) {
+      setGenerationStatus(
+        sceneMessage || 'Wait for the current scene override to finish before changing the workflow.',
+      );
+      return true;
+    }
+    return false;
   };
 
   const executePendingAssistantAction = async (pendingAction: PendingAssistantAction): Promise<boolean> => {
     if (pendingAction.action === 'extract_signal') {
       if (!hasSourceInput || isExtracting || isUploadingAssets) return false;
-      if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before extracting again.')) {
+      if (blockWorkflowMutationWhileOutputBusy(
+        'Wait for bundle image upscale to finish before extracting again.',
+        'Wait for the current scene override to finish before extracting again.',
+      )) {
         return false;
       }
       setActivePanel(extractedSignal ? 'signal' : 'profile');
@@ -721,7 +739,10 @@ export default function AdvancedStudio() {
 
     if (pendingAction.action === 'apply_render_profile') {
       if (!workflowId || isApplyingProfile) return false;
-      if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before applying the render profile.')) {
+      if (blockWorkflowMutationWhileOutputBusy(
+        'Wait for bundle image upscale to finish before applying the render profile.',
+        'Wait for the current scene override to finish before applying the render profile.',
+      )) {
         return false;
       }
       setActivePanel('signal');
@@ -732,7 +753,10 @@ export default function AdvancedStudio() {
 
     if (pendingAction.action === 'confirm_signal' || pendingAction.action === 'generate_script_pack') {
       if (!workflowSnapshot?.ready_for_script_pack || isGeneratingScriptPack || isGenerating) return false;
-      if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before generating the script pack.')) {
+      if (blockWorkflowMutationWhileOutputBusy(
+        'Wait for bundle image upscale to finish before generating the script pack.',
+        'Wait for the current scene override to finish before generating the script pack.',
+      )) {
         return false;
       }
       resetBundleImageMode();
@@ -742,7 +766,10 @@ export default function AdvancedStudio() {
 
     if (pendingAction.action === 'generate_stream') {
       if (!workflowSnapshot?.ready_for_stream || !scriptPack || isGenerating) return false;
-      if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before starting the generation stream.')) {
+      if (blockWorkflowMutationWhileOutputBusy(
+        'Wait for bundle image upscale to finish before starting the generation stream.',
+        'Wait for the current scene override to finish before starting the generation stream.',
+      )) {
         return false;
       }
       setActivePanel('stream');
@@ -769,7 +796,10 @@ export default function AdvancedStudio() {
       return;
     }
     dismissPendingAssistantAction();
-    if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before extracting again.')) {
+    if (blockWorkflowMutationWhileOutputBusy(
+      'Wait for bundle image upscale to finish before extracting again.',
+      'Wait for the current scene override to finish before extracting again.',
+    )) {
       return;
     }
     setActivePanel('profile');
@@ -782,7 +812,12 @@ export default function AdvancedStudio() {
   };
 
   const handleApplyRenderProfile = () => {
+    if (!workflowId || isApplyingProfile) return;
     dismissPendingAssistantAction();
+    if (blockWorkflowMutationWhileOutputBusy(
+      'Wait for bundle image upscale to finish before applying the render profile.',
+      'Wait for the current scene override to finish before applying the render profile.',
+    )) return;
     setActivePanel('signal');
     startSignalPreviewRun();
     pushAgentNote('info', 'Render Profile', 'Render profile ready. Waiting for lock confirmation.');
@@ -792,7 +827,10 @@ export default function AdvancedStudio() {
   const handleRegenerateSignal = () => {
     if (!hasSourceInput || isExtracting || isUploadingAssets) return;
     dismissPendingAssistantAction();
-    if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before regenerating signal.')) return;
+    if (blockWorkflowMutationWhileOutputBusy(
+      'Wait for bundle image upscale to finish before regenerating signal.',
+      'Wait for the current scene override to finish before regenerating signal.',
+    )) return;
     resetBundleImageMode();
     setActivePanel('signal');
     void runExtraction({ armSignalPreview: true });
@@ -801,14 +839,20 @@ export default function AdvancedStudio() {
   const handleRegenerateScript = () => {
     if (!scriptPack || isGeneratingScriptPack || isGenerating) return;
     dismissPendingAssistantAction();
-    if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before regenerating the script pack.')) return;
+    if (blockWorkflowMutationWhileOutputBusy(
+      'Wait for bundle image upscale to finish before regenerating the script pack.',
+      'Wait for the current scene override to finish before regenerating the script pack.',
+    )) return;
     void handleGenerateScriptPack('review');
   };
 
   const handleRegenerateStream = () => {
     if (isGenerating || !scriptPack || Object.keys(scenes).length === 0) return;
     dismissPendingAssistantAction();
-    if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before regenerating the stream.')) return;
+    if (blockWorkflowMutationWhileOutputBusy(
+      'Wait for bundle image upscale to finish before regenerating the stream.',
+      'Wait for the current scene override to finish before regenerating the stream.',
+    )) return;
     void handleGenerateStreamAction();
   };
 
@@ -829,7 +873,7 @@ export default function AdvancedStudio() {
   };
 
   const handleEnableHighFidelity = async () => {
-    if (isUpscalingBundle || isGenerating || isGeneratingScriptPack || isApplyingProfile || isExtracting) {
+    if (isUpscalingBundle || isGenerating || isGeneratingScriptPack || isApplyingProfile || isExtracting || isSceneRegenerating) {
       return;
     }
     dismissPendingAssistantAction();
@@ -908,25 +952,31 @@ export default function AdvancedStudio() {
 
   const handleGenerateScriptPack = async (mode: 'review' | 'auto' = 'review') => {
     dismissPendingAssistantAction();
-    if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before generating the script pack.')) return;
+    if (blockWorkflowMutationWhileOutputBusy(
+      'Wait for bundle image upscale to finish before generating the script pack.',
+      'Wait for the current scene override to finish before generating the script pack.',
+    )) return;
     resetBundleImageMode();
     await generateScriptPack(mode, { onAutoStartStream: startGenerationStream });
   };
 
   const handleConfirmSignal = async () => {
     dismissPendingAssistantAction();
-    if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before confirming signal.')) return;
+    if (blockWorkflowMutationWhileOutputBusy(
+      'Wait for bundle image upscale to finish before confirming signal.',
+      'Wait for the current scene override to finish before confirming signal.',
+    )) return;
     resetBundleImageMode();
     await confirmSignal({ onAutoStartStream: startGenerationStream });
   };
 
   const handleScriptPackAction = () => {
-    if (!workflowSnapshot?.ready_for_script_pack || isGeneratingScriptPack || isGenerating || isUpscalingBundle) return;
+    if (!workflowSnapshot?.ready_for_script_pack || isGeneratingScriptPack || isGenerating || isUpscalingBundle || isSceneRegenerating) return;
     void handleGenerateScriptPack('review');
   };
 
   const handleGenerateStreamAction = () => {
-    if (!workflowSnapshot?.ready_for_stream || !scriptPack || isGenerating || isUpscalingBundle) return;
+    if (!workflowSnapshot?.ready_for_stream || !scriptPack || isGenerating || isUpscalingBundle || isSceneRegenerating) return;
     dismissPendingAssistantAction();
     if (scriptPresentationMode === 'auto') {
       void startGenerationStream();
@@ -941,7 +991,10 @@ export default function AdvancedStudio() {
 
     if (stage === 'extract') {
       dismissPendingAssistantAction();
-      if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before extracting again.')) {
+      if (blockWorkflowMutationWhileOutputBusy(
+        'Wait for bundle image upscale to finish before extracting again.',
+        'Wait for the current scene override to finish before extracting again.',
+      )) {
         return;
       }
       closeActionDialog();
@@ -950,6 +1003,12 @@ export default function AdvancedStudio() {
     }
     if (stage === 'profile') {
       dismissPendingAssistantAction();
+      if (blockWorkflowMutationWhileOutputBusy(
+        'Wait for bundle image upscale to finish before applying the render profile.',
+        'Wait for the current scene override to finish before applying the render profile.',
+      )) {
+        return;
+      }
       closeActionDialog();
       await applyProfileToWorkflow();
       return;
@@ -958,8 +1017,14 @@ export default function AdvancedStudio() {
       dismissPendingAssistantAction();
       if (
         stage === 'script'
-          ? blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before regenerating the script pack.')
-          : blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before regenerating the stream.')
+          ? blockWorkflowMutationWhileOutputBusy(
+            'Wait for bundle image upscale to finish before regenerating the script pack.',
+            'Wait for the current scene override to finish before regenerating the script pack.',
+          )
+          : blockWorkflowMutationWhileOutputBusy(
+            'Wait for bundle image upscale to finish before regenerating the stream.',
+            'Wait for the current scene override to finish before regenerating the stream.',
+          )
       ) {
         return;
       }
@@ -983,7 +1048,10 @@ export default function AdvancedStudio() {
   const handleDialogRelaunch = async () => {
     if (actionDialogStage === 'script') {
       dismissPendingAssistantAction();
-      if (blockBundleMutationDuringUpscale('Wait for bundle image upscale to finish before regenerating the script pack.')) {
+      if (blockWorkflowMutationWhileOutputBusy(
+        'Wait for bundle image upscale to finish before regenerating the script pack.',
+        'Wait for the current scene override to finish before regenerating the script pack.',
+      )) {
         return;
       }
       closeActionDialog();
@@ -991,14 +1059,22 @@ export default function AdvancedStudio() {
     }
   };
 
-  const handleRegenerate = (
+  const handleRegenerate = async (
     sceneId: string,
-    newText: string,
-    newImageUrl: string,
-    newAudioUrl: string,
+    instruction: string,
   ) => {
+    if (isUpscalingBundle) {
+      throw new Error('Wait for bundle image upscale to finish before regenerating a scene.');
+    }
+    if (isGenerating || isGeneratingScriptPack) {
+      throw new Error('Wait for the current generation run to finish before regenerating a scene.');
+    }
+    if (isSceneRegenerating) {
+      throw new Error('Wait for the current scene override to finish before starting another one.');
+    }
+    dismissPendingAssistantAction();
     resetBundleImageMode();
-    handleRegenerateScene(sceneId, newText, newImageUrl, newAudioUrl);
+    await handleWorkflowSceneRegenerate(sceneId, instruction);
   };
 
   const totalSceneCount = Math.max(expectedSceneCount, Object.keys(scenes).length);
@@ -1031,7 +1107,7 @@ export default function AdvancedStudio() {
         : 'Idle';
   const streamCheckpointStatus = workflowSnapshot?.checkpoint_state?.CP5_STREAM_COMPLETE;
   const bundleCheckpointStatus = workflowSnapshot?.checkpoint_state?.CP6_BUNDLE_FINALIZED;
-  const streamStatusLabel = isGenerating || isUpscalingBundle
+  const streamStatusLabel = isGenerating || isUpscalingBundle || isSceneRegenerating
     ? 'Generating'
     : generationError || streamCheckpointStatus === 'failed' || bundleCheckpointStatus === 'failed'
       ? 'Error'
@@ -1184,6 +1260,7 @@ export default function AdvancedStudio() {
             }
             : null;
   const dialogContinueDisabled = !dialogMeta
+    || isSceneRegenerating
     || (actionDialogStage === 'extract' && (!hasSourceInput || isExtracting || isUploadingAssets || isUpscalingBundle))
     || (actionDialogStage === 'profile' && (!workflowId || isApplyingProfile))
     || (actionDialogStage === 'script' && (!workflowSnapshot?.ready_for_script_pack || isGeneratingScriptPack || isGenerating || isUpscalingBundle))
@@ -1191,12 +1268,12 @@ export default function AdvancedStudio() {
   const assistantPendingActionDisabled = !pendingAssistantAction
     ? false
     : pendingAssistantAction.action === 'extract_signal'
-      ? (!hasSourceInput || isExtracting || isUploadingAssets || isUpscalingBundle)
+      ? (!hasSourceInput || isExtracting || isUploadingAssets || isUpscalingBundle || isSceneRegenerating)
       : pendingAssistantAction.action === 'apply_render_profile'
-        ? (!workflowId || isApplyingProfile || isUpscalingBundle)
+        ? (!workflowId || isApplyingProfile || isUpscalingBundle || isSceneRegenerating)
         : pendingAssistantAction.action === 'generate_stream'
-          ? (isGenerating || isUpscalingBundle || !workflowSnapshot?.ready_for_stream || !scriptPack)
-          : (isGeneratingScriptPack || isGenerating || isUpscalingBundle || !workflowSnapshot?.ready_for_script_pack);
+          ? (isGenerating || isUpscalingBundle || isSceneRegenerating || !workflowSnapshot?.ready_for_stream || !scriptPack)
+          : (isGeneratingScriptPack || isGenerating || isUpscalingBundle || isSceneRegenerating || !workflowSnapshot?.ready_for_script_pack);
 
   return (
     <main className="relative isolate min-h-screen overflow-x-clip bg-[#05070f] py-12 px-4 sm:px-6 lg:px-8 font-sans text-slate-100">
@@ -1298,7 +1375,7 @@ export default function AdvancedStudio() {
                   uploadedSourceAssets={uploadedSourceAssets}
                   isUploadingAssets={isUploadingAssets}
                   isExtracting={isExtracting}
-                  extractDisabled={!hasSourceInput || isExtracting || isUploadingAssets || isUpscalingBundle}
+                  extractDisabled={!hasSourceInput || isExtracting || isUploadingAssets || isUpscalingBundle || isSceneRegenerating}
                   extractProgress={extractProgress}
                   extractProgressMessage={isExtracting ? extractionPhaseText : signalStage === 'ready' ? 'Signal is ready for generation.' : ''}
                   errorMessage={error}
@@ -1338,7 +1415,7 @@ export default function AdvancedStudio() {
                   canMoveProfileBack={canMoveProfileBack}
                   canMoveProfileNext={canMoveProfileNext}
                   isApplyingProfile={isApplyingProfile}
-                  applyDisabled={!workflowId}
+                  applyDisabled={!workflowId || isApplyingProfile || isSceneRegenerating}
                   primaryActionClassName={PRIMARY_ACTION_CARD_CLASS}
                   primaryActionLabelClassName={PRIMARY_ACTION_LABEL_CLASS}
                   secondaryActionClassName={SECONDARY_ACTION_CARD_CLASS}
@@ -1370,8 +1447,8 @@ export default function AdvancedStudio() {
                   typedExplainer={typedExplainer}
                   typedPreview={typedPreview}
                   signalAlreadyConfirmed={signalAlreadyConfirmed}
-                  confirmDisabled={!extractedSignal || signalAlreadyConfirmed || isUpscalingBundle}
-                  regenerateDisabled={!hasSourceInput || isExtracting || isUploadingAssets || isUpscalingBundle}
+                  confirmDisabled={!extractedSignal || signalAlreadyConfirmed || isUpscalingBundle || isSceneRegenerating}
+                  regenerateDisabled={!hasSourceInput || isExtracting || isUploadingAssets || isUpscalingBundle || isSceneRegenerating}
                   primaryActionClassName={PRIMARY_ACTION_CARD_CLASS}
                   primaryActionLabelClassName={PRIMARY_ACTION_LABEL_CLASS}
                   secondaryActionClassName={SECONDARY_ACTION_CARD_CLASS}
@@ -1389,6 +1466,8 @@ export default function AdvancedStudio() {
                   isGeneratingScriptPack={isGeneratingScriptPack}
                   primaryActionText={isUpscalingBundle
                     ? 'Upscaling Bundle Images...'
+                    : isSceneRegenerating
+                    ? 'Scene Override In Progress...'
                     : isGenerating
                     ? 'Generating Stream...'
                     : isGeneratingScriptPack
@@ -1400,8 +1479,8 @@ export default function AdvancedStudio() {
                           : !workflowSnapshot?.ready_for_stream
                             ? 'Script Pack Must Be Locked'
                             : 'Generate Explainer Stream'}
-                  primaryDisabled={isGenerating || isUpscalingBundle || !workflowSnapshot?.ready_for_stream || !scriptPack || isGeneratingScriptPack}
-                  secondaryDisabled={isGenerating || isUpscalingBundle || !scriptPack || Object.keys(scenes).length === 0}
+                  primaryDisabled={isGenerating || isUpscalingBundle || isSceneRegenerating || !workflowSnapshot?.ready_for_stream || !scriptPack || isGeneratingScriptPack}
+                  secondaryDisabled={isGenerating || isUpscalingBundle || isSceneRegenerating || !scriptPack || Object.keys(scenes).length === 0}
                   generationStatus={generationStatus}
                   generationProgress={generationProgress}
                   completedSceneCount={completedSceneCount}
@@ -1424,9 +1503,9 @@ export default function AdvancedStudio() {
                   typedScriptExplainer={typedScriptExplainer}
                   typedScriptPreview={typedScriptPreview}
                   isGeneratingScriptPack={isGeneratingScriptPack}
-                  primaryActionText={isUpscalingBundle ? 'Upscaling Bundle Images...' : isGeneratingScriptPack ? 'Generating Script Pack...' : scriptPack ? 'Regenerate Script Pack' : 'Generate Script Pack'}
-                  primaryDisabled={isGeneratingScriptPack || isGenerating || isUpscalingBundle || !workflowSnapshot?.ready_for_script_pack}
-                  secondaryDisabled={isGeneratingScriptPack || isGenerating || isUpscalingBundle || !scriptPack}
+                  primaryActionText={isUpscalingBundle ? 'Upscaling Bundle Images...' : isSceneRegenerating ? 'Scene Override In Progress...' : isGeneratingScriptPack ? 'Generating Script Pack...' : scriptPack ? 'Regenerate Script Pack' : 'Generate Script Pack'}
+                  primaryDisabled={isGeneratingScriptPack || isGenerating || isUpscalingBundle || isSceneRegenerating || !workflowSnapshot?.ready_for_script_pack}
+                  secondaryDisabled={isGeneratingScriptPack || isGenerating || isUpscalingBundle || isSceneRegenerating || !scriptPack}
                   primaryActionClassName={PRIMARY_ACTION_CARD_CLASS}
                   primaryActionLabelClassName={PRIMARY_ACTION_LABEL_CLASS}
                   secondaryActionClassName={SECONDARY_ACTION_CARD_CLASS}
@@ -1443,13 +1522,13 @@ export default function AdvancedStudio() {
         <AdvancedGeneratedExplainerSection
           scenes={scenes}
           artifactType={scriptPack?.artifact_type ?? artifactType}
-          visualMode={visualMode}
           generationError={generationError}
           bundleImageMode={bundleImageMode}
           isApplyingProfile={isApplyingProfile}
           isGenerating={isGenerating}
           isGeneratingScriptPack={isGeneratingScriptPack}
           isUpscalingBundle={isUpscalingBundle}
+          regeneratingSceneId={regeneratingSceneId}
           topic={extractedSignal?.thesis?.one_liner || 'Advanced Explainer'}
           onEnableHighFidelity={() => void handleEnableHighFidelity()}
           onRegenerate={handleRegenerate}
@@ -1466,7 +1545,7 @@ export default function AdvancedStudio() {
         dialogMeta={dialogMeta}
         showAmendHelp={showAmendHelp}
         continueDisabled={dialogContinueDisabled}
-        relaunchDisabled={actionDialogStage === 'script' ? isGenerating || isUpscalingBundle || !workflowSnapshot?.ready_for_script_pack : isExtracting || isUpscalingBundle}
+        relaunchDisabled={actionDialogStage === 'script' ? isGenerating || isUpscalingBundle || isSceneRegenerating || !workflowSnapshot?.ready_for_script_pack : isExtracting || isUpscalingBundle || isSceneRegenerating}
         onOpenChange={(open) => { if (!open) closeActionDialog(); }}
         onShowAmendHelp={() => setShowAmendHelp(true)}
         onContinue={() => void handleDialogContinue()}

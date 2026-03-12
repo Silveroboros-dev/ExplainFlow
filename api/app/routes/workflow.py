@@ -8,6 +8,7 @@ from app.schemas.requests import (
     SignalExtractionRequest,
     WorkflowArtifactLockRequest,
     WorkflowAgentChatRequest,
+    WorkflowSceneRegenerateRequest,
     WorkflowRenderLockRequest,
     WorkflowStartRequest,
     WorkflowStreamRequest,
@@ -234,6 +235,27 @@ async def workflow_generate_stream(workflow_id: str, request: Request):
                 pass
 
     return EventSourceResponse(event_generator())
+
+
+@router.post("/workflow/{workflow_id}/regenerate-scene")
+async def workflow_regenerate_scene(
+    workflow_id: str,
+    payload: WorkflowSceneRegenerateRequest,
+    request: Request,
+):
+    try:
+        workflow_payload = await coordinator.build_stream_request(workflow_id)
+        result = await agent.regenerate_workflow_scene(
+            request=request,
+            workflow_payload=workflow_payload,
+            payload=payload,
+        )
+        return {
+            "workflow_id": workflow_id,
+            **result,
+        }
+    except Exception as exc:
+        raise _handle_error(exc) from exc
 
 
 @router.post("/workflow/agent/chat")

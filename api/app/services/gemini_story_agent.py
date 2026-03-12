@@ -48,6 +48,8 @@ from app.schemas.requests import (
     ScriptPackRequest,
     ScriptPackScene,
     SignalExtractionRequest,
+    WorkflowSceneContextRequest,
+    WorkflowSceneRegenerateRequest,
 )
 from app.services.audio_pipeline import generate_audio_and_get_url
 from app.services.image_pipeline import (
@@ -202,6 +204,9 @@ class BufferedSceneExecutionResult:
     retries_used: int
     word_count: int
     continuity_tokens: tuple[str, ...]
+    text: str
+    image_url: str
+    audio_url: str
 
 
 ARTIFACT_POLICIES: dict[str, ArtifactPlanningPolicy] = {
@@ -4061,6 +4066,7 @@ class GeminiStoryAgent:
         active_continuity: list[str],
         scene_trace_payload: dict[str, Any],
         retry_reason_constraints: list[str] | None = None,
+        extra_constraints: list[str] | None = None,
     ) -> BufferedSceneExecutionResult:
         events: list[dict[str, str]] = []
         scene_id = scene.scene_id
@@ -4118,10 +4124,16 @@ class GeminiStoryAgent:
         }
         scene_result: dict[str, Any] = {}
         retry_constraints = list(retry_reason_constraints or [])
+        override_constraints = [
+            constraint.strip()
+            for constraint in (extra_constraints or [])
+            if isinstance(constraint, str) and constraint.strip()
+        ]
 
         for attempt_index in range(2):
             scene_result = {}
             attempt_constraints = list(scene.acceptance_checks)
+            attempt_constraints.extend(override_constraints)
             if retry_constraints:
                 attempt_constraints.append(
                     f"Fix these QA issues from previous attempt: {'; '.join(retry_constraints[:3])}."
@@ -4227,7 +4239,52 @@ class GeminiStoryAgent:
             retries_used=retries_used,
             word_count=int(scene_result.get("word_count", 0)),
             continuity_tokens=tuple(extract_anchor_terms(str(scene_result.get("text", "")), limit=4)),
+            text=str(scene_result.get("text", "")),
+            image_url=str(scene_result.get("image_url", "")),
+            audio_url=str(scene_result.get("audio_url", "")),
         )
+
+    @staticmethod
+    def _continuity_hints_from_scene_context(
+        prior_scene_context: list[WorkflowSceneContextRequest],
+    ) -> list[str]:
+        continuity_hints: list[str] = []
+        for item in prior_scene_context[-3:]:
+            title = item.title.strip() or item.scene_id
+            text = re.sub(r"\s+", " ", item.text or "").strip()
+            if not text:
+                continue
+            anchor_terms = extract_anchor_terms(text, limit=4)
+            if anchor_terms:
+                continuity_hints.append(f"{title}: {', '.join(anchor_terms)}")
+        return continuity_hints[-3:]
+
+    @staticmethod
+    def _workflow_scene_override_constraints(
+        instruction: str,
+        current_text: str,
+    ) -> list[str]:
+        normalized_instruction = re.sub(r"\s+", " ", instruction).strip()
+        constraints = [
+            (
+                "Apply this workflow-aware director override while staying aligned with the locked "
+                f"scene plan: {normalized_instruction}"
+            ),
+            (
+                "Preserve the scene's claim coverage, evidence grounding, and artifact role unless "
+                "the override explicitly asks to change emphasis."
+            ),
+        ]
+        normalized_current_text = re.sub(r"\s+", " ", current_text).strip()
+        if normalized_current_text:
+            current_text_excerpt = normalized_current_text[:800]
+            if len(normalized_current_text) > 800:
+                current_text_excerpt = f"{current_text_excerpt.rstrip()}..."
+            constraints.append(
+                "Revise this current generated narration draft when helpful instead of starting from "
+                f"scratch: {current_text_excerpt}"
+            )
+        return constraints
 
     async def _extract_signal_one_pass(
         self,
@@ -6285,6 +6342,250 @@ class GeminiStoryAgent:
                 checkpoint="CP4_SCRIPT_LOCKED",
                 status="failed",
                 details={"error": str(exc)},
+            )
+            message = self._friendly_quota_error_message() if self._is_resource_exhausted(exc) else str(exc)
+            return {"status": "error", "message": message, "trace": trace.model_dump()}
+
+    async def regenerate_workflow_scene(
+        self,
+        *,
+        request: Request,
+        workflow_payload: AdvancedStreamRequest,
+        payload: WorkflowSceneRegenerateRequest,
+    ) -> dict[str, Any]:
+        instruction = re.sub(r"\s+", " ", payload.instruction or "").strip()
+        if not instruction:
+            return {"status": "error", "message": "Provide an instruction for the scene override."}
+
+        content_signal = workflow_payload.content_signal
+        render_profile = workflow_payload.render_profile
+        artifact_scope = self._resolve_artifact_scope(
+            requested_scope=workflow_payload.artifact_scope,
+            render_profile=render_profile,
+            default_scope=["story_cards", "voiceover", "social_caption"],
+        )
+        run_id = self._new_run_id("workflow-scene-regen-run")
+        trace = init_trace_envelope(
+            trace_id=f"trace-{uuid4().hex[:12]}",
+            run_id=run_id,
+            flow="workflow_scene_regeneration",
+            artifact_scope=artifact_scope,
+        )
+        scene_id = payload.scene_id
+
+        try:
+            approved_script_pack_raw = workflow_payload.script_pack
+            if not isinstance(approved_script_pack_raw, dict):
+                raise ValueError("Generate and lock the script pack before regenerating a scene.")
+
+            script_pack = ScriptPack.model_validate(approved_script_pack_raw)
+            has_signal = bool(
+                content_signal.get("thesis")
+                or content_signal.get("key_claims")
+                or content_signal.get("narrative_beats")
+            )
+            add_checkpoint(
+                trace,
+                checkpoint="CP1_SIGNAL_READY",
+                status="passed" if has_signal else "failed",
+                details={"source": "workflow_payload", "has_signal": has_signal},
+            )
+            if not has_signal:
+                raise ValueError("Signal is missing. Run extraction before regenerating a scene.")
+
+            add_checkpoint(
+                trace,
+                checkpoint="CP2_ARTIFACTS_LOCKED",
+                status="passed",
+                details={"artifact_scope": artifact_scope},
+            )
+
+            visual_mode = render_profile.get("visual_mode", "illustration")
+            audience_cfg = render_profile.get("audience", {})
+            audience_level = str(audience_cfg.get("level", "beginner")).lower()
+            audience_persona = str(audience_cfg.get("persona", "General audience")).strip()
+            domain_context = str(audience_cfg.get("domain_context", "")).strip()
+            taste_bar = str(audience_cfg.get("taste_bar", "standard")).lower()
+            must_include = [
+                str(item).strip()
+                for item in audience_cfg.get("must_include", [])
+                if isinstance(item, str) and str(item).strip()
+            ][:8]
+            must_avoid = [
+                str(item).strip()
+                for item in audience_cfg.get("must_avoid", [])
+                if isinstance(item, str) and str(item).strip()
+            ][:8]
+            goal = render_profile.get("goal", "teach")
+            style_descriptors = ", ".join(render_profile.get("style", {}).get("descriptors", ["clean", "modern"]))
+            palette = render_profile.get("palette", {})
+
+            style_guide = f"Visual Mode: {visual_mode.upper()}.\n"
+            style_guide += f"Style Descriptors: {style_descriptors}.\n"
+            style_guide += f"Taste Bar: {taste_bar.upper()}.\n"
+            if palette.get("mode") == "brand":
+                style_guide += (
+                    "Mandatory Color Palette: "
+                    f"Primary {palette.get('primary', '#000000')}, "
+                    f"Secondary {palette.get('secondary', '#FFFFFF')}, "
+                    f"Accent {palette.get('accent', '#FF0000')}. "
+                    "Use these specific hex colors prominently.\n"
+                )
+            else:
+                style_guide += "Palette: Auto-select an engaging, educational color palette.\n"
+
+            if visual_mode == "diagram":
+                style_guide += (
+                    "CRITICAL: Do NOT request 2D maps with text labels. "
+                    "Focus on abstract or photorealistic educational infographics."
+                )
+            elif visual_mode == "hybrid":
+                style_guide += "CRITICAL: Blend 3D objects with floating holographic UI elements or charts."
+
+            add_checkpoint(
+                trace,
+                checkpoint="CP3_RENDER_LOCKED",
+                status="passed",
+                details={"visual_mode": visual_mode, "goal": str(render_profile.get("goal", "teach"))},
+            )
+
+            thesis = content_signal.get("thesis", {}).get("one_liner", "A generic topic")
+            claim_text_lookup = {
+                str(claim.get("claim_id")).strip(): str(claim.get("claim_text") or claim.get("content") or "").strip()
+                for claim in content_signal.get("key_claims", [])
+                if isinstance(claim, dict) and str(claim.get("claim_id", "")).strip()
+            }
+            claim_evidence_lookup = {
+                str(claim.get("claim_id")).strip(): self._evidence_summary_bits(
+                    claim.get("evidence_snippets", []) if isinstance(claim.get("evidence_snippets"), list) else []
+                )
+                for claim in content_signal.get("key_claims", [])
+                if isinstance(claim, dict) and str(claim.get("claim_id", "")).strip()
+            }
+            audience_descriptor = f"{audience_persona} ({audience_level})"
+            if domain_context:
+                audience_descriptor += f" in {domain_context}"
+
+            script_pack, _, _ = self._enrich_script_pack_with_source_media(
+                script_pack=script_pack,
+                content_signal=content_signal,
+                source_manifest=workflow_payload.source_manifest,
+            )
+
+            add_checkpoint(
+                trace,
+                checkpoint="CP4_SCRIPT_LOCKED",
+                status="passed",
+                details={
+                    "scene_count": script_pack.scene_count,
+                    "source": "workflow_locked_script_pack",
+                },
+            )
+
+            target_scene = next((scene for scene in script_pack.scenes if scene.scene_id == scene_id), None)
+            if target_scene is None:
+                raise ValueError(f"Scene {scene_id} is not available in the locked script pack.")
+
+            claim_refs = [claim_ref for claim_ref in target_scene.claim_refs if claim_ref]
+            evidence_refs = [evidence_ref for evidence_ref in target_scene.evidence_refs if evidence_ref]
+            claim_text_snippets = [
+                claim_text_lookup[claim_ref]
+                for claim_ref in claim_refs
+                if claim_ref in claim_text_lookup and claim_text_lookup[claim_ref]
+            ]
+            evidence_text_snippets: list[str] = []
+            seen_evidence_bits: set[str] = set()
+            for claim_ref in claim_refs:
+                for evidence_bit in claim_evidence_lookup.get(claim_ref, [])[:2]:
+                    if evidence_bit and evidence_bit not in seen_evidence_bits:
+                        evidence_text_snippets.append(evidence_bit)
+                        seen_evidence_bits.add(evidence_bit)
+
+            scene_trace_id = f"{trace.trace_id}-{scene_id}-{uuid4().hex[:8]}"
+            add_or_update_scene_trace(
+                trace,
+                scene_id=scene_id,
+                scene_trace_id=scene_trace_id,
+                claim_refs=claim_refs,
+                evidence_refs=evidence_refs,
+                render_strategy=target_scene.render_strategy,
+                media_asset_ids=[item.asset_id for item in target_scene.source_media if item.asset_id],
+            )
+            scene_trace_payload = trace_meta(trace, scene_trace_id=scene_trace_id)
+            active_continuity = (
+                self._continuity_hints_from_scene_context(payload.prior_scene_context)
+                + list(target_scene.continuity_refs)
+            )[-6:]
+
+            buffered_result = await self._execute_buffered_advanced_scene(
+                request=request,
+                scene=target_scene,
+                thesis=thesis,
+                audience_descriptor=audience_descriptor,
+                goal=goal,
+                style_guide=style_guide,
+                script_pack=script_pack,
+                source_manifest=workflow_payload.source_manifest,
+                must_include=must_include,
+                must_avoid=must_avoid,
+                claim_text_snippets=claim_text_snippets,
+                evidence_text_snippets=evidence_text_snippets,
+                active_continuity=active_continuity,
+                scene_trace_payload=scene_trace_payload,
+                extra_constraints=self._workflow_scene_override_constraints(
+                    instruction,
+                    payload.current_text,
+                ),
+            )
+
+            add_or_update_scene_trace(
+                trace,
+                scene_id=buffered_result.scene_id,
+                scene_trace_id=buffered_result.scene_trace_id,
+                qa_result=buffered_result.qa_result,
+            )
+            add_or_update_scene_trace(
+                trace,
+                scene_id=buffered_result.scene_id,
+                scene_trace_id=buffered_result.scene_trace_id,
+                retries_used=buffered_result.retries_used,
+                word_count=buffered_result.word_count,
+            )
+            add_checkpoint(
+                trace,
+                checkpoint="CP5_STREAM_COMPLETE",
+                status="passed",
+                details={
+                    "mode": "workflow_scene_override",
+                    "scene_id": scene_id,
+                    "qa_status": str(buffered_result.qa_result.get("status", "")),
+                },
+            )
+
+            return {
+                "status": "success",
+                "scene_id": scene_id,
+                "text": buffered_result.text,
+                "imageUrl": buffered_result.image_url,
+                "audioUrl": buffered_result.audio_url,
+                "qa_status": buffered_result.qa_result.get("status"),
+                "qa_reasons": buffered_result.qa_result.get("reasons", []),
+                "qa_score": buffered_result.qa_result.get("score"),
+                "qa_word_count": buffered_result.qa_result.get("word_count"),
+                "auto_retries": buffered_result.retries_used,
+                "trace": trace.model_dump(),
+            }
+        except Exception as exc:
+            print(f"Workflow scene regeneration error: {exc}")
+            add_checkpoint(
+                trace,
+                checkpoint="CP5_STREAM_COMPLETE",
+                status="failed",
+                details={
+                    "mode": "workflow_scene_override",
+                    "scene_id": scene_id,
+                    "error": str(exc),
+                },
             )
             message = self._friendly_quota_error_message() if self._is_resource_exhausted(exc) else str(exc)
             return {"status": "error", "message": message, "trace": trace.model_dump()}
