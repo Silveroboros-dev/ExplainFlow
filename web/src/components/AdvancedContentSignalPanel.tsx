@@ -14,9 +14,8 @@ type AdvancedContentSignalPanelProps = {
   typedExplainer: string;
   typedPreview: string;
   signalAlreadyConfirmed: boolean;
-  hasSourceInput: boolean;
-  isExtracting: boolean;
-  isUploadingAssets: boolean;
+  confirmDisabled: boolean;
+  regenerateDisabled: boolean;
   primaryActionClassName: string;
   primaryActionLabelClassName: string;
   secondaryActionClassName: string;
@@ -32,9 +31,8 @@ export default function AdvancedContentSignalPanel({
   typedExplainer,
   typedPreview,
   signalAlreadyConfirmed,
-  hasSourceInput,
-  isExtracting,
-  isUploadingAssets,
+  confirmDisabled,
+  regenerateDisabled,
   primaryActionClassName,
   primaryActionLabelClassName,
   secondaryActionClassName,
@@ -89,7 +87,7 @@ export default function AdvancedContentSignalPanel({
             type="button"
             className={primaryActionClassName}
             onClick={onConfirm}
-            disabled={!extractedSignal || signalAlreadyConfirmed}
+            disabled={confirmDisabled}
           >
             <span className="space-y-1 text-left">
               <span className={primaryActionLabelClassName}>
@@ -105,7 +103,7 @@ export default function AdvancedContentSignalPanel({
             variant="outline"
             className={secondaryActionClassName}
             onClick={onRegenerate}
-            disabled={!hasSourceInput || isExtracting || isUploadingAssets}
+            disabled={regenerateDisabled}
           >
             <span className="space-y-1 text-left">
               <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">

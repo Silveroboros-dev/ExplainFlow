@@ -19,7 +19,6 @@ import {
   mapArtifactScope,
   snapshotStatusSummary,
   type AdvancedRenderProfileInput,
-  type AdvancedRenderProfileMode,
   type ExtractedSignal,
   type ScriptPackPayload,
   type UploadedSourceAsset,
@@ -53,7 +52,6 @@ type UseAdvancedWorkflowActionsOptions = {
   workflowSnapshot: WorkflowSnapshot | null;
   extractedSignal: ExtractedSignal | null;
   scriptPack: ScriptPackPayload | null;
-  fidelityPreference: AdvancedRenderProfileMode;
   scriptPresentationMode: ScriptPresentationMode;
   renderProfileInput: AdvancedRenderProfileInput;
   setWorkflowId: React.Dispatch<React.SetStateAction<string | null>>;
@@ -66,7 +64,6 @@ type UseAdvancedWorkflowActionsOptions = {
   setGenerationError: React.Dispatch<React.SetStateAction<string>>;
   setExtractedSignal: React.Dispatch<React.SetStateAction<ExtractedSignal | null>>;
   setGenerationStatus: React.Dispatch<React.SetStateAction<string>>;
-  setFidelityPreference: React.Dispatch<React.SetStateAction<AdvancedRenderProfileMode>>;
   setIsApplyingProfile: React.Dispatch<React.SetStateAction<boolean>>;
   setIsGeneratingScriptPack: React.Dispatch<React.SetStateAction<boolean>>;
   setScriptPresentationMode: React.Dispatch<React.SetStateAction<ScriptPresentationMode>>;
@@ -111,7 +108,6 @@ export default function useAdvancedWorkflowActions({
   workflowSnapshot,
   extractedSignal,
   scriptPack,
-  fidelityPreference,
   scriptPresentationMode,
   renderProfileInput,
   setWorkflowId,
@@ -124,7 +120,6 @@ export default function useAdvancedWorkflowActions({
   setGenerationError,
   setExtractedSignal,
   setGenerationStatus,
-  setFidelityPreference,
   setIsApplyingProfile,
   setIsGeneratingScriptPack,
   setScriptPresentationMode,
@@ -148,9 +143,7 @@ export default function useAdvancedWorkflowActions({
   pushAgentNote,
   pushPlannerQaNote,
 }: UseAdvancedWorkflowActionsOptions) {
-  const buildRenderProfilePayload = (mode: AdvancedRenderProfileMode = fidelityPreference) => (
-    buildAdvancedRenderProfilePayload(renderProfileInput, mode)
-  );
+  const buildRenderProfilePayload = () => buildAdvancedRenderProfilePayload(renderProfileInput);
 
   const runExtraction = async (options: { armSignalPreview?: boolean } = {}) => {
     if (!hasSourceInput) {
@@ -181,7 +174,6 @@ export default function useAdvancedWorkflowActions({
     resetStreamPreviewRun();
     setGenerationStatus("");
     clearGeneratedOutputs();
-    setFidelityPreference("preview");
 
     try {
       if (!activeWorkflowId) {
@@ -254,9 +246,7 @@ export default function useAdvancedWorkflowActions({
     }
   };
 
-  const applyProfileToWorkflow = async (
-    mode: AdvancedRenderProfileMode = fidelityPreference,
-  ): Promise<WorkflowSnapshot | null> => {
+  const applyProfileToWorkflow = async (): Promise<WorkflowSnapshot | null> => {
     if (!workflowId) {
       setGenerationStatus("Start with extraction first so a workflow can be created.");
       pushAgentNote("error", "Render Profile", "Cannot lock render profile before workflow start.");
@@ -285,7 +275,7 @@ export default function useAdvancedWorkflowActions({
         updateWorkflowSnapshot(artifactData.workflow);
       }
 
-      const renderProfile = buildRenderProfilePayload(mode);
+      const renderProfile = buildRenderProfilePayload();
       const renderResult = await lockAdvancedWorkflowRender(apiBase, workflowId, renderProfile);
       const renderData = renderResult.data;
       if (!renderResult.ok || renderData?.status !== "success") {
@@ -306,11 +296,7 @@ export default function useAdvancedWorkflowActions({
         ? renderData.workflow.checkpoint_state.CP3_RENDER_LOCKED
         : "";
       if (cp3Status === "passed") {
-        setGenerationStatus(
-          mode === "high"
-            ? "High-fidelity profile locked. Current bundle images can now be upscaled without changing the script."
-            : "Render profile locked. Continue to signal confirmation and script planning.",
-        );
+        setGenerationStatus("Render profile locked. Continue to signal confirmation and script planning.");
         pushAgentNote("checkpoint", "Render Profile", "Render profile locked and ready.");
       } else {
         setGenerationStatus("Artifacts locked. Render profile queued and will auto-lock when signal extraction completes.");
@@ -324,11 +310,7 @@ export default function useAdvancedWorkflowActions({
         const cp3Status = recoveredSnapshot.checkpoint_state?.CP3_RENDER_LOCKED;
         if (cp3Status === "passed") {
           setGenerationError("");
-          setGenerationStatus(
-            mode === "high"
-              ? "High-fidelity profile locked. Current bundle images can now be upscaled without changing the script."
-              : "Render profile locked. Continue to signal confirmation and script planning.",
-          );
+          setGenerationStatus("Render profile locked. Continue to signal confirmation and script planning.");
           pushAgentNote("checkpoint", "Render Profile", "Recovered render profile lock after a network interruption.");
           return recoveredSnapshot;
         }

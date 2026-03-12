@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { Loader2 } from "lucide-react";
 
 import FinalBundle from "@/components/FinalBundle";
 import SceneCard from "@/components/SceneCard";
@@ -36,10 +37,11 @@ type AdvancedGeneratedExplainerSectionProps = {
   artifactType: string;
   visualMode: string;
   generationError: string;
-  fidelityPreference: "preview" | "high";
+  bundleImageMode: "preview" | "high";
   isApplyingProfile: boolean;
   isGenerating: boolean;
   isGeneratingScriptPack: boolean;
+  isUpscalingBundle: boolean;
   topic: string;
   onEnableHighFidelity: () => void;
   onRegenerate: (sceneId: string, newText: string, newImageUrl: string, newAudioUrl: string) => void;
@@ -51,10 +53,11 @@ export default function AdvancedGeneratedExplainerSection({
   artifactType,
   visualMode,
   generationError,
-  fidelityPreference,
+  bundleImageMode,
   isApplyingProfile,
   isGenerating,
   isGeneratingScriptPack,
+  isUpscalingBundle,
   topic,
   onEnableHighFidelity,
   onRegenerate,
@@ -99,39 +102,47 @@ export default function AdvancedGeneratedExplainerSection({
             autoRetryCount={scene.auto_retry_count}
             sourceProofWarning={scene.source_proof_warning}
             audioStatus={isGenerating && !scene.audioUrl ? "Generating..." : "Ready"}
+            regenerationDisabled={isUpscalingBundle}
           />
         ))}
       </div>
 
       {hasScenes ? (
         <>
-          {fidelityPreference !== "high" ? (
+          {bundleImageMode !== "high" ? (
             <Card className="bg-white text-slate-900 border-slate-300 shadow-md">
               <CardContent className="pt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="font-semibold">Need a higher-quality final bundle?</p>
                   <p className="text-sm text-slate-600">
-                    Current run used low-key preview mode for speed. Upgrade the current scene images to 2x high fidelity without changing text.
+                    Current run used preview images for speed. Upgrade the current bundle images to 2x without changing text or audio.
                   </p>
                 </div>
                 <Button
                   type="button"
                   onClick={onEnableHighFidelity}
-                  disabled={isApplyingProfile || isGenerating || isGeneratingScriptPack}
+                  disabled={isApplyingProfile || isGenerating || isGeneratingScriptPack || isUpscalingBundle}
                 >
-                  Upscale Bundle Images (2x)
+                  {isUpscalingBundle ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Upscaling Bundle Images...
+                    </>
+                  ) : (
+                    "Upscale Bundle Images (2x)"
+                  )}
                 </Button>
               </CardContent>
             </Card>
           ) : (
             <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-              High-fidelity mode is active for this bundle. Text/audio are preserved and scene images use the upscaled assets.
+              Bundle images were upscaled to 2x. If you regenerate scenes or rerun the stream, the next bundle will return to preview assets until you upscale again.
             </div>
           )}
           <FinalBundle
             scenes={scenes}
             topic={topic}
-            disabled={isGenerating}
+            disabled={isGenerating || isUpscalingBundle}
           />
         </>
       ) : null}

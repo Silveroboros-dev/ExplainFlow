@@ -24,7 +24,7 @@ type AdvancedSourcePanelProps = {
   uploadedSourceAssets: UploadedAdvancedSourceAsset[];
   isUploadingAssets: boolean;
   isExtracting: boolean;
-  hasSourceInput: boolean;
+  extractDisabled: boolean;
   extractProgress: number;
   extractProgressMessage: string;
   errorMessage: string;
@@ -45,7 +45,7 @@ export default function AdvancedSourcePanel({
   uploadedSourceAssets,
   isUploadingAssets,
   isExtracting,
-  hasSourceInput,
+  extractDisabled,
   extractProgress,
   extractProgressMessage,
   errorMessage,
@@ -189,7 +189,7 @@ export default function AdvancedSourcePanel({
             <Button
               type="submit"
               className={primaryActionClassName}
-              disabled={!hasSourceInput || isExtracting || isUploadingAssets}
+              disabled={extractDisabled}
               size="lg"
             >
               <span className="flex w-full items-center justify-between gap-4">

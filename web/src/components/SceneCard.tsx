@@ -31,6 +31,7 @@ interface SceneCardProps {
   qaWordCount?: number;
   autoRetryCount?: number;
   sourceProofWarning?: string;
+  regenerationDisabled?: boolean;
   onRegenerate?: (sceneId: string, newText: string, newImageUrl: string, newAudioUrl: string) => void;
   onOpenEvidence?: (sceneId: string, claimRef?: string) => void;
 }
@@ -53,6 +54,7 @@ export default function SceneCard({
   qaWordCount,
   autoRetryCount,
   sourceProofWarning,
+  regenerationDisabled = false,
   onRegenerate,
   onOpenEvidence,
 }: SceneCardProps) {
@@ -81,7 +83,7 @@ export default function SceneCard({
       : 'bg-rose-100 text-rose-700 border-rose-200';
 
   const handleRegenSubmit = async () => {
-    if (!instruction) return;
+    if (!instruction || regenerationDisabled) return;
     setIsRegenerating(true);
     
     try {
@@ -230,7 +232,7 @@ export default function SceneCard({
 
             <Dialog open={isOpen} onOpenChange={setIsOpen}>
               <DialogTrigger asChild>
-                <Button variant="outline" size="sm" className="mt-4 gap-2">
+                <Button variant="outline" size="sm" className="mt-4 gap-2" disabled={regenerationDisabled}>
                   <Wand2 className="h-4 w-4" />
                   Regenerate Scene
                 </Button>
@@ -252,7 +254,7 @@ export default function SceneCard({
                 </div>
                 <DialogFooter>
                   <Button variant="ghost" onClick={() => setIsOpen(false)}>Cancel</Button>
-                  <Button onClick={handleRegenSubmit} disabled={isRegenerating || !instruction}>
+                  <Button onClick={handleRegenSubmit} disabled={isRegenerating || regenerationDisabled || !instruction}>
                     {isRegenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wand2 className="mr-2 h-4 w-4" />}
                     Apply Edit
                   </Button>
