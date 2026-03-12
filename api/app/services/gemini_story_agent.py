@@ -848,9 +848,13 @@ class GeminiStoryAgent:
         beats = content_signal.get("narrative_beats", [])
         key_claims = content_signal.get("key_claims", [])
         visual_candidates = content_signal.get("visual_candidates", [])
+        planner_concepts = concepts if isinstance(concepts, list) else []
+        planner_beats = beats if isinstance(beats, list) else []
+        planner_key_claims = key_claims if isinstance(key_claims, list) else []
+        planner_visual_candidates = visual_candidates if isinstance(visual_candidates, list) else []
         claim_ids = [
             str(claim.get("claim_id")).strip()
-            for claim in key_claims
+            for claim in planner_key_claims
             if isinstance(claim, dict) and str(claim.get("claim_id", "")).strip()
         ]
         audience_descriptor = f"{audience_persona} ({audience_level})"
@@ -892,24 +896,37 @@ class GeminiStoryAgent:
             salience_assessment=salience_assessment,
             forward_pull=forward_pull,
         )
-        planning_prompt = self._build_script_pack_prompt(
-            thesis=thesis,
-            concepts=concepts if isinstance(concepts, list) else [],
-            beats=beats if isinstance(beats, list) else [],
-            key_claims=key_claims if isinstance(key_claims, list) else [],
-            visual_candidates=visual_candidates if isinstance(visual_candidates, list) else [],
-            audience_descriptor=audience_descriptor,
-            taste_bar=taste_bar,
-            must_include=must_include,
-            must_avoid=must_avoid,
+        salience_summary = self._best_effort_salience_summary(salience_assessment)
+        forward_pull_text = self._forward_pull_guidance(
             artifact_policy=artifact_policy,
-            scene_count=scene_count,
-            salience_summary=self._best_effort_salience_summary(salience_assessment),
-            forward_pull_guidance=self._forward_pull_guidance(
-                artifact_policy=artifact_policy,
-                forward_pull=forward_pull,
-            ),
+            forward_pull=forward_pull,
         )
+        prompt_kwargs = {
+            "thesis": thesis,
+            "concepts": planner_concepts,
+            "beats": planner_beats,
+            "key_claims": planner_key_claims,
+            "visual_candidates": planner_visual_candidates,
+            "audience_descriptor": audience_descriptor,
+            "taste_bar": taste_bar,
+            "must_include": must_include,
+            "must_avoid": must_avoid,
+            "artifact_policy": artifact_policy,
+            "scene_count": scene_count,
+            "salience_summary": salience_summary,
+            "forward_pull_guidance": forward_pull_text,
+        }
+        outline_kwargs = {
+            "scene_count": scene_count,
+            "thesis": thesis,
+            "audience_descriptor": audience_descriptor,
+            "artifact_policy": artifact_policy,
+            "claim_ids": claim_ids,
+            "must_include": must_include,
+            "must_avoid": must_avoid,
+            "scene_budget_reason": scene_budget_reason,
+        }
+        planning_prompt = self._build_script_pack_prompt(**prompt_kwargs)
 
         plan_response = await self.client.aio.models.generate_content(
             model=self._signal_structural_model(),
@@ -922,14 +939,7 @@ class GeminiStoryAgent:
         )
         draft_script_pack = self._outline_to_script_pack(
             outline_text=plan_response.text,
-            scene_count=scene_count,
-            thesis=thesis,
-            audience_descriptor=audience_descriptor,
-            artifact_policy=artifact_policy,
-            claim_ids=claim_ids,
-            must_include=must_include,
-            must_avoid=must_avoid,
-            scene_budget_reason=scene_budget_reason,
+            **outline_kwargs,
         )
         initial_report = self._validate_script_pack_against_enrichments(
             script_pack=draft_script_pack,
@@ -949,22 +959,7 @@ class GeminiStoryAgent:
         if report.has_hard_issues:
             replan_attempted = True
             replan_prompt = self._build_script_pack_prompt(
-                thesis=thesis,
-                concepts=concepts if isinstance(concepts, list) else [],
-                beats=beats if isinstance(beats, list) else [],
-                key_claims=key_claims if isinstance(key_claims, list) else [],
-                visual_candidates=visual_candidates if isinstance(visual_candidates, list) else [],
-                audience_descriptor=audience_descriptor,
-                taste_bar=taste_bar,
-                must_include=must_include,
-                must_avoid=must_avoid,
-                artifact_policy=artifact_policy,
-                scene_count=scene_count,
-                salience_summary=self._best_effort_salience_summary(salience_assessment),
-                forward_pull_guidance=self._forward_pull_guidance(
-                    artifact_policy=artifact_policy,
-                    forward_pull=forward_pull,
-                ),
+                **prompt_kwargs,
                 repair_directives=self._build_replan_directives(
                     report=report,
                     script_pack=script_pack,
@@ -981,14 +976,7 @@ class GeminiStoryAgent:
             )
             replanned_draft = self._outline_to_script_pack(
                 outline_text=replan_response.text,
-                scene_count=scene_count,
-                thesis=thesis,
-                audience_descriptor=audience_descriptor,
-                artifact_policy=artifact_policy,
-                claim_ids=claim_ids,
-                must_include=must_include,
-                must_avoid=must_avoid,
-                scene_budget_reason=scene_budget_reason,
+                **outline_kwargs,
             )
             script_pack = self._repair_script_pack_from_enrichments(
                 script_pack=replanned_draft,
