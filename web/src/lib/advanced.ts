@@ -383,6 +383,21 @@ export type UploadedSourceAsset = {
   metadata?: Record<string, unknown>;
 };
 
+export type AdvancedSourceManifestAsset = {
+  asset_id: string;
+  modality: UploadedSourceAsset["modality"];
+  uri: string;
+  mime_type?: string;
+  title?: string;
+  page_index?: number;
+  duration_ms?: number;
+  metadata?: Record<string, unknown>;
+};
+
+export type AdvancedSourceManifest = {
+  assets: AdvancedSourceManifestAsset[];
+};
+
 export type SceneQueueItem = {
   scene_id: string;
   title?: string;
@@ -610,6 +625,10 @@ export const asPlannerQaSummary = (value: unknown): PlannerQaSummary | null => {
   };
 };
 
+export const asStringArray = (value: unknown): string[] => (
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
+);
+
 const asNumberArray = (value: unknown): number[] => (
   Array.isArray(value) ? value.filter((item): item is number => typeof item === "number" && Number.isFinite(item)) : []
 );
@@ -738,3 +757,35 @@ export const formatMilliseconds = (value?: number): string => {
   const seconds = totalSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 };
+
+export const mapArtifactScope = (selectedArtifactType: string): string[] => {
+  if (selectedArtifactType === "slide_thumbnail") {
+    return ["thumbnail", "social_caption"];
+  }
+  if (selectedArtifactType === "storyboard_grid") {
+    return ["storyboard", "voiceover", "social_caption"];
+  }
+  if (selectedArtifactType === "comparison_one_pager") {
+    return ["story_cards", "social_caption"];
+  }
+  return ["story_cards", "voiceover"];
+};
+
+export const buildAdvancedSourceManifest = (
+  uploadedSourceAssets: UploadedSourceAsset[],
+): AdvancedSourceManifest | undefined => (
+  uploadedSourceAssets.length > 0
+    ? {
+      assets: uploadedSourceAssets.map((asset) => ({
+        asset_id: asset.asset_id,
+        modality: asset.modality,
+        uri: asset.uri,
+        mime_type: asset.mime_type,
+        title: asset.title,
+        page_index: asset.page_index,
+        duration_ms: asset.duration_ms,
+        metadata: asset.metadata,
+      })),
+    }
+    : undefined
+);

@@ -14,6 +14,21 @@ import AdvancedSourcePanel from '@/components/AdvancedSourcePanel';
 import AgentActivityPanel, { AgentNote, AgentNoteType } from '@/components/AgentActivityPanel';
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import useAdvancedWorkflowStorage from "@/hooks/useAdvancedWorkflowStorage";
+import {
+  extractAdvancedWorkflowSignal,
+  fetchAdvancedWorkflowScriptPack as requestAdvancedWorkflowScriptPack,
+  fetchAdvancedWorkflowSignal as requestAdvancedWorkflowSignal,
+  fetchAdvancedWorkflowSnapshot as requestAdvancedWorkflowSnapshot,
+  generateAdvancedWorkflowScriptPack,
+  lockAdvancedWorkflowArtifacts,
+  lockAdvancedWorkflowRender,
+  openAdvancedWorkflowStream,
+  startAdvancedWorkflow,
+  submitAdvancedWorkflowChat,
+  uploadAdvancedSourceAssets,
+  upscaleAdvancedFinalBundle,
+} from "@/lib/advanced-api";
 import { Toaster, toast } from "sonner";
 import {
   ADVANCED_API_BASE as API_BASE,
@@ -46,12 +61,13 @@ import {
   asPlannerQaSummary,
   asSourceMedia,
   asSourceMediaList,
-  asUploadedSourceAsset,
-  createApiRequestError,
+  asStringArray,
+  buildAdvancedSourceManifest,
   deriveSceneCount,
   formatMilliseconds,
   isUnknownWorkflowError,
   isUnknownWorkflowMessage,
+  mapArtifactScope,
   readVideoDurationMs,
   snapshotStatusSummary,
   type ActionDialogStage,
@@ -179,10 +195,6 @@ export default function AdvancedStudio() {
     setStreamTypingRunId((prev) => prev + 1);
   };
 
-  const asStringArray = (value: unknown): string[] => (
-    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
-  );
-
   const pushChatMessage = (role: ChatRole, text: string) => {
     const message: ChatMessage = {
       id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -298,19 +310,6 @@ export default function AdvancedStudio() {
     chatScrollAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [chatMessages.length]);
 
-  const mapArtifactScope = (selectedArtifactType: string): string[] => {
-    if (selectedArtifactType === 'slide_thumbnail') {
-      return ['thumbnail', 'social_caption'];
-    }
-    if (selectedArtifactType === 'storyboard_grid') {
-      return ['storyboard', 'voiceover', 'social_caption'];
-    }
-    if (selectedArtifactType === 'comparison_one_pager') {
-      return ['story_cards', 'social_caption'];
-    }
-    return ['story_cards', 'voiceover'];
-  };
-
   const updateWorkflowSnapshot = (snapshot: unknown) => {
     if (!snapshot || typeof snapshot !== 'object') return;
     const candidate = snapshot as WorkflowSnapshot;
@@ -342,23 +341,6 @@ export default function AdvancedStudio() {
 
     setGenerationStatus(snapshotStatusSummary(snapshot));
   };
-
-  const buildSourceManifestPayload = () => (
-    uploadedSourceAssets.length > 0
-      ? {
-        assets: uploadedSourceAssets.map((asset) => ({
-          asset_id: asset.asset_id,
-          modality: asset.modality,
-          uri: asset.uri,
-          mime_type: asset.mime_type,
-          title: asset.title,
-          page_index: asset.page_index,
-          duration_ms: asset.duration_ms,
-          metadata: asset.metadata,
-        })),
-      }
-      : undefined
-  );
 
   const hasSourceInput = sourceDoc.trim().length > 0 || uploadedSourceAssets.length > 0;
   const clearGeneratedOutputs = () => {
@@ -396,23 +378,15 @@ export default function AdvancedStudio() {
       files.forEach((file) => formData.append('files', file));
       formData.append('asset_descriptors', JSON.stringify(assetDescriptors));
 
-      const response = await fetch(`${API_BASE}/api/source-assets/upload`, {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await response.json();
-      if (!response.ok || data?.status !== 'success' || !Array.isArray(data?.assets)) {
-        const detail = typeof data?.detail === 'string'
-          ? data.detail
-          : (typeof data?.message === 'string' ? data.message : 'Source upload failed.');
+      const uploadResult = await uploadAdvancedSourceAssets(API_BASE, formData);
+      if (!uploadResult.ok || uploadResult.status !== 'success') {
+        const detail = uploadResult.detail || uploadResult.message || 'Source upload failed.';
         setError(detail);
         toast.error(detail);
         return;
       }
 
-      const newAssets = data.assets
-        .map(asUploadedSourceAsset)
-        .filter((asset: UploadedSourceAsset | null): asset is UploadedSourceAsset => asset !== null);
+      const newAssets = uploadResult.assets;
 
       setUploadedSourceAssets((prev) => {
         const next = [...prev];
@@ -539,12 +513,7 @@ export default function AdvancedStudio() {
   };
 
   const fetchWorkflowSnapshot = async (workflowIdValue: string): Promise<WorkflowSnapshot> => {
-    const response = await fetch(`${API_BASE}/api/workflow/${workflowIdValue}`);
-    const payload = await response.json();
-    if (!response.ok) {
-      throw createApiRequestError(payload, 'Unable to load workflow state.', response.status);
-    }
-    const snapshot = payload as WorkflowSnapshot;
+    const snapshot = await requestAdvancedWorkflowSnapshot(API_BASE, workflowIdValue);
     updateWorkflowSnapshot(snapshot);
     syncWorkflowUiFromSnapshot(snapshot);
     const streamFailed = snapshot.checkpoint_state?.CP5_STREAM_COMPLETE === 'failed'
@@ -561,21 +530,11 @@ export default function AdvancedStudio() {
   };
 
   const fetchWorkflowSignal = async (workflowIdValue: string): Promise<ExtractedSignal> => {
-    const response = await fetch(`${API_BASE}/api/workflow/${workflowIdValue}/content-signal`);
-    const payload = await response.json();
-    if (!response.ok || payload?.status !== 'success' || !payload?.content_signal) {
-      throw createApiRequestError(payload, 'Unable to load extracted signal.', response.status);
-    }
-    return payload.content_signal as ExtractedSignal;
+    return requestAdvancedWorkflowSignal(API_BASE, workflowIdValue);
   };
 
   const fetchWorkflowScriptPack = async (workflowIdValue: string): Promise<ScriptPackPayload> => {
-    const response = await fetch(`${API_BASE}/api/workflow/${workflowIdValue}/script-pack`);
-    const payload = await response.json();
-    if (!response.ok || payload?.status !== 'success' || !payload?.script_pack) {
-      throw createApiRequestError(payload, 'Unable to load script pack.', response.status);
-    }
-    return payload.script_pack as ScriptPackPayload;
+    return requestAdvancedWorkflowScriptPack(API_BASE, workflowIdValue);
   };
 
   const recoverWorkflowState = async (
@@ -625,28 +584,11 @@ export default function AdvancedStudio() {
     }
   };
 
-  React.useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    if (workflowId) {
-      window.localStorage.setItem(ADVANCED_WORKFLOW_STORAGE_KEY, workflowId);
-    } else {
-      window.localStorage.removeItem(ADVANCED_WORKFLOW_STORAGE_KEY);
-    }
-  }, [workflowId]);
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    const storedWorkflowId = window.localStorage.getItem(ADVANCED_WORKFLOW_STORAGE_KEY);
-    if (!storedWorkflowId || storedWorkflowId === workflowId) {
-      return;
-    }
-    void recoverWorkflowState(storedWorkflowId, { silent: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useAdvancedWorkflowStorage({
+    workflowId,
+    storageKey: ADVANCED_WORKFLOW_STORAGE_KEY,
+    recoverWorkflow: (storedWorkflowId) => recoverWorkflowState(storedWorkflowId, { silent: true }),
+  });
 
   // Typewriter effect loop
   React.useEffect(() => {
@@ -894,7 +836,7 @@ export default function AdvancedStudio() {
       return false;
     }
     const { armSignalPreview = false } = options;
-    const sourceManifest = buildSourceManifestPayload();
+    const sourceManifest = buildAdvancedSourceManifest(uploadedSourceAssets);
     const canReuseWorkflow = Boolean(
       workflowId
       && workflowSnapshot?.checkpoint_state?.CP1_SIGNAL_READY !== 'passed',
@@ -922,22 +864,12 @@ export default function AdvancedStudio() {
     
     try {
       if (!activeWorkflowId) {
-        const startResponse = await fetch(`${API_BASE}/api/workflow/start`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            source_text: sourceDoc,
-            ...(sourceManifest ? { source_manifest: sourceManifest } : {}),
-          })
+        const startResult = await startAdvancedWorkflow(API_BASE, {
+          source_text: sourceDoc,
+          ...(sourceManifest ? { source_manifest: sourceManifest } : {}),
         });
-        const startData: {
-          workflow_id?: string;
-          workflow?: WorkflowSnapshot;
-          status?: string;
-          detail?: string;
-          message?: string;
-        } = await startResponse.json();
-        if (!startResponse.ok || startData.status !== 'success' || !startData.workflow_id) {
+        const startData = startResult.data;
+        if (!startResult.ok || startData.status !== 'success' || !startData.workflow_id) {
           setError(apiErrorMessage(startData, 'Unable to initialize workflow.'));
           pushAgentNote('error', 'Extraction', 'Workflow initialization failed.');
           setSignalStage('error');
@@ -954,22 +886,11 @@ export default function AdvancedStudio() {
         }
       }
 
-      const extractResponse = await fetch(`${API_BASE}/api/workflow/${activeWorkflowId}/extract-signal`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source_text: sourceDoc,
-          ...(sourceManifest ? { source_manifest: sourceManifest } : {}),
-        })
+      const extractResult = await extractAdvancedWorkflowSignal(API_BASE, activeWorkflowId, {
+        source_text: sourceDoc,
+        ...(sourceManifest ? { source_manifest: sourceManifest } : {}),
       });
-
-      const data: {
-        workflow_id?: string;
-        workflow?: WorkflowSnapshot;
-        status?: string;
-        content_signal?: ExtractedSignal;
-        message?: string;
-      } = await extractResponse.json();
+      const data = extractResult.data;
       if (data.workflow) {
         updateWorkflowSnapshot(data.workflow);
         syncWorkflowUiFromSnapshot(data.workflow);
@@ -1162,13 +1083,9 @@ export default function AdvancedStudio() {
     try {
       const artifactScope = mapArtifactScope(artifactType);
 
-      const artifactRes = await fetch(`${API_BASE}/api/workflow/${workflowId}/lock-artifacts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ artifact_scope: artifactScope })
-      });
-      const artifactData = await artifactRes.json();
-      if (!artifactRes.ok || artifactData?.status !== 'success') {
+      const artifactResult = await lockAdvancedWorkflowArtifacts(API_BASE, workflowId, artifactScope);
+      const artifactData = artifactResult.data;
+      if (!artifactResult.ok || artifactData?.status !== 'success') {
         const detail = typeof artifactData?.detail === 'string'
           ? artifactData.detail
           : (typeof artifactData?.message === 'string' ? artifactData.message : 'Artifact scope lock failed.');
@@ -1182,13 +1099,9 @@ export default function AdvancedStudio() {
       }
 
       const renderProfile = buildRenderProfilePayload(mode);
-      const renderRes = await fetch(`${API_BASE}/api/workflow/${workflowId}/lock-render`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ render_profile: renderProfile })
-      });
-      const renderData = await renderRes.json();
-      if (!renderRes.ok || renderData?.status !== 'success') {
+      const renderResult = await lockAdvancedWorkflowRender(API_BASE, workflowId, renderProfile);
+      const renderData = renderResult.data;
+      if (!renderResult.ok || renderData?.status !== 'success') {
         const detail = typeof renderData?.detail === 'string'
           ? renderData.detail
           : (typeof renderData?.message === 'string' ? renderData.message : 'Render profile lock failed.');
@@ -1295,11 +1208,8 @@ export default function AdvancedStudio() {
     }
 
     try {
-      const response = await fetch(`${API_BASE}/api/workflow/${workflowId}/generate-script-pack`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      const data = await response.json();
+      const scriptPackResult = await generateAdvancedWorkflowScriptPack(API_BASE, workflowId);
+      const data = scriptPackResult.data;
       if (data?.workflow) {
         updateWorkflowSnapshot(data.workflow);
       }
@@ -1401,20 +1311,15 @@ export default function AdvancedStudio() {
     pushAgentNote('info', 'Final Bundle', 'High-fidelity upscale started using the current scene images.');
 
     try {
-      const response = await fetch(`${API_BASE}/api/final-bundle/upscale`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scale_factor: 2,
-          scenes: currentScenes.map((scene) => ({
-            scene_id: scene.id,
-            image_url: scene.imageUrl,
-          })),
-        }),
+      const upscaleResult = await upscaleAdvancedFinalBundle(API_BASE, {
+        scale_factor: 2,
+        scenes: currentScenes.map((scene) => ({
+          scene_id: scene.id,
+          image_url: scene.imageUrl,
+        })),
       });
-
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || data?.status !== 'success') {
+      const data = upscaleResult.data;
+      if (!upscaleResult.ok || data?.status !== 'success') {
         const detail = typeof data?.detail === 'string'
           ? data.detail
           : (typeof data?.message === 'string' ? data.message : 'High-fidelity upscale failed.');
@@ -1501,13 +1406,11 @@ export default function AdvancedStudio() {
     pushAgentNote('info', 'Generation', startNote);
     
     try {
-      const response = await fetch(`${API_BASE}/api/workflow/${workflowId}/generate-stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          script_pack: scriptPackOverride ?? scriptPack ?? undefined
-        })
-      });
+      const response = await openAdvancedWorkflowStream(
+        API_BASE,
+        workflowId,
+        scriptPackOverride ?? scriptPack ?? undefined,
+      );
 
       if (!response.body) throw new Error("ReadableStream not supported in this browser.");
 
@@ -1835,25 +1738,21 @@ export default function AdvancedStudio() {
 
     try {
       setGenerationError('');
-      const response = await fetch(`${API_BASE}/api/workflow/agent/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message,
-          context: {
-            workflow_id: workflowId,
-            active_panel: activePanel,
-            source_text: sourceDoc,
-            source_manifest: buildSourceManifestPayload(),
-            render_profile: buildRenderProfilePayload(),
-            artifact_scope: mapArtifactScope(artifactType),
-            script_presentation_mode: scriptPresentationMode,
-          },
-          conversation,
-        }),
+      const agentResult = await submitAdvancedWorkflowChat(API_BASE, {
+        message,
+        context: {
+          workflow_id: workflowId,
+          active_panel: activePanel,
+          source_text: sourceDoc,
+          source_manifest: buildAdvancedSourceManifest(uploadedSourceAssets),
+          render_profile: buildRenderProfilePayload(),
+          artifact_scope: mapArtifactScope(artifactType),
+          script_presentation_mode: scriptPresentationMode,
+        },
+        conversation,
       });
-      const data = await response.json() as WorkflowAgentChatResponse;
-      if (!response.ok) {
+      const data = agentResult.data as WorkflowAgentChatResponse;
+      if (!agentResult.ok) {
         const detail = apiErrorMessage(data, 'Agent request failed.');
         if (isUnknownWorkflowMessage(detail)) {
           resetWorkflowSession({ noteStage: 'Agent' });
