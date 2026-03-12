@@ -332,7 +332,6 @@ export default function useAdvancedGenerationStream({
                     text: "",
                     status: "queued",
                   };
-                  fullTextBufferRef.current[sceneItem.scene_id] = sceneItem.narration_focus || "";
                 });
                 setExpectedSceneCount(queueScenes.length);
                 setScenes(initialScenes);
@@ -366,6 +365,7 @@ export default function useAdvancedGenerationStream({
                     : undefined,
                   source_media: asSourceMediaList(data.source_media),
                   source_proof_warning: undefined,
+                  text: "",
                   status: "generating",
                 };
                 if (typeof data.title === "string" && data.title.trim()) {
@@ -444,6 +444,7 @@ export default function useAdvancedGenerationStream({
                   const existing = prev[sceneId] ?? { id: sceneId, text: "", status: "queued" };
                   const sourceMediaCount = Array.isArray(existing.source_media) ? existing.source_media.length : 0;
                   const expectedSourceMediaCount = existing.expected_source_media_count ?? 0;
+                  const completedText = (fullTextBufferRef.current[sceneId] || existing.text || "").trim();
                   const nextWarning = (
                     (expectedSourceMediaCount > 0 || (existing.evidence_refs?.length ?? 0) > 0)
                     && sourceMediaCount === 0
@@ -455,6 +456,7 @@ export default function useAdvancedGenerationStream({
                     ...prev,
                     [sceneId]: {
                       ...existing,
+                      text: completedText,
                       status: qaStatus === "FAIL" ? "qa-failed" : "ready",
                       auto_retry_count: autoRetries,
                       source_proof_warning: nextWarning,
