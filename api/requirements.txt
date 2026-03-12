@@ -2,6 +2,7 @@ fastapi
 uvicorn
 pydantic
 google-genai
+google-cloud-storage
 sse-starlette
 python-dotenv
 Pillow
