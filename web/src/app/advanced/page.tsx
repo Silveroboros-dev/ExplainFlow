@@ -14,14 +14,10 @@ import AdvancedSourcePanel from '@/components/AdvancedSourcePanel';
 import AgentActivityPanel, { AgentNote, AgentNoteType } from '@/components/AgentActivityPanel';
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import useAdvancedWorkflowActions from "@/hooks/useAdvancedWorkflowActions";
 import useAdvancedWorkflowSession from "@/hooks/useAdvancedWorkflowSession";
 import {
-  extractAdvancedWorkflowSignal,
-  generateAdvancedWorkflowScriptPack,
-  lockAdvancedWorkflowArtifacts,
-  lockAdvancedWorkflowRender,
   openAdvancedWorkflowStream,
-  startAdvancedWorkflow,
   submitAdvancedWorkflowChat,
   uploadAdvancedSourceAssets,
   upscaleAdvancedFinalBundle,
@@ -285,6 +281,69 @@ export default function AdvancedStudio() {
     setEvidenceViewer(null);
     fullTextBuffer.current = {};
   };
+
+  const {
+    applyProfileToWorkflow,
+    buildRenderProfilePayload,
+    confirmSignal,
+    generateScriptPack,
+    runExtraction,
+  } = useAdvancedWorkflowActions({
+    apiBase: API_BASE,
+    sourceDoc,
+    uploadedSourceAssets,
+    hasSourceInput,
+    workflowId,
+    workflowSnapshot,
+    extractedSignal,
+    scriptPack,
+    fidelityPreference,
+    scriptPresentationMode,
+    renderProfileInput: {
+      artifactType,
+      visualMode,
+      density,
+      audienceLevel,
+      audiencePersona,
+      domainContext,
+      tasteBar,
+      mustIncludeText,
+      mustAvoidText,
+    },
+    setWorkflowId,
+    setWorkflowSnapshot,
+    setAgentNotes,
+    setIsExtracting,
+    setSignalStage,
+    setExtractProgress,
+    setError,
+    setGenerationError,
+    setExtractedSignal,
+    setGenerationStatus,
+    setFidelityPreference,
+    setIsApplyingProfile,
+    setIsGeneratingScriptPack,
+    setScriptPresentationMode,
+    setActivePanel,
+    setScriptPack,
+    setExpectedSceneCount,
+    setScriptPackStage,
+    setScriptPackProgress,
+    clearGeneratedOutputs,
+    startSignalPreviewRun,
+    resetSignalPreviewRun,
+    startScriptPreviewRun,
+    resetScriptPreviewRun,
+    resetStreamPreviewRun,
+    updateWorkflowSnapshot,
+    syncWorkflowUiFromSnapshot,
+    recoverWorkflowState,
+    fetchWorkflowSnapshot,
+    fetchWorkflowSignal,
+    handleUnknownWorkflowError,
+    pushAgentNote,
+    pushPlannerQaNote,
+  });
 
   const removeUploadedSourceAsset = (assetId: string) => {
     setUploadedSourceAssets((prev) => prev.filter((asset) => asset.asset_id !== assetId));
@@ -686,108 +745,6 @@ export default function AdvancedStudio() {
     setShowAmendHelp(false);
   };
 
-  const runExtraction = async (options: { armSignalPreview?: boolean } = {}) => {
-    if (!hasSourceInput) {
-      return false;
-    }
-    const { armSignalPreview = false } = options;
-    const sourceManifest = buildAdvancedSourceManifest(uploadedSourceAssets);
-    const canReuseWorkflow = Boolean(
-      workflowId
-      && workflowSnapshot?.checkpoint_state?.CP1_SIGNAL_READY !== 'passed',
-    );
-    let activeWorkflowId = canReuseWorkflow ? workflowId : null;
-
-    setAgentNotes([]);
-    pushAgentNote('info', 'Extraction', 'Signal extraction started from source material.');
-    setIsExtracting(true);
-    setSignalStage('sending');
-    setExtractProgress(8);
-    setError('');
-    setGenerationError('');
-    setExtractedSignal(null);
-    if (armSignalPreview) {
-      startSignalPreviewRun();
-    } else {
-      resetSignalPreviewRun();
-    }
-    resetScriptPreviewRun();
-    resetStreamPreviewRun();
-    setGenerationStatus('');
-    clearGeneratedOutputs();
-    setFidelityPreference('preview');
-    
-    try {
-      if (!activeWorkflowId) {
-        const startResult = await startAdvancedWorkflow(API_BASE, {
-          source_text: sourceDoc,
-          ...(sourceManifest ? { source_manifest: sourceManifest } : {}),
-        });
-        const startData = startResult.data;
-        if (!startResult.ok || startData.status !== 'success' || !startData.workflow_id) {
-          setError(apiErrorMessage(startData, 'Unable to initialize workflow.'));
-          pushAgentNote('error', 'Extraction', 'Workflow initialization failed.');
-          setSignalStage('error');
-          setExtractProgress(0);
-          return false;
-        }
-        activeWorkflowId = startData.workflow_id;
-        setWorkflowId(startData.workflow_id);
-        if (startData.workflow) {
-          updateWorkflowSnapshot(startData.workflow);
-          syncWorkflowUiFromSnapshot(startData.workflow);
-        } else {
-          setWorkflowSnapshot(null);
-        }
-      }
-
-      const extractResult = await extractAdvancedWorkflowSignal(API_BASE, activeWorkflowId, {
-        source_text: sourceDoc,
-        ...(sourceManifest ? { source_manifest: sourceManifest } : {}),
-      });
-      const data = extractResult.data;
-      if (data.workflow) {
-        updateWorkflowSnapshot(data.workflow);
-        syncWorkflowUiFromSnapshot(data.workflow);
-      }
-      if (data.status === 'success') {
-        setExtractedSignal(data.content_signal ?? null);
-        setSignalStage('ready');
-        setExtractProgress(100);
-        setGenerationStatus(
-          data.workflow
-            ? snapshotStatusSummary(data.workflow)
-            : 'Signal extracted. Next: lock artifact scope and render profile.'
-        );
-        pushAgentNote('checkpoint', 'Extraction', 'Signal extracted and schema validation passed.');
-        return true;
-      } else {
-        setError(data.message || 'Extraction failed');
-        pushAgentNote('error', 'Extraction', data.message || 'Signal extraction failed.');
-        setSignalStage('error');
-        setExtractProgress(0);
-        return false;
-      }
-    } catch (err) {
-      console.error(err);
-      if (activeWorkflowId) {
-        const recoveredSnapshot = await recoverWorkflowState(activeWorkflowId, { silent: true });
-        if (recoveredSnapshot?.has_signal || recoveredSnapshot?.checkpoint_state?.CP1_SIGNAL_READY === 'passed') {
-          pushAgentNote('checkpoint', 'Extraction', 'Recovered extracted signal after a network interruption.');
-          setError('');
-          return true;
-        }
-      }
-      setError('Network error during extraction');
-      pushAgentNote('error', 'Extraction', 'Network error during signal extraction.');
-      setSignalStage('error');
-      setExtractProgress(0);
-      return false;
-    } finally {
-      setIsExtracting(false);
-    }
-  };
-
   const handleExtract = (e: React.FormEvent) => {
     e.preventDefault();
     if (!hasSourceInput) {
@@ -838,296 +795,6 @@ export default function AdvancedStudio() {
     const nextStep = RENDER_PROFILE_STEPS[profileStepIndex + 1];
     if (nextStep) {
       setProfileStep(nextStep);
-    }
-  };
-
-  const handleConfirmSignal = async () => {
-    let currentSnapshot = workflowSnapshot;
-    let signalToUse = extractedSignal;
-
-    if (workflowId) {
-      try {
-        currentSnapshot = await fetchWorkflowSnapshot(workflowId);
-      } catch (snapshotError) {
-        if (handleUnknownWorkflowError(snapshotError, { noteStage: 'Signal' })) {
-          return;
-        }
-        console.error('Signal confirmation snapshot refresh error:', snapshotError);
-      }
-    }
-    if (!signalToUse && workflowId && currentSnapshot?.has_signal) {
-      try {
-        signalToUse = await fetchWorkflowSignal(workflowId);
-        setExtractedSignal(signalToUse);
-      } catch (signalError) {
-        if (handleUnknownWorkflowError(signalError, { noteStage: 'Signal' })) {
-          return;
-        }
-        console.error('Signal confirmation recovery error:', signalError);
-      }
-    }
-
-    if (!signalToUse) {
-      setGenerationStatus('Extract signal first.');
-      pushAgentNote('error', 'Signal', 'Signal confirmation blocked: extract signal first.');
-      return;
-    }
-    if (!currentSnapshot?.ready_for_script_pack) {
-      setGenerationStatus('Workflow gate not ready. Lock artifact scope and render profile first.');
-      pushAgentNote('error', 'Signal', 'Signal confirmation blocked by join gate (artifacts/render not locked).');
-      return;
-    }
-    setActivePanel('script');
-    setGenerationStatus('Signal confirmed. Generating script pack...');
-    pushAgentNote('info', 'Signal', 'Signal confirmed. Script pack generation started.');
-    await handleGenerateScriptPack(scriptPresentationMode);
-  };
-
-  const buildRenderProfilePayload = (mode: 'preview' | 'high' = fidelityPreference) => ({
-    profile_id: `rp_custom_${Date.now()}`,
-    goal: "teach",
-    audience: {
-      level: audienceLevel,
-      persona: audiencePersona,
-      domain_context: domainContext || undefined,
-      taste_bar: tasteBar,
-      must_include: mustIncludeText
-        ? mustIncludeText.split(',').map(item => item.trim()).filter(Boolean).slice(0, 8)
-        : undefined,
-      must_avoid: mustAvoidText
-        ? mustAvoidText.split(',').map(item => item.trim()).filter(Boolean).slice(0, 8)
-        : undefined
-    },
-    visual_mode: visualMode,
-    artifact_type: artifactType,
-    low_key_preview: true,
-    style: {
-      descriptors: [visualMode === "illustration" ? "cinematic" : "clean", "modern"]
-    },
-    fidelity: mode === 'high' ? 'high' : 'medium',
-    density: density,
-    palette: {
-      mode: "auto"
-    },
-    output_controls: {
-      scene_count: 4,
-      target_duration_sec: 60,
-      aspect_ratio: "16:9"
-    },
-    voiceover: {
-      enabled: true,
-      voice_style: "neutral",
-      pace_wpm: 150
-    }
-  });
-
-  const applyProfileToWorkflow = async (
-    mode: 'preview' | 'high' = fidelityPreference,
-  ): Promise<WorkflowSnapshot | null> => {
-    if (!workflowId) {
-      setGenerationStatus('Start with extraction first so a workflow can be created.');
-      pushAgentNote('error', 'Render Profile', 'Cannot lock render profile before workflow start.');
-      return null;
-    }
-
-    setIsApplyingProfile(true);
-    setGenerationError('');
-    setGenerationStatus('Locking artifact scope and render profile...');
-    pushAgentNote('info', 'Render Profile', 'Locking artifact scope and render profile for this run.');
-
-    try {
-      const artifactScope = mapArtifactScope(artifactType);
-
-      const artifactResult = await lockAdvancedWorkflowArtifacts(API_BASE, workflowId, artifactScope);
-      const artifactData = artifactResult.data;
-      if (!artifactResult.ok || artifactData?.status !== 'success') {
-        const detail = typeof artifactData?.detail === 'string'
-          ? artifactData.detail
-          : (typeof artifactData?.message === 'string' ? artifactData.message : 'Artifact scope lock failed.');
-        setGenerationError(detail);
-        pushAgentNote('error', 'Render Profile', detail);
-        setGenerationStatus('');
-        return null;
-      }
-      if (artifactData.workflow) {
-        updateWorkflowSnapshot(artifactData.workflow);
-      }
-
-      const renderProfile = buildRenderProfilePayload(mode);
-      const renderResult = await lockAdvancedWorkflowRender(API_BASE, workflowId, renderProfile);
-      const renderData = renderResult.data;
-      if (!renderResult.ok || renderData?.status !== 'success') {
-        const detail = typeof renderData?.detail === 'string'
-          ? renderData.detail
-          : (typeof renderData?.message === 'string' ? renderData.message : 'Render profile lock failed.');
-        setGenerationError(detail);
-        pushAgentNote('error', 'Render Profile', detail);
-        setGenerationStatus('');
-        return null;
-      }
-
-      const updatedWorkflow = renderData.workflow as WorkflowSnapshot | undefined;
-      if (updatedWorkflow) {
-        updateWorkflowSnapshot(updatedWorkflow);
-      }
-      const cp3Status = typeof renderData?.workflow?.checkpoint_state?.CP3_RENDER_LOCKED === 'string'
-        ? renderData.workflow.checkpoint_state.CP3_RENDER_LOCKED
-        : '';
-      if (cp3Status === 'passed') {
-        setGenerationStatus(
-          mode === 'high'
-            ? 'High-fidelity profile locked. Current bundle images can now be upscaled without changing the script.'
-            : 'Render profile locked. Continue to signal confirmation and script planning.'
-        );
-        pushAgentNote('checkpoint', 'Render Profile', 'Render profile locked and ready.');
-      } else {
-        setGenerationStatus('Artifacts locked. Render profile queued and will auto-lock when signal extraction completes.');
-        pushAgentNote('info', 'Render Profile', 'Artifacts locked. Render lock is queued until signal is ready.');
-      }
-      return updatedWorkflow ?? null;
-    } catch (err) {
-      console.error('Apply profile error:', err);
-      const recoveredSnapshot = await recoverWorkflowState(workflowId, { silent: true });
-      if (recoveredSnapshot) {
-        const cp3Status = recoveredSnapshot.checkpoint_state?.CP3_RENDER_LOCKED;
-        if (cp3Status === 'passed') {
-          setGenerationError('');
-          setGenerationStatus(
-            mode === 'high'
-              ? 'High-fidelity profile locked. Current bundle images can now be upscaled without changing the script.'
-              : 'Render profile locked. Continue to signal confirmation and script planning.'
-          );
-          pushAgentNote('checkpoint', 'Render Profile', 'Recovered render profile lock after a network interruption.');
-          return recoveredSnapshot;
-        }
-        if (recoveredSnapshot.render_profile_queued) {
-          setGenerationError('');
-          setGenerationStatus('Artifacts locked. Render profile queued and will auto-lock when signal extraction completes.');
-          pushAgentNote('info', 'Render Profile', 'Recovered queued render profile after a network interruption.');
-          return recoveredSnapshot;
-        }
-      }
-      setGenerationError('Unable to lock render profile in workflow.');
-      pushAgentNote('error', 'Render Profile', 'Unable to lock render profile in workflow.');
-      setGenerationStatus('');
-      return null;
-    } finally {
-      setIsApplyingProfile(false);
-    }
-  };
-
-  const handleGenerateScriptPack = async (mode: 'review' | 'auto' = 'review') => {
-    if (!workflowId) {
-      setGenerationStatus('Run extraction first to initialize workflow.');
-      pushAgentNote('error', 'Script Pack', 'Cannot generate script pack before extraction workflow starts.');
-      return;
-    }
-    let currentSnapshot = workflowSnapshot;
-    try {
-      currentSnapshot = await fetchWorkflowSnapshot(workflowId);
-    } catch (snapshotError) {
-      if (handleUnknownWorkflowError(snapshotError, { noteStage: 'Script Pack' })) {
-        return;
-      }
-      console.error('Script pack snapshot refresh error:', snapshotError);
-    }
-    if (!currentSnapshot?.ready_for_script_pack) {
-      setGenerationStatus('Workflow gate not ready. Lock artifacts and render profile first.');
-      pushAgentNote('error', 'Script Pack', 'Script pack generation blocked by workflow gate.');
-      return;
-    }
-
-    setIsGeneratingScriptPack(true);
-    setScriptPresentationMode(mode);
-    setGenerationError('');
-    setGenerationStatus(
-      mode === 'review'
-        ? 'Preparing script pack for your confirmation...'
-        : 'Preparing script pack for immediate use...'
-    );
-    setActivePanel('script');
-    setScriptPackStage('outlining');
-    setScriptPackProgress(10);
-    pushAgentNote(
-      'info',
-      'Script Pack',
-      mode === 'review'
-        ? 'Generating script pack for review.'
-        : 'Generating script pack for immediate streaming.'
-    );
-    startScriptPreviewRun();
-    setScriptPack(null);
-    setExpectedSceneCount(0);
-    if (mode === 'review') {
-      setActivePanel('script');
-    }
-
-    try {
-      const scriptPackResult = await generateAdvancedWorkflowScriptPack(API_BASE, workflowId);
-      const data = scriptPackResult.data;
-      if (data?.workflow) {
-        updateWorkflowSnapshot(data.workflow);
-      }
-      if (data?.status === 'success' && data?.script_pack) {
-        const approvedScriptPack = data.script_pack as ScriptPackPayload;
-        setScriptPack(approvedScriptPack);
-        setExpectedSceneCount(deriveSceneCount(approvedScriptPack));
-        setScriptPackStage('ready');
-        setScriptPackProgress(100);
-        pushPlannerQaNote(asPlannerQaSummary(data.planner_qa_summary));
-        if (mode === 'review') {
-          setGenerationStatus('Script pack is ready. Review and amend before starting stream generation.');
-          setActivePanel('script');
-          pushAgentNote('checkpoint', 'Script Pack', 'Script pack ready for review.');
-        } else {
-          setGenerationStatus('Script pack approved. Starting generation stream automatically...');
-          setActivePanel('stream');
-          pushAgentNote('checkpoint', 'Script Pack', 'Script pack approved. Starting stream automatically.');
-          setIsGeneratingScriptPack(false);
-          await handleGenerateStream(approvedScriptPack, {
-            gateReadyOverride: true,
-            preparationMessage: 'Script pack approved. Preparing generation pipeline...',
-            startNote: 'Script pack approved. Generation stream started automatically.',
-          });
-          return;
-        }
-      } else {
-        const detail = typeof data?.detail === 'string'
-          ? data.detail
-          : (typeof data?.message === 'string' ? data.message : 'Script pack generation failed.');
-        setScriptPackStage('error');
-        setScriptPackProgress(0);
-        setGenerationError(detail);
-        pushAgentNote('error', 'Script Pack', detail);
-        setGenerationStatus('');
-      }
-    } catch (err) {
-      console.error("Script pack error:", err);
-      const recoveredSnapshot = await recoverWorkflowState(workflowId, { silent: true });
-      if (recoveredSnapshot?.has_script_pack) {
-        setScriptPackStage('ready');
-        setScriptPackProgress(100);
-        setGenerationError('');
-        if (scriptPack) {
-          setExpectedSceneCount(deriveSceneCount(scriptPack));
-        }
-        if (mode === 'review') {
-          setGenerationStatus('Script pack is ready. Review and amend before starting stream generation.');
-          setActivePanel('script');
-        } else {
-          setGenerationStatus('Recovered script pack after a network interruption.');
-          setActivePanel('script');
-        }
-        pushAgentNote('checkpoint', 'Script Pack', 'Recovered script pack after a network interruption.');
-        return;
-      }
-      setScriptPackStage('error');
-      setScriptPackProgress(0);
-      setGenerationError('Unable to generate script pack.');
-      pushAgentNote('error', 'Script Pack', 'Unable to generate script pack.');
-      setGenerationStatus('');
-    } finally {
-      setIsGeneratingScriptPack(false);
     }
   };
 
@@ -1527,6 +1194,14 @@ export default function AdvancedStudio() {
       }
       setIsGenerating(false);
     }
+  };
+
+  const handleGenerateScriptPack = async (mode: 'review' | 'auto' = 'review') => {
+    await generateScriptPack(mode, { onAutoStartStream: handleGenerateStream });
+  };
+
+  const handleConfirmSignal = async () => {
+    await confirmSignal({ onAutoStartStream: handleGenerateStream });
   };
 
   const handleScriptPackAction = () => {

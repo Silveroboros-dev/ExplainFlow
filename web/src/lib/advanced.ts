@@ -398,6 +398,54 @@ export type AdvancedSourceManifest = {
   assets: AdvancedSourceManifestAsset[];
 };
 
+export type AdvancedRenderProfileMode = "preview" | "high";
+
+export type AdvancedRenderProfileInput = {
+  artifactType: string;
+  visualMode: string;
+  density: string;
+  audienceLevel: string;
+  audiencePersona: string;
+  domainContext: string;
+  tasteBar: string;
+  mustIncludeText: string;
+  mustAvoidText: string;
+};
+
+export type AdvancedRenderProfilePayload = {
+  profile_id: string;
+  goal: "teach";
+  audience: {
+    level: string;
+    persona: string;
+    domain_context?: string;
+    taste_bar: string;
+    must_include?: string[];
+    must_avoid?: string[];
+  };
+  visual_mode: string;
+  artifact_type: string;
+  low_key_preview: true;
+  style: {
+    descriptors: string[];
+  };
+  fidelity: "high" | "medium";
+  density: string;
+  palette: {
+    mode: "auto";
+  };
+  output_controls: {
+    scene_count: number;
+    target_duration_sec: number;
+    aspect_ratio: "16:9";
+  };
+  voiceover: {
+    enabled: true;
+    voice_style: "neutral";
+    pace_wpm: number;
+  };
+};
+
 export type SceneQueueItem = {
   scene_id: string;
   title?: string;
@@ -787,5 +835,51 @@ export const buildAdvancedSourceManifest = (
         metadata: asset.metadata,
       })),
     }
-    : undefined
+      : undefined
 );
+
+const csvFieldToList = (value: string): string[] | undefined => {
+  const items = value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  return items.length > 0 ? items : undefined;
+};
+
+export const buildAdvancedRenderProfilePayload = (
+  input: AdvancedRenderProfileInput,
+  mode: AdvancedRenderProfileMode = "preview",
+): AdvancedRenderProfilePayload => ({
+  profile_id: `rp_custom_${Date.now()}`,
+  goal: "teach",
+  audience: {
+    level: input.audienceLevel,
+    persona: input.audiencePersona,
+    domain_context: input.domainContext || undefined,
+    taste_bar: input.tasteBar,
+    must_include: csvFieldToList(input.mustIncludeText),
+    must_avoid: csvFieldToList(input.mustAvoidText),
+  },
+  visual_mode: input.visualMode,
+  artifact_type: input.artifactType,
+  low_key_preview: true,
+  style: {
+    descriptors: [input.visualMode === "illustration" ? "cinematic" : "clean", "modern"],
+  },
+  fidelity: mode === "high" ? "high" : "medium",
+  density: input.density,
+  palette: {
+    mode: "auto",
+  },
+  output_controls: {
+    scene_count: 4,
+    target_duration_sec: 60,
+    aspect_ratio: "16:9",
+  },
+  voiceover: {
+    enabled: true,
+    voice_style: "neutral",
+    pace_wpm: 150,
+  },
+});
