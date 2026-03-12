@@ -16,6 +16,7 @@ sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from app.schemas.events import build_sse_event
 from app.schemas.requests import (
+    QuickArtifactBlockSchema,
     AdvancedStreamRequest,
     QuickArtifactOverrideRequest,
     QuickArtifactRequest,
@@ -1047,6 +1048,66 @@ def test_populate_quick_block_visuals_generates_images_even_for_source_backed_bl
 
     assert visualized.blocks[0].image_url == "http://127.0.0.1:8000/static/assets/quick_block_demo.png"
     assert visualized.blocks[1].image_url == "http://127.0.0.1:8000/static/assets/quick_block_demo.png"
+    assert block_image_mock.await_count == 2
+
+
+def test_populate_quick_block_visuals_honors_forced_block_ids() -> None:
+    agent = GeminiStoryAgent()
+    artifact = QuickArtifactSchema.model_validate(
+        {
+            "artifact_id": "artifact-force-visuals",
+            "title": "Forced visuals artifact",
+            "subtitle": "Testing forced block visuals",
+            "summary": "Forced block ids should still generate images outside the targeted subset.",
+            "visual_style": "illustration",
+            "hero_direction": "Clean hero.",
+            "blocks": [
+                {
+                    "block_id": "block-1",
+                    "label": "Hook",
+                    "title": "Primary target",
+                    "body": "This block is directly targeted.",
+                    "bullets": [],
+                    "visual_direction": "Lead visual.",
+                    "emphasis": "hook",
+                },
+                {
+                    "block_id": "block-2",
+                    "label": "Proof",
+                    "title": "Forced target",
+                    "body": "This block should be regenerated even outside the main subset.",
+                    "bullets": [],
+                    "visual_direction": "Evidence frame.",
+                    "emphasis": "proof",
+                },
+            ],
+        }
+    )
+
+    async def fake_generate_block_image(*, block: QuickArtifactBlockSchema, **_: Any) -> str:
+        return f"http://127.0.0.1:8000/static/assets/{block.block_id}.png"
+
+    with patch.object(
+        GeminiStoryAgent,
+        "_generate_quick_block_image",
+        new=AsyncMock(side_effect=fake_generate_block_image),
+    ) as block_image_mock:
+        visualized = asyncio.run(
+            agent._populate_quick_block_visuals(
+                request=SimpleNamespace(url=SimpleNamespace(scheme="http", netloc="127.0.0.1:8000")),
+                topic="Demo topic",
+                audience="Operators",
+                tone="Practical",
+                visual_mode="illustration",
+                artifact=artifact,
+                content_signal={},
+                only_block_ids={"block-1"},
+                force_block_ids={"block-2"},
+            )
+        )
+
+    assert visualized.blocks[0].image_url == "http://127.0.0.1:8000/static/assets/block-1.png"
+    assert visualized.blocks[1].image_url == "http://127.0.0.1:8000/static/assets/block-2.png"
     assert block_image_mock.await_count == 2
 
 
