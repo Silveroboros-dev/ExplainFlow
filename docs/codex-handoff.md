@@ -6,8 +6,8 @@ Last updated: 2026-03-12
 
 - Workspace: `/Users/rk/Desktop/Gemini Live Agent Challenge`
 - Active branch: `codex/advanced-qa-pipeline`
-- Latest branch commit: `2302c18` (`Separate Advanced display and narration text`)
-- Branch status: clean and pushed to `fork/codex/advanced-qa-pipeline`
+- Latest branch commit: `7d7d41b` (`Share advanced route request helpers`)
+- Branch status: clean for code changes; only local deployment-file edits remain in `GEMINI.md`, `cloudbuild.yaml`, and `terraform/main.tf`
 
 Do not commit editor state or generated runtime assets unless explicitly requested.
 
@@ -97,13 +97,33 @@ Key properties:
   - canonical narration is now separate from display / typewriter text, so export and scene regeneration do not depend on preview state
 - Removed unused Advanced typing-complete state
 - Kept Advanced MP4 calmer-motion / short-overlay behavior and visible export controls intact
+- Landed a second backend / workflow optimization phase after the initial frontend refactor:
+  - extracted large backend helper domains out of `gemini_story_agent.py`
+  - reduced repeated workflow-prep work across script-pack generation and stream start
+  - trimmed redundant workflow polling / locking round trips in the Advanced UI
+  - reduced routine workflow snapshot payload size
 
 Central files:
 
 - `api/app/routes/assets.py`
 - `api/app/routes/workflow.py`
+- `api/app/routes/advanced_route_helpers.py`
 - `api/app/services/video_pipeline.py`
 - `api/app/services/gemini_story_agent.py`
+- `api/app/services/story_agent_source_media.py`
+- `api/app/services/story_agent_planner.py`
+- `api/app/services/story_agent_scene_generation.py`
+- `api/app/services/story_agent_advanced_stream.py`
+- `api/app/services/story_agent_advanced_qa.py`
+- `api/app/services/story_agent_advanced_first_scene.py`
+- `api/app/services/story_agent_buffered_scene.py`
+- `api/app/services/story_agent_scene_prelude.py`
+- `api/app/services/story_agent_extraction.py`
+- `api/app/services/story_agent_extraction_runtime.py`
+- `api/app/services/story_agent_quick.py`
+- `api/app/services/story_agent_quick_artifact.py`
+- `api/app/services/story_agent_quick_runtime.py`
+- `api/app/services/story_agent_quick_workflows.py`
 - `api/app/services/interleaved_parser.py`
 - `api/app/schemas/requests.py`
 - `api/app/services/workflow_chat_agent.py`
@@ -204,12 +224,42 @@ Current result:
   - `747ae4f` `Make Advanced scene override workflow-aware`
   - `c361803` `Fix Advanced scene narration state`
   - `2302c18` `Separate Advanced display and narration text`
+- backend / workflow optimization checkpoints after that:
+  - `d2b8abe` `Refactor story agent backend helpers`
+  - `41dac1e` `Optimize workflow media hot paths`
+  - `91d694e` `Refactor Quick backend artifact helpers`
+  - `07ab489` `Refactor Quick backend workflows`
+  - `72377a7` `Overlap Quick scene streaming after opener`
+  - `11a40f7` `Share buffered scene pass runner`
+  - `b47674f` `Share scene prelude event builder`
+  - `76f0558` `Refactor Advanced scene QA loop`
+  - `01d1e56` `Refactor Advanced first scene streaming`
+  - `0766096` `Skip duplicate script-pack proof enrichment`
+  - `c22af34` `Avoid duplicate workflow snapshot refresh`
+  - `2d6e71d` `Slim workflow snapshot payloads`
+  - `6310cf5` `Combine workflow profile locks`
+  - `0c6dec7` `Deduplicate script pack prompt prep`
+  - `7d7d41b` `Share advanced route request helpers`
 
 ## Files Most Central To The Current State
 
 Backend:
 
 - `api/app/services/gemini_story_agent.py`
+- `api/app/services/story_agent_source_media.py`
+- `api/app/services/story_agent_planner.py`
+- `api/app/services/story_agent_scene_generation.py`
+- `api/app/services/story_agent_advanced_stream.py`
+- `api/app/services/story_agent_advanced_qa.py`
+- `api/app/services/story_agent_advanced_first_scene.py`
+- `api/app/services/story_agent_buffered_scene.py`
+- `api/app/services/story_agent_scene_prelude.py`
+- `api/app/services/story_agent_extraction.py`
+- `api/app/services/story_agent_extraction_runtime.py`
+- `api/app/services/story_agent_quick.py`
+- `api/app/services/story_agent_quick_artifact.py`
+- `api/app/services/story_agent_quick_runtime.py`
+- `api/app/services/story_agent_quick_workflows.py`
 - `api/app/services/video_pipeline.py`
 - `api/app/services/source_ingest.py`
 - `api/app/services/interleaved_parser.py`
@@ -217,6 +267,7 @@ Backend:
 - `api/app/services/workflow_chat_agent.py`
 - `api/app/routes/assets.py`
 - `api/app/routes/generate_stream.py`
+- `api/app/routes/advanced_route_helpers.py`
 - `api/app/routes/workflow.py`
 - `api/app/schemas/requests.py`
 
@@ -306,10 +357,11 @@ These are real next-step items, not regressions.
 - true line-deep linking is still limited
 
 5. Deeper post-demo refactor
-- backend `gemini_story_agent.py` is still a god object
+- backend `gemini_story_agent.py` is much smaller now, but still the top-level orchestrator shell
 - Advanced page is much smaller, but still acts as the coordinator shell
 - proof-viewer image lint cleanup is still unaddressed
 - there has not yet been a full post-refactor rehearsal pass documenting the whole Advanced workflow
+- `AgentCoordinator` request builders still deep-copy large payloads defensively; that is the next higher-risk optimization seam if performance work continues
 
 ## Recommended Next Priority
 
@@ -324,7 +376,7 @@ If continuing refactor work on this branch:
 1. stop Quick here
 2. pause large frontend reshaping and run a targeted Advanced rehearsal / smoke pass
 3. only then choose the next narrow seam:
-   - backend service split from `gemini_story_agent.py`
+   - `AgentCoordinator` request-builder copy pressure
    - OCR / ingest improvements
    - proof-link / proof-viewer precision
 4. keep changes rollback-safe and behavior-preserving
