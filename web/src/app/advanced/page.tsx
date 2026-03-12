@@ -3,7 +3,9 @@
 import Image from 'next/image';
 import React, { useState } from 'react';
 import AdvancedContentSignalPanel from '@/components/AdvancedContentSignalPanel';
+import AdvancedGenerationStreamPanel from '@/components/AdvancedGenerationStreamPanel';
 import AdvancedRenderProfilePanel from '@/components/AdvancedRenderProfilePanel';
+import AdvancedScriptPackPanel from '@/components/AdvancedScriptPackPanel';
 import AdvancedSourcePanel from '@/components/AdvancedSourcePanel';
 import SceneCard from '@/components/SceneCard';
 import FinalBundle from '@/components/FinalBundle';
@@ -20,7 +22,6 @@ import {
   GitBranch,
   ImageIcon,
   LayoutGrid,
-  Loader2,
   Newspaper,
   PenTool,
   Presentation,
@@ -3125,179 +3126,56 @@ export default function AdvancedStudio() {
               )}
 
               {activePanel === 'stream' && (
-                <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
-                  <CardHeader>
-                    <CardTitle className="text-slate-900">5. Generation Stream</CardTitle>
-                    <CardDescription className="text-slate-600">
-                      Start generation and monitor live scene-by-scene output.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <Button className={PRIMARY_ACTION_CARD_CLASS} size="lg" onClick={() => void handleGenerateStreamAction()} disabled={isGenerating || !workflowSnapshot?.ready_for_stream || !scriptPack || isGeneratingScriptPack}>
-                        <span className="flex w-full items-center justify-between gap-4">
-                          <span className="space-y-1 text-left">
-                            <span className={PRIMARY_ACTION_LABEL_CLASS}>
-                              Primary Action
-                            </span>
-                            <span className="block text-base font-semibold">
-                              {isGenerating ? (
-                                'Generating Stream...'
-                              ) : isGeneratingScriptPack ? (
-                                'Script Pack in Progress...'
-                              ) : !workflowSnapshot?.ready_for_script_pack ? (
-                                'Lock Signal + Artifacts + Profile First'
-                              ) : !scriptPack ? (
-                                'Generate Script Pack First'
-                              ) : !workflowSnapshot?.ready_for_stream ? (
-                                'Script Pack Must Be Locked'
-                              ) : (
-                                'Generate Explainer Stream'
-                              )}
-                            </span>
-                          </span>
-                          {isGenerating ? (
-                            <Loader2 className="h-5 w-5 animate-spin text-slate-100" />
-                          ) : null}
-                        </span>
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className={SECONDARY_ACTION_CARD_CLASS}
-                        onClick={handleRegenerateStream}
-                        disabled={isGenerating || !scriptPack || Object.keys(scenes).length === 0}
-                      >
-                        <span className="space-y-1 text-left">
-                          <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                            Secondary Action
-                          </span>
-                          <span className="block text-base font-semibold">Regenerate Stream</span>
-                        </span>
-                      </Button>
-                    </div>
-                    {showStreamTypingPreview && (
-                      <div className="space-y-4">
-                        <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
-                          Generation can continue for a while after the stream starts. You can keep asking questions in the assistant chat while scenes render.
-                        </div>
-                        <div className="p-4 bg-indigo-50 text-indigo-950 rounded-md border border-indigo-200">
-                          <h4 className="font-semibold mb-2">Orchestrating Generation Stream...</h4>
-                          <p className="text-sm whitespace-pre-wrap font-mono leading-6">
-                            {typedStreamExplainer}
-                            <span className="animate-pulse">|</span>
-                          </p>
-                        </div>
-                        <div className="bg-slate-900 text-slate-50 p-4 rounded-md overflow-auto max-h-[360px] text-xs font-mono">
-                          <pre>
-                            {typedStreamPreview}
-                            <span className="animate-pulse">|</span>
-                          </pre>
-                        </div>
-                      </div>
-                    )}
-                    {generationStatus && (
-                      <div className="p-4 bg-blue-50 text-blue-900 rounded-md border border-blue-200">
-                        <h4 className="font-semibold mb-1">Generation Status</h4>
-                        <p className="text-sm">{generationStatus}</p>
-                      </div>
-                    )}
-                    {isGenerating && (
-                      <div className="space-y-2">
-                        <Progress value={generationProgress} className="h-2 bg-blue-100 [&>*]:bg-blue-500" />
-                        <p className="text-xs text-slate-600">Scenes complete: {completedSceneCount}/{Math.max(totalSceneCount, completedSceneCount)}</p>
-                      </div>
-                    )}
-                    {generationError && (
-                      <p className="text-sm font-medium text-rose-600">{generationError}</p>
-                    )}
-                  </CardContent>
-                </Card>
+                <AdvancedGenerationStreamPanel
+                  showTypingPreview={showStreamTypingPreview}
+                  typedStreamExplainer={typedStreamExplainer}
+                  typedStreamPreview={typedStreamPreview}
+                  isGenerating={isGenerating}
+                  isGeneratingScriptPack={isGeneratingScriptPack}
+                  primaryActionText={isGenerating
+                    ? 'Generating Stream...'
+                    : isGeneratingScriptPack
+                      ? 'Script Pack in Progress...'
+                      : !workflowSnapshot?.ready_for_script_pack
+                        ? 'Lock Signal + Artifacts + Profile First'
+                        : !scriptPack
+                          ? 'Generate Script Pack First'
+                          : !workflowSnapshot?.ready_for_stream
+                            ? 'Script Pack Must Be Locked'
+                            : 'Generate Explainer Stream'}
+                  primaryDisabled={isGenerating || !workflowSnapshot?.ready_for_stream || !scriptPack || isGeneratingScriptPack}
+                  secondaryDisabled={isGenerating || !scriptPack || Object.keys(scenes).length === 0}
+                  generationStatus={generationStatus}
+                  generationProgress={generationProgress}
+                  completedSceneCount={completedSceneCount}
+                  totalSceneCount={totalSceneCount}
+                  generationError={generationError}
+                  primaryActionClassName={PRIMARY_ACTION_CARD_CLASS}
+                  primaryActionLabelClassName={PRIMARY_ACTION_LABEL_CLASS}
+                  secondaryActionClassName={SECONDARY_ACTION_CARD_CLASS}
+                  onGenerate={() => void handleGenerateStreamAction()}
+                  onRegenerate={handleRegenerateStream}
+                />
               )}
 
               {activePanel === 'script' && (
-                <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
-                  <CardHeader>
-                    <CardTitle className="text-slate-900">4. Script Pack</CardTitle>
-                    <CardDescription className="text-slate-600">
-                      Planner output generated from the extracted signal and current render profile.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {scriptPack && !showScriptTypingPreview ? (
-                      <div className="space-y-3">
-                        <div className="bg-slate-900 text-slate-50 p-4 rounded-md overflow-auto max-h-[460px] text-xs font-mono">
-                          <pre>{JSON.stringify(scriptPack, null, 2)}</pre>
-                        </div>
-                        <p className="text-xs text-slate-600">
-                          Change render profile settings and run generation again to regenerate this script pack.
-                        </p>
-                      </div>
-                    ) : showScriptTypingPreview ? (
-                      <div className="space-y-4">
-                        <Progress value={scriptPackProgress} className="h-2 bg-blue-100 [&>*]:bg-blue-500" />
-                        <p className="text-sm text-slate-700">{scriptPackPhaseText}</p>
-                        <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
-                          Script planning can take around a minute on the current architecture. You can keep asking questions in the assistant chat while it runs.
-                        </div>
-                        <div className="p-4 bg-blue-50 text-blue-900 rounded-md border border-blue-200">
-                          <h4 className="font-semibold mb-2">Drafting Script Pack...</h4>
-                          <p className="text-sm whitespace-pre-wrap font-mono leading-6">
-                            {typedScriptExplainer}
-                            <span className="animate-pulse">|</span>
-                          </p>
-                        </div>
-                        <div className="bg-slate-900 text-slate-50 p-4 rounded-md overflow-auto max-h-[360px] text-xs font-mono">
-                          <pre>
-                            {typedScriptPreview}
-                            <span className="animate-pulse">|</span>
-                          </pre>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex min-h-[220px] flex-col items-center justify-center rounded-md border-2 border-dashed border-slate-300 p-8 text-slate-500">
-                        <p className="text-center font-medium">Script pack not available yet.</p>
-                        <p className="mt-1 text-center text-sm">Generate script pack first, then review before starting stream.</p>
-                      </div>
-                    )}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <Button
-                        type="button"
-                        className={PRIMARY_ACTION_CARD_CLASS}
-                        onClick={() => void handleScriptPackAction()}
-                        disabled={isGeneratingScriptPack || isGenerating || !workflowSnapshot?.ready_for_script_pack}
-                      >
-                        <span className="flex w-full items-center justify-between gap-4">
-                          <span className="space-y-1 text-left">
-                            <span className={PRIMARY_ACTION_LABEL_CLASS}>
-                              Primary Action
-                            </span>
-                            <span className="block text-base font-semibold">
-                              {isGeneratingScriptPack ? 'Generating Script Pack...' : scriptPack ? 'Regenerate Script Pack' : 'Generate Script Pack'}
-                            </span>
-                          </span>
-                          {isGeneratingScriptPack ? (
-                            <Loader2 className="h-5 w-5 animate-spin text-slate-100" />
-                          ) : null}
-                        </span>
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className={SECONDARY_ACTION_CARD_CLASS}
-                        onClick={handleRegenerateScript}
-                        disabled={isGeneratingScriptPack || isGenerating || !scriptPack}
-                      >
-                        <span className="space-y-1 text-left">
-                          <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                            Secondary Action
-                          </span>
-                          <span className="block text-base font-semibold">Regenerate Script</span>
-                        </span>
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
+                <AdvancedScriptPackPanel
+                  scriptPack={scriptPack}
+                  showTypingPreview={showScriptTypingPreview}
+                  scriptPackProgress={scriptPackProgress}
+                  scriptPackPhaseText={scriptPackPhaseText}
+                  typedScriptExplainer={typedScriptExplainer}
+                  typedScriptPreview={typedScriptPreview}
+                  isGeneratingScriptPack={isGeneratingScriptPack}
+                  primaryActionText={isGeneratingScriptPack ? 'Generating Script Pack...' : scriptPack ? 'Regenerate Script Pack' : 'Generate Script Pack'}
+                  primaryDisabled={isGeneratingScriptPack || isGenerating || !workflowSnapshot?.ready_for_script_pack}
+                  secondaryDisabled={isGeneratingScriptPack || isGenerating || !scriptPack}
+                  primaryActionClassName={PRIMARY_ACTION_CARD_CLASS}
+                  primaryActionLabelClassName={PRIMARY_ACTION_LABEL_CLASS}
+                  secondaryActionClassName={SECONDARY_ACTION_CARD_CLASS}
+                  onGenerate={() => void handleScriptPackAction()}
+                  onRegenerate={handleRegenerateScript}
+                />
               )}
             </div>
           </div>
