@@ -2,6 +2,7 @@
 
 import Image from 'next/image';
 import React, { useState } from 'react';
+import AdvancedAssistantPanel from '@/components/AdvancedAssistantPanel';
 import AdvancedContentSignalPanel from '@/components/AdvancedContentSignalPanel';
 import AdvancedGeneratedExplainerSection from '@/components/AdvancedGeneratedExplainerSection';
 import AdvancedGenerationStreamPanel from '@/components/AdvancedGenerationStreamPanel';
@@ -10,12 +11,9 @@ import AdvancedScriptPackPanel from '@/components/AdvancedScriptPackPanel';
 import AdvancedSourcePanel from '@/components/AdvancedSourcePanel';
 import AgentActivityPanel, { AgentNote, AgentNoteType } from '@/components/AgentActivityPanel';
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   type LucideIcon,
   GitBranch,
@@ -2780,31 +2778,6 @@ export default function AdvancedStudio() {
   const canMoveProfileBack = profileStepIndex > 0;
   const canMoveProfileNext = profileStepIndex < RENDER_PROFILE_STEPS.length - 1;
   const agentIsWorking = isExtracting || isApplyingProfile || isGeneratingScriptPack || isGenerating;
-  const chatRoleMeta = (role: ChatRole): {
-    rowClassName: string;
-    bubbleClassName: string;
-    label: string;
-  } => {
-    if (role === 'user') {
-      return {
-        rowClassName: 'justify-end',
-        bubbleClassName: 'border-blue-300 bg-blue-50 text-blue-950',
-        label: 'You',
-      };
-    }
-    if (role === 'system') {
-      return {
-        rowClassName: 'justify-center',
-        bubbleClassName: 'border-slate-300 bg-slate-100 text-slate-700',
-        label: 'System',
-      };
-    }
-    return {
-      rowClassName: 'justify-start',
-      bubbleClassName: 'border-slate-200 bg-white text-slate-900',
-      label: 'ExplainFlow',
-    };
-  };
   const stageProgress = (() => {
     if (!hasSourceInput) return 0;
     if (workflowSnapshot?.checkpoint_state?.CP6_BUNDLE_FINALIZED === 'passed') return 100;
@@ -2927,69 +2900,16 @@ export default function AdvancedStudio() {
 
         <div className="grid items-start gap-6 lg:grid-cols-[1.2fr_1fr]">
           <div className="space-y-6 lg:sticky lg:top-4">
-            <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
-              <CardHeader>
-                <CardTitle className="text-slate-900">ExplainFlow Assistant</CardTitle>
-                <CardDescription className="text-slate-600">
-                  Workflow orchestration console. Shows only the latest request/response while detailed logs stay in Agent Session Notes.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                  <div className="mb-3 flex items-center justify-between gap-3 px-1">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Latest Exchange</p>
-                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
-                      Live
-                    </span>
-                  </div>
-                <ScrollArea className="h-[300px] rounded-xl border border-slate-200 bg-white p-3 md:h-[340px]">
-                  <div className="space-y-3 pr-2">
-                    {chatMessages.map((message) => {
-                      const meta = chatRoleMeta(message.role);
-                      return (
-                        <div key={message.id} className={`flex w-full items-start gap-2 ${meta.rowClassName}`}>
-                          <div className={`max-w-[85%] rounded-2xl border px-3 py-2 text-sm leading-6 shadow-sm ${meta.bubbleClassName}`}>
-                            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide opacity-70">{meta.label}</p>
-                            <p className="whitespace-pre-wrap">{message.text}</p>
-                          </div>
-                        </div>
-                      );
-                    })}
-                    {agentIsWorking && (
-                      <div className="flex w-full items-start gap-2 justify-start">
-                        <div className="max-w-[85%] rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
-                          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-600">ExplainFlow</p>
-                          <Skeleton className="h-3 w-28 bg-slate-200" />
-                          <Skeleton className="mt-2 h-3 w-44 bg-slate-200" />
-                          <Skeleton className="mt-2 h-3 w-36 bg-slate-200" />
-                        </div>
-                      </div>
-                    )}
-                    <div ref={chatScrollAnchorRef} />
-                  </div>
-                </ScrollArea>
-                </div>
-                <form onSubmit={(e) => void handleChatSubmit(e)} className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <Textarea
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder='Ask naturally, e.g. "What should I do next?" or "Open render profile."'
-                    className="min-h-[84px] resize-none bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
-                  />
-                  <Button
-                    type="submit"
-                    className={`${PRIMARY_ACTION_CARD_CLASS}`}
-                  >
-                    <span className="space-y-1 text-left">
-                      <span className={PRIMARY_ACTION_LABEL_CLASS}>
-                        Assistant Action
-                      </span>
-                      <span className="block text-base font-semibold">Send Request</span>
-                    </span>
-                  </Button>
-                </form>
-              </CardContent>
-            </Card>
+            <AdvancedAssistantPanel
+              chatMessages={chatMessages}
+              chatInput={chatInput}
+              isWorking={agentIsWorking}
+              primaryActionClassName={PRIMARY_ACTION_CARD_CLASS}
+              primaryActionLabelClassName={PRIMARY_ACTION_LABEL_CLASS}
+              chatScrollAnchorRef={chatScrollAnchorRef}
+              onSubmit={(event) => void handleChatSubmit(event)}
+              onChatInputChange={setChatInput}
+            />
 
             <AgentActivityPanel
               title="Agent Session Notes"
