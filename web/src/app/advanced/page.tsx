@@ -3,12 +3,11 @@
 import Image from 'next/image';
 import React, { useState } from 'react';
 import AdvancedContentSignalPanel from '@/components/AdvancedContentSignalPanel';
+import AdvancedGeneratedExplainerSection from '@/components/AdvancedGeneratedExplainerSection';
 import AdvancedGenerationStreamPanel from '@/components/AdvancedGenerationStreamPanel';
 import AdvancedRenderProfilePanel from '@/components/AdvancedRenderProfilePanel';
 import AdvancedScriptPackPanel from '@/components/AdvancedScriptPackPanel';
 import AdvancedSourcePanel from '@/components/AdvancedSourcePanel';
-import SceneCard from '@/components/SceneCard';
-import FinalBundle from '@/components/FinalBundle';
 import AgentActivityPanel, { AgentNote, AgentNoteType } from '@/components/AgentActivityPanel';
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -3183,79 +3182,20 @@ export default function AdvancedStudio() {
           </div>
         </div>
 
-        {/* Timeline Stream Area */}
-        <div className="space-y-6 mt-12">
-          {generationError && (
-            <div className="p-4 bg-red-50 text-red-900 rounded-md border border-red-200">
-              <h4 className="font-semibold mb-1">Generation Error</h4>
-              <p className="text-sm">{generationError}</p>
-            </div>
-          )}
-
-          {Object.values(scenes).length > 0 && (
-            <h2 className="text-2xl font-bold tracking-tight text-slate-100 mb-6">Generated Explainer</h2>
-          )}
-          
-          <div className="flex flex-col gap-6">
-            {Object.values(scenes).map(scene => (
-              <SceneCard 
-                key={scene.id} 
-                sceneId={scene.id} 
-                title={scene.title}
-                text={scene.text} 
-                imageUrl={scene.imageUrl} 
-                artifactType={scriptPack?.artifact_type ?? artifactType}
-                audioUrl={scene.audioUrl} 
-                visualMode={visualMode}
-                onRegenerate={handleRegenerate}
-                onOpenEvidence={openEvidenceViewer}
-                claimRefs={scene.claim_refs}
-                sourceMedia={scene.source_media}
-                status={scene.status}
-                qaStatus={scene.qa_status}
-                qaReasons={scene.qa_reasons}
-                qaScore={scene.qa_score}
-                qaWordCount={scene.qa_word_count}
-                autoRetryCount={scene.auto_retry_count}
-                sourceProofWarning={scene.source_proof_warning}
-                audioStatus={isGenerating && !scene.audioUrl ? "Generating..." : "Ready"} 
-              />
-            ))}
-          </div>
-
-          {Object.values(scenes).length > 0 && (
-            <>
-              {fidelityPreference !== 'high' ? (
-                <Card className="bg-white text-slate-900 border-slate-300 shadow-md">
-                  <CardContent className="pt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="font-semibold">Need a higher-quality final bundle?</p>
-                      <p className="text-sm text-slate-600">
-                        Current run used low-key preview mode for speed. Upgrade the current scene images to 2x high fidelity without changing text.
-                      </p>
-                    </div>
-                    <Button
-                      type="button"
-                      onClick={() => void handleEnableHighFidelity()}
-                      disabled={isApplyingProfile || isGenerating || isGeneratingScriptPack}
-                    >
-                      Upscale Bundle Images (2x)
-                    </Button>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-                  High-fidelity mode is active for this bundle. Text/audio are preserved and scene images use the upscaled assets.
-                </div>
-              )}
-              <FinalBundle
-                scenes={scenes}
-                topic={extractedSignal?.thesis?.one_liner || 'Advanced Explainer'}
-                disabled={isGenerating}
-              />
-            </>
-          )}
-        </div>
+        <AdvancedGeneratedExplainerSection
+          scenes={scenes}
+          artifactType={scriptPack?.artifact_type ?? artifactType}
+          visualMode={visualMode}
+          generationError={generationError}
+          fidelityPreference={fidelityPreference}
+          isApplyingProfile={isApplyingProfile}
+          isGenerating={isGenerating}
+          isGeneratingScriptPack={isGeneratingScriptPack}
+          topic={extractedSignal?.thesis?.one_liner || 'Advanced Explainer'}
+          onEnableHighFidelity={() => void handleEnableHighFidelity()}
+          onRegenerate={handleRegenerate}
+          onOpenEvidence={openEvidenceViewer}
+        />
 
       </div>
       <Dialog open={Boolean(evidenceViewer)} onOpenChange={(open) => { if (!open) setEvidenceViewer(null); }}>
