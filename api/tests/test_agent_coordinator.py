@@ -265,6 +265,38 @@ def test_source_manifest_propagates_into_script_and_stream_requests() -> None:
     asyncio.run(run())
 
 
+def test_snapshot_omits_source_manifest_and_uses_trace_summary() -> None:
+    async def run() -> None:
+        coordinator = AgentCoordinator()
+        started = await coordinator.start_workflow(
+            "Input text",
+            {
+                "assets": [
+                    {
+                        "asset_id": "asset-audio-1",
+                        "modality": "audio",
+                        "uri": "http://example.com/audio.mp3",
+                        "duration_ms": 120000,
+                    }
+                ]
+            },
+        )
+        workflow_id = started["workflow_id"]
+
+        snap = await coordinator.get_snapshot(workflow_id)
+
+        assert "source_manifest" not in snap
+        assert isinstance(snap["trace"], dict)
+        assert "trace_id" in snap["trace"]
+        assert "run_id" in snap["trace"]
+        assert "checkpoint_count" in snap["trace"]
+        assert "scene_count" in snap["trace"]
+        assert "checkpoints" not in snap["trace"]
+        assert "scenes" not in snap["trace"]
+
+    asyncio.run(run())
+
+
 def test_final_bundle_status_lookup_by_run_id() -> None:
     async def run() -> None:
         coordinator = AgentCoordinator()

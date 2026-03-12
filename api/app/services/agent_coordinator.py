@@ -153,12 +153,24 @@ class AgentCoordinator:
         )
 
     @staticmethod
+    def _snapshot_trace_summary(state: WorkflowState) -> dict[str, Any]:
+        latest_checkpoint = state.trace.checkpoints[-1] if state.trace.checkpoints else None
+        return {
+            "trace_id": state.trace.trace_id,
+            "run_id": state.trace.run_id,
+            "flow": state.trace.flow,
+            "checkpoint_count": len(state.trace.checkpoints),
+            "scene_count": len(state.trace.scenes),
+            "latest_checkpoint": latest_checkpoint.checkpoint if latest_checkpoint is not None else None,
+            "latest_checkpoint_status": latest_checkpoint.status if latest_checkpoint is not None else None,
+        }
+
+    @staticmethod
     def _snapshot(state: WorkflowState) -> dict[str, Any]:
         cp3_status = state.checkpoint_state.get("CP3_RENDER_LOCKED")
         return {
             "workflow_id": state.workflow_id,
             "source_text_chars": len(state.source_text),
-            "source_manifest": deepcopy(state.source_manifest),
             "normalized_source_text_chars": len(state.normalized_source_text),
             "source_text_origin": state.source_text_origin,
             "artifact_scope": list(state.artifact_scope),
@@ -183,7 +195,7 @@ class AgentCoordinator:
             "latest_run_id": state.latest_run_id,
             "latest_bundle_url": state.latest_bundle_url,
             "last_error": state.last_error,
-            "trace": state.trace.model_dump(),
+            "trace": AgentCoordinator._snapshot_trace_summary(state),
             "created_at_utc": state.created_at_utc,
             "updated_at_utc": state.updated_at_utc,
         }
