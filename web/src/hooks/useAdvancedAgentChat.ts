@@ -12,7 +12,6 @@ import {
   deriveSceneCount,
   isUnknownWorkflowMessage,
   mapArtifactScope,
-  snapshotStatusSummary,
   type AdvancedPanel,
   type ChatMessage,
   type ChatRole,
@@ -30,7 +29,6 @@ type PushAgentNote = (type: AgentNoteType, stage: string, message: string) => vo
 type UseAdvancedAgentChatOptions = {
   apiBase: string;
   workflowId: string | null;
-  workflowSnapshot: WorkflowSnapshot | null;
   activePanel: AdvancedPanel;
   sourceDoc: string;
   uploadedSourceAssets: UploadedSourceAsset[];
@@ -48,7 +46,6 @@ type UseAdvancedAgentChatOptions = {
   setScriptPack: React.Dispatch<React.SetStateAction<ScriptPackPayload | null>>;
   setExpectedSceneCount: React.Dispatch<React.SetStateAction<number>>;
   setActivePanel: React.Dispatch<React.SetStateAction<AdvancedPanel>>;
-  setGenerationStatus: React.Dispatch<React.SetStateAction<string>>;
   buildRenderProfilePayload: () => unknown;
   updateWorkflowSnapshot: (snapshot: unknown) => void;
   resetWorkflowSession: (
@@ -66,7 +63,6 @@ type UseAdvancedAgentChatOptions = {
 export default function useAdvancedAgentChat({
   apiBase,
   workflowId,
-  workflowSnapshot,
   activePanel,
   sourceDoc,
   uploadedSourceAssets,
@@ -84,7 +80,6 @@ export default function useAdvancedAgentChat({
   setScriptPack,
   setExpectedSceneCount,
   setActivePanel,
-  setGenerationStatus,
   buildRenderProfilePayload,
   updateWorkflowSnapshot,
   resetWorkflowSession,
@@ -178,7 +173,7 @@ export default function useAdvancedAgentChat({
       const pendingAction = asPendingAssistantAction(data);
       if (pendingAction) {
         setPendingAssistantAction(pendingAction);
-      } else if (data.ui?.active_panel) {
+      } else if (data.selected_action === "open_panel" && data.ui?.active_panel) {
         setActivePanel(data.ui.active_panel);
       }
       if (typeof data.assistant_message === "string" && data.assistant_message.trim()) {
@@ -191,11 +186,6 @@ export default function useAdvancedAgentChat({
       if (detail) {
         setGenerationError(detail);
         pushAgentNote("error", "Agent", detail);
-      } else if (!pendingAction) {
-        const nextStatus = snapshotStatusSummary(returnedWorkflow ?? workflowSnapshot);
-        if (nextStatus) {
-          setGenerationStatus(nextStatus);
-        }
       }
     } catch (error) {
       console.error("Agent chat error:", error);

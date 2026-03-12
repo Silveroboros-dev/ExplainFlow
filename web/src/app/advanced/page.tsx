@@ -365,7 +365,6 @@ export default function AdvancedStudio() {
   } = useAdvancedAgentChat({
     apiBase: API_BASE,
     workflowId,
-    workflowSnapshot,
     activePanel,
     sourceDoc,
     uploadedSourceAssets,
@@ -383,7 +382,6 @@ export default function AdvancedStudio() {
     setScriptPack,
     setExpectedSceneCount,
     setActivePanel,
-    setGenerationStatus,
     buildRenderProfilePayload: () => buildRenderProfilePayload(),
     updateWorkflowSnapshot,
     resetWorkflowSession,

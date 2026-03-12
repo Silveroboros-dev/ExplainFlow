@@ -27,6 +27,9 @@ import {
 type SignalStage = "idle" | "sending" | "structuring" | "ready" | "error";
 type ScriptPackStage = "idle" | "outlining" | "structuring" | "validating" | "ready" | "error";
 type PushAgentNote = (type: AgentNoteType, stage: string, message: string) => void;
+type SnapshotSyncOptions = {
+  syncPanel?: boolean;
+};
 
 type UseAdvancedWorkflowSessionOptions = {
   apiBase: string;
@@ -167,7 +170,11 @@ export default function useAdvancedWorkflowSession({
     setWorkflowId(candidate.workflow_id);
   };
 
-  const syncWorkflowUiFromSnapshot = (snapshot: WorkflowSnapshot) => {
+  const syncWorkflowUiFromSnapshot = (
+    snapshot: WorkflowSnapshot,
+    options: SnapshotSyncOptions = {},
+  ) => {
+    const { syncPanel = true } = options;
     const checkpoints = snapshot.checkpoint_state ?? {};
     if (checkpoints.CP1_SIGNAL_READY === "passed" || snapshot.has_signal) {
       setSignalStage("ready");
@@ -178,23 +185,28 @@ export default function useAdvancedWorkflowSession({
       setExtractProgress(0);
     }
 
-    if (checkpoints.CP6_BUNDLE_FINALIZED === "passed" || checkpoints.CP5_STREAM_COMPLETE === "passed") {
-      setActivePanel("stream");
-    } else if (snapshot.has_script_pack) {
-      setActivePanel("script");
-    } else if (snapshot.ready_for_script_pack || snapshot.has_render_profile || snapshot.render_profile_queued) {
-      setActivePanel("signal");
-    } else if (snapshot.workflow_id) {
-      setActivePanel("profile");
+    if (syncPanel) {
+      if (checkpoints.CP6_BUNDLE_FINALIZED === "passed" || checkpoints.CP5_STREAM_COMPLETE === "passed") {
+        setActivePanel("stream");
+      } else if (snapshot.has_script_pack) {
+        setActivePanel("script");
+      } else if (snapshot.ready_for_script_pack || snapshot.has_render_profile || snapshot.render_profile_queued) {
+        setActivePanel("signal");
+      } else if (snapshot.workflow_id) {
+        setActivePanel("profile");
+      }
     }
 
     setGenerationStatus(snapshotStatusSummary(snapshot));
   };
 
-  const loadWorkflowSnapshot = async (workflowIdValue: string): Promise<WorkflowSnapshot> => {
+  const loadWorkflowSnapshot = async (
+    workflowIdValue: string,
+    options: SnapshotSyncOptions = {},
+  ): Promise<WorkflowSnapshot> => {
     const snapshot = await fetchAdvancedWorkflowSnapshot(apiBase, workflowIdValue);
     updateWorkflowSnapshot(snapshot);
-    syncWorkflowUiFromSnapshot(snapshot);
+    syncWorkflowUiFromSnapshot(snapshot, { syncPanel: options.syncPanel ?? false });
     const streamFailed = snapshot.checkpoint_state?.CP5_STREAM_COMPLETE === "failed"
       || snapshot.checkpoint_state?.CP6_BUNDLE_FINALIZED === "failed";
     if (streamFailed && typeof snapshot.last_error === "string" && snapshot.last_error.trim()) {
@@ -223,7 +235,7 @@ export default function useAdvancedWorkflowSession({
     const { silent = false } = options;
 
     try {
-      const snapshot = await loadWorkflowSnapshot(workflowIdValue);
+      const snapshot = await loadWorkflowSnapshot(workflowIdValue, { syncPanel: true });
       if (snapshot.has_signal) {
         try {
           const recoveredSignal = await loadWorkflowSignal(workflowIdValue);
