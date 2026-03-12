@@ -89,7 +89,7 @@ export default function useAdvancedGenerationStream({
     patch: Partial<SceneViewModel>,
   ) => {
     setScenes((prev) => {
-      const existing = prev[sceneId] ?? { id: sceneId, text: "", status: "queued" };
+      const existing = prev[sceneId] ?? { id: sceneId, text: "", narrationText: "", status: "queued" };
       return {
         ...prev,
         [sceneId]: {
@@ -102,7 +102,7 @@ export default function useAdvancedGenerationStream({
 
   const appendSourceMedia = (sceneId: string, media: SourceMediaViewModel) => {
     setScenes((prev) => {
-      const existing = prev[sceneId] ?? { id: sceneId, text: "", status: "queued" };
+      const existing = prev[sceneId] ?? { id: sceneId, text: "", narrationText: "", status: "queued" };
       const currentMedia = Array.isArray(existing.source_media) ? existing.source_media : [];
       const existingIndex = currentMedia.findIndex((item) => (
         item.asset_id === media.asset_id
@@ -165,6 +165,7 @@ export default function useAdvancedGenerationStream({
       [sceneId]: {
         ...prev[sceneId],
         text,
+        narrationText: text,
         imageUrl: imageUrl ?? prev[sceneId]?.imageUrl,
         audioUrl: audioUrl ?? prev[sceneId]?.audioUrl,
         status: qaStatus === "FAIL" ? "qa-failed" : "ready",
@@ -197,7 +198,12 @@ export default function useAdvancedGenerationStream({
     pushAgentNote("info", "Scene Override", `Workflow-aware override started for ${sceneTitle}.`);
 
     try {
-      const currentText = (fullTextBufferRef.current[sceneId] || scenes[sceneId]?.text || "").trim();
+      const currentText = (
+        fullTextBufferRef.current[sceneId]
+        || scenes[sceneId]?.narrationText
+        || scenes[sceneId]?.text
+        || ""
+      ).trim();
       const response = await regenerateAdvancedWorkflowScene(apiBase, workflowId, {
         scene_id: sceneId,
         instruction,
@@ -330,6 +336,7 @@ export default function useAdvancedGenerationStream({
                     render_strategy: sceneItem.render_strategy,
                     expected_source_media_count: sceneItem.source_media_count,
                     text: "",
+                    narrationText: "",
                     status: "queued",
                   };
                 });
@@ -366,6 +373,7 @@ export default function useAdvancedGenerationStream({
                   source_media: asSourceMediaList(data.source_media),
                   source_proof_warning: undefined,
                   text: "",
+                  narrationText: "",
                   status: "generating",
                 };
                 if (typeof data.title === "string" && data.title.trim()) {
@@ -414,7 +422,7 @@ export default function useAdvancedGenerationStream({
                 const sceneId = typeof data.scene_id === "string" ? data.scene_id : "";
                 if (!sceneId) continue;
                 setScenes((prev) => {
-                  const existing = prev[sceneId] ?? { id: sceneId, text: "", status: "queued" };
+                  const existing = prev[sceneId] ?? { id: sceneId, text: "", narrationText: "", status: "queued" };
                   return {
                     ...prev,
                     [sceneId]: {
@@ -431,6 +439,7 @@ export default function useAdvancedGenerationStream({
                 fullTextBufferRef.current[sceneId] = "";
                 updateSceneMetadata(sceneId, {
                   text: "",
+                  narrationText: "",
                   imageUrl: undefined,
                   audioUrl: undefined,
                   status: "generating",
@@ -441,10 +450,15 @@ export default function useAdvancedGenerationStream({
                 const qaStatus = typeof data.qa_status === "string" ? data.qa_status : "";
                 const autoRetries = typeof data.auto_retries === "number" ? data.auto_retries : undefined;
                 setScenes((prev) => {
-                  const existing = prev[sceneId] ?? { id: sceneId, text: "", status: "queued" };
+                  const existing = prev[sceneId] ?? { id: sceneId, text: "", narrationText: "", status: "queued" };
                   const sourceMediaCount = Array.isArray(existing.source_media) ? existing.source_media.length : 0;
                   const expectedSourceMediaCount = existing.expected_source_media_count ?? 0;
-                  const completedText = (fullTextBufferRef.current[sceneId] || existing.text || "").trim();
+                  const completedText = (
+                    fullTextBufferRef.current[sceneId]
+                    || existing.narrationText
+                    || existing.text
+                    || ""
+                  ).trim();
                   const nextWarning = (
                     (expectedSourceMediaCount > 0 || (existing.evidence_refs?.length ?? 0) > 0)
                     && sourceMediaCount === 0
@@ -457,6 +471,7 @@ export default function useAdvancedGenerationStream({
                     [sceneId]: {
                       ...existing,
                       text: completedText,
+                      narrationText: completedText,
                       status: qaStatus === "FAIL" ? "qa-failed" : "ready",
                       auto_retry_count: autoRetries,
                       source_proof_warning: nextWarning,

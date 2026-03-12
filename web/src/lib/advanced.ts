@@ -333,6 +333,7 @@ export type SceneViewModel = {
   id: string;
   title?: string;
   text: string;
+  narrationText: string;
   imageUrl?: string;
   audioUrl?: string;
   claim_refs?: string[];
@@ -904,7 +905,12 @@ export const buildAdvancedSceneRegenerationContext = (
   return scriptPack.scenes
     .slice(Math.max(0, targetIndex - 3), targetIndex)
     .map((scene) => {
-      const currentText = (fullTextBuffer[scene.scene_id] || scenes[scene.scene_id]?.text || "").trim();
+      const currentText = (
+        fullTextBuffer[scene.scene_id]
+        || scenes[scene.scene_id]?.narrationText
+        || scenes[scene.scene_id]?.text
+        || ""
+      ).trim();
       return {
         scene_id: scene.scene_id,
         title: scene.title,

@@ -19,6 +19,7 @@ type AdvancedGeneratedScene = {
   id: string;
   title?: string;
   text: string;
+  narrationText: string;
   imageUrl?: string;
   audioUrl?: string;
   claim_refs?: string[];

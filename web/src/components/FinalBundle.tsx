@@ -10,6 +10,7 @@ type FinalBundleScene = {
   id: string;
   title?: string;
   text: string;
+  narrationText: string;
   overlayText?: string;
   imageUrl?: string;
   audioUrl?: string;
@@ -96,14 +97,17 @@ export default function FinalBundle({ scenes, topic, disabled = false }: FinalBu
 
   const payload = {
     topic,
-    scenes: sceneList.map((scene) => ({
-      scene_id: scene.id,
-      title: scene.title,
-      text: scene.text,
-      overlay_text: deriveOverlayText(scene.title, scene.text, scene.overlayText),
-      image_url: scene.imageUrl,
-      audio_url: scene.audioUrl,
-    })),
+    scenes: sceneList.map((scene) => {
+      const narrationText = scene.narrationText || scene.text;
+      return {
+        scene_id: scene.id,
+        title: scene.title,
+        text: narrationText,
+        overlay_text: deriveOverlayText(scene.title, narrationText, scene.overlayText),
+        image_url: scene.imageUrl,
+        audio_url: scene.audioUrl,
+      };
+    }),
   };
 
   const handleDownloadBundle = async () => {
