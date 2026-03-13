@@ -138,6 +138,7 @@ export default function AdvancedStudio() {
   const noteDedupRef = React.useRef<Record<string, number>>({});
   const checkpointNoteStatusRef = React.useRef<Record<string, string> | null>(null);
   const checkpointNoteWorkflowIdRef = React.useRef<string | null>(null);
+  const scriptStageNoteRef = React.useRef<string | null>(null);
 
   const resetSignalPreviewRun = () => {
     setTypedExplainer('');
@@ -283,6 +284,36 @@ export default function AdvancedStudio() {
 
     checkpointNoteStatusRef.current = { ...nextStatuses };
   }, [pushAgentNote, workflowId, workflowSnapshot]);
+
+  React.useEffect(() => {
+    if (!isGeneratingScriptPack) {
+      scriptStageNoteRef.current = null;
+      return;
+    }
+
+    const stageMessages: Record<string, { stage: string; message: string }> = {
+      outlining: {
+        stage: 'Script Pack',
+        message: 'Planner draft started from the locked signal and render profile.',
+      },
+      structuring: {
+        stage: 'Script Pack',
+        message: 'Planner is structuring scene roles, claim coverage, and visual directives.',
+      },
+      validating: {
+        stage: 'Planner QA',
+        message: 'Planner QA and deterministic repair checks are running.',
+      },
+    };
+
+    const nextNote = stageMessages[scriptPackStage];
+    if (!nextNote || scriptStageNoteRef.current === scriptPackStage) {
+      return;
+    }
+
+    scriptStageNoteRef.current = scriptPackStage;
+    pushAgentNote('info', nextNote.stage, nextNote.message);
+  }, [isGeneratingScriptPack, pushAgentNote, scriptPackStage]);
 
   const {
     handleGenerateStream,

@@ -192,9 +192,36 @@ def test_extract_anchor_terms_filters_stopwords_and_limits() -> None:
 def test_signal_model_tiering_defaults() -> None:
     with patch.dict(os.environ, {}, clear=True):
         assert GeminiStoryAgent._signal_structural_model() == "gemini-3.1-pro-preview"
+        assert GeminiStoryAgent._signal_transcript_model() == "gemini-3.1-flash-lite-preview"
+        assert GeminiStoryAgent._signal_asset_recovery_model() == "gemini-3-flash-preview"
         assert GeminiStoryAgent._signal_source_text_model() == "gemini-3-flash-preview"
-        assert GeminiStoryAgent._planner_precompute_model() == "gemini-3-flash-preview"
+        assert GeminiStoryAgent._planner_precompute_model() == "gemini-3.1-flash-lite-preview"
         assert GeminiStoryAgent._signal_creative_model() == "gemini-3.1-pro-preview"
+        assert GeminiStoryAgent._quick_artifact_model() == "gemini-3.1-flash-lite-preview"
+
+
+def test_signal_source_model_legacy_env_fallback_applies_to_both_paths() -> None:
+    with patch.dict(
+        os.environ,
+        {"EXPLAINFLOW_SIGNAL_SOURCE_TEXT_MODEL": "gemini-legacy-source-model"},
+        clear=True,
+    ):
+        assert GeminiStoryAgent._signal_transcript_model() == "gemini-legacy-source-model"
+        assert GeminiStoryAgent._signal_asset_recovery_model() == "gemini-legacy-source-model"
+
+
+def test_signal_source_model_specific_envs_override_legacy_fallback() -> None:
+    with patch.dict(
+        os.environ,
+        {
+            "EXPLAINFLOW_SIGNAL_SOURCE_TEXT_MODEL": "gemini-legacy-source-model",
+            "EXPLAINFLOW_SIGNAL_TRANSCRIPT_MODEL": "gemini-transcript-model",
+            "EXPLAINFLOW_SIGNAL_ASSET_RECOVERY_MODEL": "gemini-asset-recovery-model",
+        },
+        clear=True,
+    ):
+        assert GeminiStoryAgent._signal_transcript_model() == "gemini-transcript-model"
+        assert GeminiStoryAgent._signal_asset_recovery_model() == "gemini-asset-recovery-model"
 
 
 def test_validate_video_manifest_constraints_requires_transcript_for_longer_video() -> None:
@@ -3890,6 +3917,81 @@ def test_enrich_script_pack_with_source_media_falls_back_to_scene_evidence_refs(
     assert scene.source_media[0].asset_id == "asset-paper-1"
     assert scene.source_media[0].evidence_refs == ["e1"]
     assert scene_evidence_map["scene-1"] == ["e1"]
+    assert evidence_ids == ["e1"]
+
+
+def test_enrich_script_pack_with_source_media_promotes_module_proof_to_scene() -> None:
+    script_pack = ScriptPack.model_validate(
+        {
+            "plan_id": "plan-module-proof-promotion",
+            "plan_summary": "Promote module proof to scene proof when scene-level refs are empty.",
+            "audience_descriptor": "Researchers",
+            "scene_count": 1,
+            "artifact_type": "storyboard_grid",
+            "scenes": [
+                {
+                    "scene_id": "scene-1",
+                    "title": "Fractal Coastline",
+                    "scene_goal": "Use module evidence as the scene proof anchor.",
+                    "narration_focus": "Show the coastline paradox through a module-level proof panel.",
+                    "visual_prompt": "Coastline diagram with a cited callout.",
+                    "claim_refs": [],
+                    "evidence_refs": [],
+                    "continuity_refs": [],
+                    "acceptance_checks": [],
+                    "modules": [
+                        {
+                            "module_id": "module-proof",
+                            "label": "Coastline proof",
+                            "purpose": "Ground the paradox in the cited source excerpt.",
+                            "content_type": "support_panel",
+                            "claim_refs": ["c1"],
+                            "evidence_refs": [],
+                            "source_media": [],
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    enriched, scene_evidence_map, evidence_ids = GeminiStoryAgent._enrich_script_pack_with_source_media(
+        script_pack=script_pack,
+        content_signal={
+            "key_claims": [
+                {
+                    "claim_id": "c1",
+                    "claim_text": "The measured coastline length grows as the measurement scale gets smaller.",
+                    "evidence_snippets": [
+                        {
+                            "evidence_id": "e1",
+                            "type": "pdf_page",
+                            "asset_id": "asset-paper-1",
+                            "page_index": 2,
+                            "quote_text": "Measured length increases with smaller measuring units.",
+                        }
+                    ],
+                }
+            ]
+        },
+        source_manifest={
+            "assets": [
+                {
+                    "asset_id": "asset-paper-1",
+                    "modality": "pdf_page",
+                    "uri": "http://example.com/paper.pdf",
+                    "page_index": 2,
+                }
+            ]
+        },
+    )
+
+    scene = enriched.scenes[0]
+    assert scene.source_media
+    assert scene.source_media[0].asset_id == "asset-paper-1"
+    assert scene.source_media[0].evidence_refs == ["e1"]
+    assert "e1" in scene.evidence_refs
+    assert "e1" in scene_evidence_map["scene-1"]
     assert evidence_ids == ["e1"]
 
 

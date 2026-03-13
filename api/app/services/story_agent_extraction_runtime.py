@@ -13,7 +13,7 @@ async def normalize_transcript_source_text(
     source_manifest_summary: Callable[[Any], str],
     build_transcript_normalization_prompt: Callable[..., str],
     parse_json_object_response: Callable[[str], dict[str, Any]],
-    signal_source_text_model: Callable[[], str],
+    transcript_normalization_model: Callable[[], str],
     transcript_only_video_mode: Callable[[Any], bool],
 ) -> tuple[str, str]:
     inventory_text = source_manifest_summary(source_manifest)
@@ -22,7 +22,7 @@ async def normalize_transcript_source_text(
         source_inventory_text=inventory_text,
     )
     response = await client.aio.models.generate_content(
-        model=signal_source_text_model(),
+        model=transcript_normalization_model(),
         contents=prompt,
         config=types.GenerateContentConfig(
             temperature=0.1,
@@ -78,7 +78,7 @@ async def recover_normalized_source_text(
     build_source_text_recovery_prompt: Callable[..., str],
     build_asset_augmented_contents: Callable[..., Awaitable[tuple[str | list[Any], list[str], int]]],
     parse_json_object_response: Callable[[str], dict[str, Any]],
-    signal_source_text_model: Callable[[], str],
+    asset_recovery_model: Callable[[], str],
 ) -> tuple[str, str | None]:
     provided_text = str(input_text or "").strip()
     if provided_text:
@@ -103,7 +103,7 @@ async def recover_normalized_source_text(
         return "", None
 
     response = await client.aio.models.generate_content(
-        model=signal_source_text_model(),
+        model=asset_recovery_model(),
         contents=contents,
         config=types.GenerateContentConfig(
             temperature=0.1,

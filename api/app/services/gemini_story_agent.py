@@ -205,11 +205,12 @@ from app.services.video_pipeline import build_quick_video
 SIGNAL_EXTRACTION_PROMPT_VERSION_DEFAULT = "v2"
 SIGNAL_STRUCTURAL_MODEL_DEFAULT = "gemini-3.1-pro-preview"
 SIGNAL_CREATIVE_MODEL_DEFAULT = "gemini-3.1-pro-preview"
-SIGNAL_SOURCE_TEXT_MODEL_DEFAULT = "gemini-3-flash-preview"
-PLANNER_PRECOMPUTE_MODEL_DEFAULT = "gemini-3-flash-preview"
+SIGNAL_TRANSCRIPT_MODEL_DEFAULT = "gemini-3.1-flash-lite-preview"
+SIGNAL_ASSET_RECOVERY_MODEL_DEFAULT = "gemini-3-flash-preview"
+PLANNER_PRECOMPUTE_MODEL_DEFAULT = "gemini-3.1-flash-lite-preview"
 ADVANCED_SCENE_CONCURRENCY_DEFAULT = 2
 QUICK_SCENE_CONCURRENCY_DEFAULT = 2
-QUICK_ARTIFACT_MODEL_DEFAULT = "gemini-3-flash-preview"
+QUICK_ARTIFACT_MODEL_DEFAULT = "gemini-3.1-flash-lite-preview"
 
 @dataclass(frozen=True)
 class UploadedSourceAssets:
@@ -280,7 +281,7 @@ class GeminiStoryAgent:
             source_manifest_summary=self._source_manifest_summary,
             build_transcript_normalization_prompt=self._build_transcript_normalization_prompt,
             parse_json_object_response=self._parse_json_object_response,
-            signal_source_text_model=self._signal_source_text_model,
+            transcript_normalization_model=self._signal_transcript_model,
             transcript_only_video_mode=self._transcript_only_video_mode,
         )
 
@@ -294,7 +295,27 @@ class GeminiStoryAgent:
 
     @staticmethod
     def _signal_source_text_model() -> str:
-        return os.getenv("EXPLAINFLOW_SIGNAL_SOURCE_TEXT_MODEL", SIGNAL_SOURCE_TEXT_MODEL_DEFAULT).strip() or SIGNAL_SOURCE_TEXT_MODEL_DEFAULT
+        return GeminiStoryAgent._signal_asset_recovery_model()
+
+    @staticmethod
+    def _signal_transcript_model() -> str:
+        configured = os.getenv("EXPLAINFLOW_SIGNAL_TRANSCRIPT_MODEL", "").strip()
+        if configured:
+            return configured
+        legacy = os.getenv("EXPLAINFLOW_SIGNAL_SOURCE_TEXT_MODEL", "").strip()
+        if legacy:
+            return legacy
+        return SIGNAL_TRANSCRIPT_MODEL_DEFAULT
+
+    @staticmethod
+    def _signal_asset_recovery_model() -> str:
+        configured = os.getenv("EXPLAINFLOW_SIGNAL_ASSET_RECOVERY_MODEL", "").strip()
+        if configured:
+            return configured
+        legacy = os.getenv("EXPLAINFLOW_SIGNAL_SOURCE_TEXT_MODEL", "").strip()
+        if legacy:
+            return legacy
+        return SIGNAL_ASSET_RECOVERY_MODEL_DEFAULT
 
     @staticmethod
     def _planner_precompute_model() -> str:
@@ -578,7 +599,7 @@ class GeminiStoryAgent:
             build_source_text_recovery_prompt=self._build_source_text_recovery_prompt,
             build_asset_augmented_contents=self._build_asset_augmented_contents,
             parse_json_object_response=self._parse_json_object_response,
-            signal_source_text_model=self._signal_source_text_model,
+            asset_recovery_model=self._signal_asset_recovery_model,
         )
 
     async def _extract_signal_structural(

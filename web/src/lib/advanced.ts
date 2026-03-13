@@ -718,6 +718,8 @@ export const buildAdvancedSignalProgressItems = ({
   const checkpointStatus = workflowSnapshot?.checkpoint_state?.CP1_SIGNAL_READY;
   const signalReady = hasSignal || checkpointStatus === "passed" || workflowSnapshot?.has_signal === true;
   const failed = signalStage === "error" || checkpointStatus === "failed";
+  const validationStarted = signalStage === "structuring" || extractProgress >= 45 || signalReady;
+  const confirmationStarted = signalStage === "structuring" || extractProgress >= 80 || signalReady;
 
   return [
     {
@@ -741,7 +743,7 @@ export const buildAdvancedSignalProgressItems = ({
     {
       id: "validate",
       label: "Schema validation",
-      status: signalReady ? "done" : failed ? "error" : (signalStage === "structuring" || extractProgress >= 45) ? "active" : "pending",
+      status: signalReady ? "done" : failed ? "error" : validationStarted ? "active" : "pending",
       detail: signalReady
         ? "Signal is valid and ready for the next stage."
         : "Verifies the signal before render-profile locking.",
@@ -749,8 +751,10 @@ export const buildAdvancedSignalProgressItems = ({
     {
       id: "confirm",
       label: "Signal ready for confirmation",
-      status: signalReady ? "done" : "pending",
-      detail: signalReady ? "Proceed to Content Signal and confirm it." : "Unlocks once extraction completes.",
+      status: signalReady ? "done" : failed ? "error" : confirmationStarted ? "active" : "pending",
+      detail: signalReady
+        ? "Proceed to Content Signal and confirm it."
+        : "Preparing the validated signal for confirmation.",
     },
   ];
 };
@@ -770,6 +774,9 @@ export const buildAdvancedScriptProgressItems = ({
   const locked = Boolean(scriptPack || workflowSnapshot?.has_script_pack || workflowSnapshot?.ready_for_stream || checkpoints.CP4_SCRIPT_LOCKED === "passed");
   const failed = scriptPackStage === "error" || checkpoints.CP4_SCRIPT_LOCKED === "failed";
   const plannerSummary = workflowSnapshot?.planner_qa_summary?.summary;
+  const plannerDraftComplete = locked || scriptPackStage === "validating" || scriptPackStage === "ready";
+  const plannerQaStarted = plannerSummary || scriptPackStage === "validating" || scriptPackStage === "ready";
+  const lockStarted = locked || plannerQaStarted;
 
   return [
     {
@@ -783,8 +790,8 @@ export const buildAdvancedScriptProgressItems = ({
     {
       id: "planner",
       label: "Planner draft",
-      status: locked ? "done" : failed ? "error" : isGeneratingScriptPack ? "active" : "pending",
-      detail: locked
+      status: plannerDraftComplete ? "done" : failed ? "error" : isGeneratingScriptPack ? "active" : "pending",
+      detail: plannerDraftComplete
         ? "Scene sequence and artifact structure drafted."
         : scriptPackStage === "structuring"
           ? "Building scene roles, claim coverage, and visual directives."
@@ -793,7 +800,7 @@ export const buildAdvancedScriptProgressItems = ({
     {
       id: "qa",
       label: "Planner QA and repairs",
-      status: locked ? "done" : failed ? "error" : (scriptPackStage === "validating" ? "active" : "pending"),
+      status: locked ? "done" : failed ? "error" : (plannerQaStarted ? "active" : "pending"),
       detail: plannerSummary
         ? plannerSummary
         : "Checks mandatory coverage, repairs weak plans, and can trigger constrained replan.",
@@ -801,8 +808,12 @@ export const buildAdvancedScriptProgressItems = ({
     {
       id: "lock",
       label: "Script pack locked",
-      status: locked ? "done" : failed ? "error" : "pending",
-      detail: locked ? "Ready for stream generation." : "Unlocks once planner QA passes.",
+      status: locked ? "done" : failed ? "error" : lockStarted ? "active" : "pending",
+      detail: locked
+        ? "Ready for stream generation."
+        : lockStarted
+          ? "Finalizing planner QA results and locking the script pack."
+          : "Unlocks once planner QA passes.",
     },
   ];
 };

@@ -818,9 +818,44 @@ def enrich_script_pack_with_source_media(
                             module_source_media[existing_index] = merge_source_media_item(
                                 module_source_media[existing_index],
                                 media_ref,
-                            )
+                    )
             module.evidence_refs = module_evidence_refs[:6]
             module.source_media = merge_source_media_list(module_source_media)[:2]
+
+        if len(scene.source_media) < 3:
+            scene_media_index_by_key = {
+                source_media_merge_key(item): index
+                for index, item in enumerate(scene.source_media)
+            }
+            promoted_module_media: list[SourceMediaRefSchema] = []
+            for module in scene.modules:
+                for evidence_ref in module.evidence_refs[:6]:
+                    if evidence_ref not in scene.evidence_refs:
+                        scene.evidence_refs.append(evidence_ref)
+                for media in module.source_media:
+                    media_key = source_media_merge_key(media)
+                    existing_index = scene_media_index_by_key.get(media_key)
+                    if existing_index is None:
+                        promoted_module_media.append(media)
+                        scene_media_index_by_key[media_key] = len(scene.source_media) + len(promoted_module_media) - 1
+                    else:
+                        if existing_index < len(scene.source_media):
+                            scene.source_media[existing_index] = merge_source_media_item(scene.source_media[existing_index], media)
+                        else:
+                            promoted_index = existing_index - len(scene.source_media)
+                            promoted_module_media[promoted_index] = merge_source_media_item(
+                                promoted_module_media[promoted_index],
+                                media,
+                            )
+                    if len(scene.source_media) + len(promoted_module_media) >= 3:
+                        break
+                if len(scene.source_media) + len(promoted_module_media) >= 3:
+                    break
+            if promoted_module_media:
+                scene.source_media = merge_source_media_list([*scene.source_media, *promoted_module_media])[:3]
+                scene.evidence_refs = list(dict.fromkeys(scene.evidence_refs))[:8]
+                if scene.source_media and scene.render_strategy == "generated":
+                    scene.render_strategy = "hybrid"
 
         for evidence_id in scene.evidence_refs:
             evidence_usage_counts[evidence_id] = evidence_usage_counts.get(evidence_id, 0) + 1
