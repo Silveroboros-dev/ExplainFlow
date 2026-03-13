@@ -221,7 +221,6 @@ export default function useAdvancedWorkflowActions({
             ? snapshotStatusSummary(data.workflow)
             : "Signal extracted. Next: lock artifact scope and render profile.",
         );
-        pushAgentNote("checkpoint", "Extraction", "Signal extracted and schema validation passed.");
         return true;
       }
 
@@ -235,7 +234,6 @@ export default function useAdvancedWorkflowActions({
       if (activeWorkflowId) {
         const recoveredSnapshot = await recoverWorkflowState(activeWorkflowId, { silent: true });
         if (recoveredSnapshot?.has_signal || recoveredSnapshot?.checkpoint_state?.CP1_SIGNAL_READY === "passed") {
-          pushAgentNote("checkpoint", "Extraction", "Recovered extracted signal after a network interruption.");
           setError("");
           return true;
         }
@@ -291,7 +289,6 @@ export default function useAdvancedWorkflowActions({
         : "";
       if (cp3Status === "passed") {
         setGenerationStatus("Render profile locked. Continue to signal confirmation and script planning.");
-        pushAgentNote("checkpoint", "Render Profile", "Render profile locked and ready.");
       } else {
         setGenerationStatus("Artifacts locked. Render profile queued and will auto-lock when signal extraction completes.");
         pushAgentNote("info", "Render Profile", "Artifacts locked. Render lock is queued until signal is ready.");
@@ -305,7 +302,6 @@ export default function useAdvancedWorkflowActions({
         if (cp3Status === "passed") {
           setGenerationError("");
           setGenerationStatus("Render profile locked. Continue to signal confirmation and script planning.");
-          pushAgentNote("checkpoint", "Render Profile", "Recovered render profile lock after a network interruption.");
           return recoveredSnapshot;
         }
         if (recoveredSnapshot.render_profile_queued) {

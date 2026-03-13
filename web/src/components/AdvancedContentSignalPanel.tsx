@@ -5,14 +5,14 @@ import React from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import StageProgressList from "@/components/StageProgressList";
+import type { StageProgressItem } from "@/lib/advanced";
 
 type AdvancedContentSignalPanelProps = {
   extractedSignal: unknown;
-  showTypingPreview: boolean;
   extractProgress: number;
   extractionPhaseText: string;
-  typedExplainer: string;
-  typedPreview: string;
+  progressItems: StageProgressItem[];
   signalAlreadyConfirmed: boolean;
   confirmDisabled: boolean;
   regenerateDisabled: boolean;
@@ -25,11 +25,9 @@ type AdvancedContentSignalPanelProps = {
 
 export default function AdvancedContentSignalPanel({
   extractedSignal,
-  showTypingPreview,
   extractProgress,
   extractionPhaseText,
-  typedExplainer,
-  typedPreview,
+  progressItems,
   signalAlreadyConfirmed,
   confirmDisabled,
   regenerateDisabled,
@@ -46,7 +44,7 @@ export default function AdvancedContentSignalPanel({
         <CardDescription className="text-slate-600">Style-agnostic structured extraction from the source document.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {extractedSignal && !showTypingPreview ? (
+        {extractedSignal ? (
           <div className="space-y-4">
             <div className="bg-slate-900 text-slate-50 p-4 rounded-md overflow-auto max-h-[460px] text-xs font-mono">
               <pre>{JSON.stringify(extractedSignal, null, 2)}</pre>
@@ -58,28 +56,19 @@ export default function AdvancedContentSignalPanel({
               </p>
             </div>
           </div>
-        ) : showTypingPreview ? (
-          <div className="space-y-4">
-            <Progress value={extractProgress} className="h-2 bg-amber-100 [&>*]:bg-amber-500" />
-            <p className="text-sm text-slate-700">{extractionPhaseText}</p>
-            <div className="p-4 bg-amber-50 text-amber-950 rounded-md border border-amber-200">
-              <h4 className="font-semibold mb-2">Extracting Structured Signal...</h4>
-              <p className="text-sm whitespace-pre-wrap font-mono leading-6">
-                {typedExplainer}
-                <span className="animate-pulse">|</span>
-              </p>
-            </div>
-            <div className="bg-slate-900 text-slate-50 p-4 rounded-md overflow-auto max-h-[360px] text-xs font-mono">
-              <pre>
-                {typedPreview}
-                <span className="animate-pulse">|</span>
-              </pre>
-            </div>
-          </div>
         ) : (
-          <div className="flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-300 rounded-md p-8 min-h-[240px]">
-            <p className="text-center font-medium">Signal not started yet.</p>
-            <p className="text-center text-sm mt-1">Open Source Material stage and run extraction first.</p>
+          <div className="space-y-4">
+            <StageProgressList
+              title="Extraction Progress"
+              subtitle="Live workflow checkpoints for the structured signal stage."
+              items={progressItems}
+            />
+            {extractProgress > 0 ? (
+              <>
+                <Progress value={extractProgress} className="h-2 bg-amber-100 [&>*]:bg-amber-500" />
+                {extractionPhaseText ? <p className="text-sm text-slate-700">{extractionPhaseText}</p> : null}
+              </>
+            ) : null}
           </div>
         )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">

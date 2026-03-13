@@ -84,7 +84,7 @@ function SelectionTileGroup({
   onSelect,
 }: SelectionTileGroupProps) {
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5">
       <Label>{label}</Label>
       <div className={columnsClassName}>
         {tiles.map((tile) => {
@@ -97,9 +97,9 @@ function SelectionTileGroup({
               onClick={() => onSelect(tile.value)}
               className={`${tileClassName} ${tile.baseClassName} ${isSelected ? tile.selectedClassName : tileHoverClassName}`}
             >
-              <div className="mb-4 flex items-center gap-3">
+              <div className="mb-3 flex items-center gap-3">
                 <span
-                  className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
+                  className={`inline-flex h-10 w-10 items-center justify-center rounded-2xl ${
                     isSelected ? tile.selectedIconClassName : tile.iconClassName
                   }`}
                 >
@@ -112,7 +112,7 @@ function SelectionTileGroup({
                   </p>
                 </div>
               </div>
-              <p className="text-sm leading-6 text-slate-700/90">{tile.description}</p>
+              <p className="text-[13px] leading-5 text-slate-700/90">{tile.description}</p>
             </button>
           );
         })}
@@ -165,15 +165,15 @@ export default function AdvancedRenderProfilePanel({
   onCollapse,
 }: AdvancedRenderProfilePanelProps) {
   return (
-    <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
-      <CardHeader>
+    <Card className="flex h-full flex-col bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
+      <CardHeader className="pb-3">
         <CardTitle className="text-slate-900">2. Render Profile</CardTitle>
         <CardDescription className="text-slate-600">
           Configure output while signal extraction runs in parallel. Questions are split so each choice is deliberate.
         </CardDescription>
       </CardHeader>
-      <CardContent className="high-contrast-form-labels space-y-5">
-        <Tabs value={profileStep} onValueChange={onProfileStepChange} className="space-y-4">
+      <CardContent className="high-contrast-form-labels flex flex-1 flex-col space-y-4 overflow-hidden">
+        <Tabs value={profileStep} onValueChange={onProfileStepChange} className="flex min-h-0 flex-1 flex-col space-y-3 overflow-hidden">
           <TabsList className="grid w-full grid-cols-2 md:grid-cols-4">
             {renderProfileSteps.map((step) => (
               <TabsTrigger key={step} value={step}>
@@ -182,7 +182,7 @@ export default function AdvancedRenderProfilePanel({
             ))}
           </TabsList>
 
-          <TabsContent value="output" className="space-y-4">
+          <TabsContent value="output" className="mt-0 min-h-0 flex-1 space-y-3 overflow-y-auto pr-2">
             <p className="text-sm text-slate-600">Question 1: What output format and visual mode should the agent optimize for?</p>
             <SelectionTileGroup
               label="Artifact Type"
@@ -208,7 +208,7 @@ export default function AdvancedRenderProfilePanel({
             </div>
           </TabsContent>
 
-          <TabsContent value="audience" className="space-y-4">
+          <TabsContent value="audience" className="mt-0 min-h-0 flex-1 space-y-3 overflow-y-auto pr-2">
             <p className="text-sm text-slate-600">Question 2: Who is this explainer for?</p>
             <SelectionTileGroup
               label="Audience Level"
@@ -243,7 +243,7 @@ export default function AdvancedRenderProfilePanel({
             </div>
           </TabsContent>
 
-          <TabsContent value="style" className="space-y-4">
+          <TabsContent value="style" className="mt-0 min-h-0 flex-1 space-y-3 overflow-y-auto pr-2">
             <p className="text-sm text-slate-600">Question 3: What quality and density should visuals and narration target?</p>
             <SelectionTileGroup
               label="Information Density"
@@ -268,7 +268,7 @@ export default function AdvancedRenderProfilePanel({
             </div>
           </TabsContent>
 
-          <TabsContent value="constraints" className="space-y-4">
+          <TabsContent value="constraints" className="mt-0 min-h-0 flex-1 space-y-3 overflow-y-auto pr-2">
             <p className="text-sm text-slate-600">Question 4: What should always be included, and what must be avoided?</p>
             <div className="space-y-2">
               <Label htmlFor="mustInclude">Must Include (Optional)</Label>
@@ -293,7 +293,7 @@ export default function AdvancedRenderProfilePanel({
           </TabsContent>
         </Tabs>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Button
             type="button"
             variant="outline"
@@ -314,7 +314,7 @@ export default function AdvancedRenderProfilePanel({
           </Button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+        <div className="grid grid-cols-1 gap-3 pt-1 sm:grid-cols-2">
           <Button
             type="button"
             className={primaryActionClassName}

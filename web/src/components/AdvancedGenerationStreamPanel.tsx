@@ -6,11 +6,10 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import StageProgressList from "@/components/StageProgressList";
+import type { StageProgressItem } from "@/lib/advanced";
 
 type AdvancedGenerationStreamPanelProps = {
-  showTypingPreview: boolean;
-  typedStreamExplainer: string;
-  typedStreamPreview: string;
   isGenerating: boolean;
   isGeneratingScriptPack: boolean;
   primaryActionText: string;
@@ -21,6 +20,7 @@ type AdvancedGenerationStreamPanelProps = {
   completedSceneCount: number;
   totalSceneCount: number;
   generationError: string;
+  progressItems: StageProgressItem[];
   primaryActionClassName: string;
   primaryActionLabelClassName: string;
   secondaryActionClassName: string;
@@ -29,9 +29,6 @@ type AdvancedGenerationStreamPanelProps = {
 };
 
 export default function AdvancedGenerationStreamPanel({
-  showTypingPreview,
-  typedStreamExplainer,
-  typedStreamPreview,
   isGenerating,
   isGeneratingScriptPack,
   primaryActionText,
@@ -42,6 +39,7 @@ export default function AdvancedGenerationStreamPanel({
   completedSceneCount,
   totalSceneCount,
   generationError,
+  progressItems,
   primaryActionClassName,
   primaryActionLabelClassName,
   secondaryActionClassName,
@@ -49,14 +47,14 @@ export default function AdvancedGenerationStreamPanel({
   onRegenerate,
 }: AdvancedGenerationStreamPanelProps) {
   return (
-    <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
+    <Card className="flex h-full flex-col bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
       <CardHeader>
         <CardTitle className="text-slate-900">5. Generation Stream</CardTitle>
         <CardDescription className="text-slate-600">
           Start generation and monitor live scene-by-scene output.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="flex flex-1 flex-col space-y-4 overflow-hidden">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Button
             className={primaryActionClassName}
@@ -91,46 +89,35 @@ export default function AdvancedGenerationStreamPanel({
             </span>
           </Button>
         </div>
-        {showTypingPreview ? (
+        <div className="min-h-0 flex-1 overflow-y-auto pr-2">
           <div className="space-y-4">
-            <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
-              Generation can continue for a while after the stream starts. You can keep asking questions in the assistant chat while scenes render.
-            </div>
-            <div className="p-4 bg-indigo-50 text-indigo-950 rounded-md border border-indigo-200">
-              <h4 className="font-semibold mb-2">Orchestrating Generation Stream...</h4>
-              <p className="text-sm whitespace-pre-wrap font-mono leading-6">
-                {typedStreamExplainer}
-                <span className="animate-pulse">|</span>
-              </p>
-            </div>
-            <div className="bg-slate-900 text-slate-50 p-4 rounded-md overflow-auto max-h-[360px] text-xs font-mono">
-              <pre>
-                {typedStreamPreview}
-                <span className="animate-pulse">|</span>
-              </pre>
-            </div>
+            <StageProgressList
+              title="Generation Progress"
+              subtitle="Live execution reports from the scene-by-scene stream."
+              items={progressItems}
+            />
+            {generationStatus ? (
+              <div className="p-4 bg-blue-50 text-blue-900 rounded-md border border-blue-200">
+                <h4 className="font-semibold mb-1">Generation Status</h4>
+                <p className="text-sm">{generationStatus}</p>
+              </div>
+            ) : null}
+            {isGenerating ? (
+              <div className="space-y-2">
+                <Progress value={generationProgress} className="h-2 bg-blue-100 [&>*]:bg-blue-500" />
+                <p className="text-xs text-slate-600">Scenes complete: {completedSceneCount}/{Math.max(totalSceneCount, completedSceneCount)}</p>
+              </div>
+            ) : null}
+            {generationError ? (
+              <p className="text-sm font-medium text-rose-600">{generationError}</p>
+            ) : null}
+            {isGeneratingScriptPack && !isGenerating ? (
+              <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+                Stream generation will be available as soon as the current script-pack run finishes.
+              </div>
+            ) : null}
           </div>
-        ) : null}
-        {generationStatus ? (
-          <div className="p-4 bg-blue-50 text-blue-900 rounded-md border border-blue-200">
-            <h4 className="font-semibold mb-1">Generation Status</h4>
-            <p className="text-sm">{generationStatus}</p>
-          </div>
-        ) : null}
-        {isGenerating ? (
-          <div className="space-y-2">
-            <Progress value={generationProgress} className="h-2 bg-blue-100 [&>*]:bg-blue-500" />
-            <p className="text-xs text-slate-600">Scenes complete: {completedSceneCount}/{Math.max(totalSceneCount, completedSceneCount)}</p>
-          </div>
-        ) : null}
-        {generationError ? (
-          <p className="text-sm font-medium text-rose-600">{generationError}</p>
-        ) : null}
-        {isGeneratingScriptPack && !isGenerating && !showTypingPreview ? (
-          <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
-            Stream generation will be available as soon as the current script-pack run finishes.
-          </div>
-        ) : null}
+        </div>
       </CardContent>
     </Card>
   );

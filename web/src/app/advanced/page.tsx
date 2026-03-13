@@ -27,7 +27,11 @@ import {
   ADVANCED_API_BASE as API_BASE,
   ARTIFACT_SELECTION_TILES,
   AUDIENCE_LEVEL_TILES,
+  CHECKPOINT_LABELS,
   DENSITY_TILES,
+  buildAdvancedScriptProgressItems,
+  buildAdvancedSignalProgressItems,
+  buildAdvancedStreamProgressItems,
   PRIMARY_ACTION_CARD_CLASS,
   PRIMARY_ACTION_LABEL_CLASS,
   RENDER_PROFILE_STEPS,
@@ -131,6 +135,9 @@ export default function AdvancedStudio() {
   // Ref for the typewriter effect to track full text without causing infinite re-renders
   const fullTextBuffer = React.useRef<Record<string, string>>({});
   const sourceAssetsInputRef = React.useRef<HTMLInputElement | null>(null);
+  const noteDedupRef = React.useRef<Record<string, number>>({});
+  const checkpointNoteStatusRef = React.useRef<Record<string, string> | null>(null);
+  const checkpointNoteWorkflowIdRef = React.useRef<string | null>(null);
 
   const resetSignalPreviewRun = () => {
     setTypedExplainer('');
@@ -172,12 +179,19 @@ export default function AdvancedStudio() {
   };
 
   const pushAgentNote = (type: AgentNoteType, stage: string, message: string) => {
+    const dedupeKey = `${type}::${stage}::${message}`;
+    const now = Date.now();
+    const previousTimestamp = noteDedupRef.current[dedupeKey];
+    if (typeof previousTimestamp === 'number' && now - previousTimestamp < 5000) {
+      return;
+    }
+    noteDedupRef.current[dedupeKey] = now;
     const note: AgentNote = {
-      id: `note-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      id: `note-${now}-${Math.random().toString(36).slice(2, 8)}`,
       type,
       stage,
       message,
-      timestamp: Date.now(),
+      timestamp: now,
     };
     setAgentNotes((prev) => [note, ...prev].slice(0, 80));
     if (type === 'checkpoint') {
@@ -238,6 +252,37 @@ export default function AdvancedStudio() {
     const detail = extras.length > 0 ? `${summary.summary} ${extras.join('. ')}.` : summary.summary;
     pushAgentNote('qa', 'Planner QA', detail);
   };
+
+  React.useEffect(() => {
+    if (!workflowId) {
+      checkpointNoteWorkflowIdRef.current = null;
+      checkpointNoteStatusRef.current = null;
+      return;
+    }
+    if (!workflowSnapshot) return;
+
+    const nextStatuses = workflowSnapshot.checkpoint_state ?? {};
+    if (checkpointNoteWorkflowIdRef.current !== workflowId || !checkpointNoteStatusRef.current) {
+      checkpointNoteWorkflowIdRef.current = workflowId;
+      checkpointNoteStatusRef.current = { ...nextStatuses };
+      return;
+    }
+
+    const previousStatuses = checkpointNoteStatusRef.current;
+    const transitionMessages: Record<string, string> = {
+      CP1_SIGNAL_READY: 'Signal extracted and schema validation passed.',
+      CP2_ARTIFACTS_LOCKED: 'Artifact scope locked.',
+      CP3_RENDER_LOCKED: 'Render profile locked and ready.',
+    };
+
+    Object.entries(transitionMessages).forEach(([checkpoint, message]) => {
+      if (previousStatuses[checkpoint] !== 'passed' && nextStatuses[checkpoint] === 'passed') {
+        pushAgentNote('checkpoint', CHECKPOINT_LABELS[checkpoint] ?? checkpoint, message);
+      }
+    });
+
+    checkpointNoteStatusRef.current = { ...nextStatuses };
+  }, [pushAgentNote, workflowId, workflowSnapshot]);
 
   const {
     handleGenerateStream,
@@ -1151,6 +1196,29 @@ export default function AdvancedStudio() {
   const showStreamTypingPreview = streamTypewriterArmed
     && !streamPreviewFailed
     && !streamOutputReady;
+  const signalProgressItems = buildAdvancedSignalProgressItems({
+    workflowId,
+    workflowSnapshot,
+    signalStage,
+    isExtracting,
+    extractProgress,
+    hasSignal: Boolean(extractedSignal),
+  });
+  const scriptProgressItems = buildAdvancedScriptProgressItems({
+    workflowSnapshot,
+    isGeneratingScriptPack,
+    scriptPackStage,
+    scriptPack,
+  });
+  const streamProgressItems = buildAdvancedStreamProgressItems({
+    workflowSnapshot,
+    isGenerating,
+    isGeneratingScriptPack,
+    totalSceneCount,
+    completedSceneCount,
+    scenes,
+    generationError,
+  });
   const signalAlreadyConfirmed = Boolean(
     isGeneratingScriptPack
     || scriptPack
@@ -1276,7 +1344,7 @@ export default function AdvancedStudio() {
           : (isGeneratingScriptPack || isGenerating || isUpscalingBundle || isSceneRegenerating || !workflowSnapshot?.ready_for_script_pack);
 
   return (
-    <main className="relative isolate min-h-screen overflow-x-clip bg-[#05070f] py-12 px-4 sm:px-6 lg:px-8 font-sans text-slate-100">
+    <main className="relative isolate min-h-screen overflow-x-clip bg-[#05070f] py-6 px-4 sm:px-6 lg:px-8 font-sans text-slate-100">
       <div className="landing-bg page-bg-muted pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden>
         <div className="landing-aurora" />
         <div className="landing-grid" />
@@ -1300,16 +1368,16 @@ export default function AdvancedStudio() {
         </div>
       </div>
 
-      <div className="relative z-10 max-w-6xl mx-auto space-y-8">
+      <div className="relative z-10 mx-auto max-w-[96rem] space-y-6">
         
         {/* Header Section */}
-        <div className="text-center space-y-2">
+        <div className="text-center space-y-1.5">
           <h1 className="text-4xl font-extrabold tracking-tight text-slate-100 drop-shadow-[0_2px_16px_rgba(2,6,23,0.75)]">Advanced Studio</h1>
           <p className="text-lg text-slate-200/95 drop-shadow-[0_1px_8px_rgba(2,6,23,0.6)]">Long-document input and granular render profile control.</p>
         </div>
 
-        <div className="grid items-start gap-6 lg:grid-cols-[1.2fr_1fr]">
-          <div className="space-y-6 lg:sticky lg:top-4">
+        <div className="grid items-start gap-5 lg:grid-cols-[0.82fr_1.18fr]">
+          <div className="space-y-3 lg:sticky lg:top-3">
             <AdvancedAssistantPanel
               chatMessages={chatMessages}
               chatInput={chatInput}
@@ -1330,6 +1398,7 @@ export default function AdvancedStudio() {
               subtitle="Checkpoint, QA, and traceability notes from the active workflow."
               notes={agentNotes}
               currentStatus={generationStatus}
+              notesHeightClassName="h-[180px] md:h-[210px]"
             />
           </div>
 
@@ -1366,9 +1435,9 @@ export default function AdvancedStudio() {
         </Card>
         </div>
 
-        <div className="relative min-h-[420px]">
-          <div className="mx-auto max-w-4xl">
-            <div key={activePanel} className="animate-in fade-in-0 zoom-in-95 duration-300">
+        <div className="relative min-h-[420px] lg:h-[calc(100vh-21rem)]">
+          <div className="mx-auto h-full max-w-4xl">
+            <div key={activePanel} className="h-full animate-in fade-in-0 zoom-in-95 duration-300 [&>*]:h-full">
               {activePanel === 'source' && (
                 <AdvancedSourcePanel
                   sourceDoc={sourceDoc}
@@ -1441,11 +1510,9 @@ export default function AdvancedStudio() {
               {activePanel === 'signal' && (
                 <AdvancedContentSignalPanel
                   extractedSignal={extractedSignal}
-                  showTypingPreview={showSignalTypingPreview}
                   extractProgress={extractProgress}
                   extractionPhaseText={extractionPhaseText}
-                  typedExplainer={typedExplainer}
-                  typedPreview={typedPreview}
+                  progressItems={signalProgressItems}
                   signalAlreadyConfirmed={signalAlreadyConfirmed}
                   confirmDisabled={!extractedSignal || signalAlreadyConfirmed || isUpscalingBundle || isSceneRegenerating}
                   regenerateDisabled={!hasSourceInput || isExtracting || isUploadingAssets || isUpscalingBundle || isSceneRegenerating}
@@ -1459,9 +1526,6 @@ export default function AdvancedStudio() {
 
               {activePanel === 'stream' && (
                 <AdvancedGenerationStreamPanel
-                  showTypingPreview={showStreamTypingPreview}
-                  typedStreamExplainer={typedStreamExplainer}
-                  typedStreamPreview={typedStreamPreview}
                   isGenerating={isGenerating}
                   isGeneratingScriptPack={isGeneratingScriptPack}
                   primaryActionText={isUpscalingBundle
@@ -1486,6 +1550,7 @@ export default function AdvancedStudio() {
                   completedSceneCount={completedSceneCount}
                   totalSceneCount={totalSceneCount}
                   generationError={generationError}
+                  progressItems={streamProgressItems}
                   primaryActionClassName={PRIMARY_ACTION_CARD_CLASS}
                   primaryActionLabelClassName={PRIMARY_ACTION_LABEL_CLASS}
                   secondaryActionClassName={SECONDARY_ACTION_CARD_CLASS}
@@ -1497,11 +1562,9 @@ export default function AdvancedStudio() {
               {activePanel === 'script' && (
                 <AdvancedScriptPackPanel
                   scriptPack={scriptPack}
-                  showTypingPreview={showScriptTypingPreview}
                   scriptPackProgress={scriptPackProgress}
                   scriptPackPhaseText={scriptPackPhaseText}
-                  typedScriptExplainer={typedScriptExplainer}
-                  typedScriptPreview={typedScriptPreview}
+                  progressItems={scriptProgressItems}
                   isGeneratingScriptPack={isGeneratingScriptPack}
                   primaryActionText={isUpscalingBundle ? 'Upscaling Bundle Images...' : isSceneRegenerating ? 'Scene Override In Progress...' : isGeneratingScriptPack ? 'Generating Script Pack...' : scriptPack ? 'Regenerate Script Pack' : 'Generate Script Pack'}
                   primaryDisabled={isGeneratingScriptPack || isGenerating || isUpscalingBundle || isSceneRegenerating || !workflowSnapshot?.ready_for_script_pack}

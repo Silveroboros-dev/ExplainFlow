@@ -541,6 +541,15 @@ export type WorkflowSnapshot = {
   trace?: unknown;
 };
 
+export type StageProgressStatus = "pending" | "active" | "done" | "error";
+
+export type StageProgressItem = {
+  id: string;
+  label: string;
+  status: StageProgressStatus;
+  detail?: string;
+};
+
 export type AdvancedPanel = "source" | "profile" | "signal" | "stream" | "script";
 export type ActionDialogStage = "extract" | "profile" | "script" | "stream";
 export type RenderProfileStep = "output" | "audience" | "style" | "constraints";
@@ -689,6 +698,172 @@ export const snapshotStatusSummary = (snapshot: WorkflowSnapshot | null): string
     return "Signal extracted. Apply render profile next.";
   }
   return snapshot.workflow_id ? "Workflow initialized. Signal extraction is pending." : "";
+};
+
+export const buildAdvancedSignalProgressItems = ({
+  workflowId,
+  workflowSnapshot,
+  signalStage,
+  isExtracting,
+  extractProgress,
+  hasSignal,
+}: {
+  workflowId: string | null;
+  workflowSnapshot: WorkflowSnapshot | null;
+  signalStage: "idle" | "sending" | "structuring" | "ready" | "error";
+  isExtracting: boolean;
+  extractProgress: number;
+  hasSignal: boolean;
+}): StageProgressItem[] => {
+  const checkpointStatus = workflowSnapshot?.checkpoint_state?.CP1_SIGNAL_READY;
+  const signalReady = hasSignal || checkpointStatus === "passed" || workflowSnapshot?.has_signal === true;
+  const failed = signalStage === "error" || checkpointStatus === "failed";
+
+  return [
+    {
+      id: "workflow",
+      label: "Workflow initialized",
+      status: workflowId || workflowSnapshot?.workflow_id ? "done" : "pending",
+      detail: workflowId || workflowSnapshot?.workflow_id ? "Source accepted for staged processing." : "Starts when extraction begins.",
+    },
+    {
+      id: "extract",
+      label: "Structured extraction",
+      status: signalReady ? "done" : failed ? "error" : isExtracting ? "active" : "pending",
+      detail: signalReady
+        ? "Thesis, claims, concepts, and narrative beats captured."
+        : isExtracting
+          ? signalStage === "structuring"
+            ? "Organizing the source into a stable signal contract."
+            : `Running extraction pipeline (${extractProgress}%).`
+          : "Waiting for source text or uploaded assets.",
+    },
+    {
+      id: "validate",
+      label: "Schema validation",
+      status: signalReady ? "done" : failed ? "error" : (signalStage === "structuring" || extractProgress >= 45) ? "active" : "pending",
+      detail: signalReady
+        ? "Signal is valid and ready for the next stage."
+        : "Verifies the signal before render-profile locking.",
+    },
+    {
+      id: "confirm",
+      label: "Signal ready for confirmation",
+      status: signalReady ? "done" : "pending",
+      detail: signalReady ? "Proceed to Content Signal and confirm it." : "Unlocks once extraction completes.",
+    },
+  ];
+};
+
+export const buildAdvancedScriptProgressItems = ({
+  workflowSnapshot,
+  isGeneratingScriptPack,
+  scriptPackStage,
+  scriptPack,
+}: {
+  workflowSnapshot: WorkflowSnapshot | null;
+  isGeneratingScriptPack: boolean;
+  scriptPackStage: "idle" | "outlining" | "structuring" | "validating" | "ready" | "error";
+  scriptPack: ScriptPackPayload | null;
+}): StageProgressItem[] => {
+  const checkpoints = workflowSnapshot?.checkpoint_state ?? {};
+  const locked = Boolean(scriptPack || workflowSnapshot?.has_script_pack || workflowSnapshot?.ready_for_stream || checkpoints.CP4_SCRIPT_LOCKED === "passed");
+  const failed = scriptPackStage === "error" || checkpoints.CP4_SCRIPT_LOCKED === "failed";
+  const plannerSummary = workflowSnapshot?.planner_qa_summary?.summary;
+
+  return [
+    {
+      id: "inputs",
+      label: "Signal and render inputs locked",
+      status: workflowSnapshot?.ready_for_script_pack || locked ? "done" : "pending",
+      detail: workflowSnapshot?.ready_for_script_pack || locked
+        ? "Planner can build against the locked workflow state."
+        : "Needs signal confirmation plus artifact and render locks.",
+    },
+    {
+      id: "planner",
+      label: "Planner draft",
+      status: locked ? "done" : failed ? "error" : isGeneratingScriptPack ? "active" : "pending",
+      detail: locked
+        ? "Scene sequence and artifact structure drafted."
+        : scriptPackStage === "structuring"
+          ? "Building scene roles, claim coverage, and visual directives."
+          : "Starts when script generation is triggered.",
+    },
+    {
+      id: "qa",
+      label: "Planner QA and repairs",
+      status: locked ? "done" : failed ? "error" : (scriptPackStage === "validating" ? "active" : "pending"),
+      detail: plannerSummary
+        ? plannerSummary
+        : "Checks mandatory coverage, repairs weak plans, and can trigger constrained replan.",
+    },
+    {
+      id: "lock",
+      label: "Script pack locked",
+      status: locked ? "done" : failed ? "error" : "pending",
+      detail: locked ? "Ready for stream generation." : "Unlocks once planner QA passes.",
+    },
+  ];
+};
+
+export const buildAdvancedStreamProgressItems = ({
+  workflowSnapshot,
+  isGenerating,
+  isGeneratingScriptPack,
+  totalSceneCount,
+  completedSceneCount,
+  scenes,
+  generationError,
+}: {
+  workflowSnapshot: WorkflowSnapshot | null;
+  isGenerating: boolean;
+  isGeneratingScriptPack: boolean;
+  totalSceneCount: number;
+  completedSceneCount: number;
+  scenes: Record<string, SceneViewModel>;
+  generationError: string;
+}): StageProgressItem[] => {
+  const checkpoints = workflowSnapshot?.checkpoint_state ?? {};
+  const bundleReady = checkpoints.CP6_BUNDLE_FINALIZED === "passed";
+  const streamReady = workflowSnapshot?.ready_for_stream || checkpoints.CP5_STREAM_COMPLETE === "passed" || bundleReady;
+  const failed = Boolean(generationError) || checkpoints.CP5_STREAM_COMPLETE === "failed" || checkpoints.CP6_BUNDLE_FINALIZED === "failed";
+  const hasQaActivity = Object.values(scenes).some((scene) => Boolean(scene.qa_status) || (scene.auto_retry_count ?? 0) > 0);
+
+  return [
+    {
+      id: "gate",
+      label: "Stream gate satisfied",
+      status: streamReady ? "done" : isGeneratingScriptPack ? "active" : "pending",
+      detail: streamReady ? "Locked script pack is ready for scene execution." : "Waits for a locked script pack.",
+    },
+    {
+      id: "queue",
+      label: "Scene queue prepared",
+      status: totalSceneCount > 0 ? "done" : failed ? "error" : isGenerating ? "active" : "pending",
+      detail: totalSceneCount > 0
+        ? `${totalSceneCount} scene${totalSceneCount === 1 ? "" : "s"} queued for generation.`
+        : "Queue appears after the stream starts.",
+    },
+    {
+      id: "render",
+      label: "Live scene rendering",
+      status: failed ? "error" : totalSceneCount > 0 && completedSceneCount >= totalSceneCount && totalSceneCount > 0 ? "done" : isGenerating ? "active" : "pending",
+      detail: totalSceneCount > 0
+        ? `${completedSceneCount}/${totalSceneCount} scenes completed.`
+        : "Narration, visuals, proof links, and audio stream in scene by scene.",
+    },
+    {
+      id: "qa_bundle",
+      label: "QA and final bundle",
+      status: bundleReady ? "done" : failed ? "error" : (isGenerating || hasQaActivity) ? "active" : "pending",
+      detail: bundleReady
+        ? "Bundle finalized with traceability attached."
+        : hasQaActivity
+          ? "Per-scene QA is evaluating outputs and requesting retries when needed."
+          : "Final bundle is assembled after scene outputs stabilize.",
+    },
+  ];
 };
 
 export const apiErrorMessage = (payload: unknown, fallback: string): string => {
