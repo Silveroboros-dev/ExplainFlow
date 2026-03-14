@@ -1,15 +1,45 @@
 # ExplainFlow Codex Handoff
 
-Last updated: 2026-03-12
+Last updated: 2026-03-14
 
 ## Repo State
 
 - Workspace: `/Users/rk/Desktop/Gemini Live Agent Challenge`
 - Active branch: `codex/advanced-qa-pipeline`
-- Latest branch commit: `7d7d41b` (`Share advanced route request helpers`)
-- Branch status: clean for code changes; only local deployment-file edits remain in `GEMINI.md`, `cloudbuild.yaml`, and `terraform/main.tf`
+- Latest local product checkpoint: `61a44c6` (`Refine Advanced progress pacing`)
+- Latest pushed branch commit: `2990350` (`Improve Advanced progress and source-text model routing`)
+- Canonical deployed web URL: `https://explainflow-web-745130520479.us-central1.run.app`
+- Branch status: local deployment-file edits remain in `GEMINI.md`, `cloudbuild.yaml`, and `terraform/main.tf`, plus untracked generated runtime assets under `api/app/static/`
 
 Do not commit editor state or generated runtime assets unless explicitly requested.
+
+## Latest Confirmed Checkpoint
+
+- Latest local code checkpoint: `61a44c6` (`Refine Advanced progress pacing`)
+- Latest pushed code checkpoint: `2990350` (`Improve Advanced progress and source-text model routing`)
+- Safe rollback anchor before the latest Advanced progress refinement: `2990350` (`Improve Advanced progress and source-text model routing`)
+- Current branch is suitable for continuing app work without first cleaning deployment-only local edits
+
+## Local-Only Dirty State
+
+These changes are intentionally not part of the code checkpoint and should be handled explicitly:
+
+- `GEMINI.md`
+- `cloudbuild.yaml`
+- `terraform/main.tf`
+- generated assets under `api/app/static/`
+
+Unless deployment work is the task, ignore these files and do not fold them into ordinary product/refactor commits.
+
+## Known Temporary Local Fixes
+
+- Local host development during the latest session used:
+  - API on `127.0.0.1:8000`
+  - web on `127.0.0.1:3000`
+- Local MP4 generation required machine-level dependencies during testing:
+  - `moviepy` available in the Python environment
+  - `ffmpeg` available on the machine
+- These are environment assumptions, not product features. Re-check them if local export fails again.
 
 ## Current Product Shape
 
@@ -39,6 +69,12 @@ Key properties:
 - scene-level QA during streaming
 - proof-linked generation and source traceability
 - export from already generated scenes, not rerun generation
+- `AgentCoordinator` remains the backend workflow control plane:
+  - owns checkpoint state and invalidation
+  - builds canonical script-pack and stream requests
+  - records final stream / bundle state
+- frontend hooks do not replace coordinator authority:
+  - they orchestrate UI state, recovery, and notes on top of the workflow APIs
 
 ### Quick
 
@@ -148,6 +184,18 @@ Central files:
 - Playlist `hybrid` behavior now plays:
   - source clip first
   - generated frame second
+- Quick artifact now returns before visual hydration completes, then fills hero/block visuals in the background
+- Local uploaded video handling was hardened:
+  - uploaded local video is now allowed into extraction
+  - empty normalized-text recovery can fall back to multimodal asset-only extraction
+  - uploaded Gemini files wait for `ACTIVE` state before extraction uses them
+- Quick now warns when a local uploaded video has no transcript, because delivery may lean on source-backed reels and generated images may be sparse
+- Quick copy now distinguishes:
+  - transcript-backed YouTube indexing
+  - transcript-backed uploaded video indexing
+  - source-backed uploaded video indexing
+- Advanced MP4 export now emits start / ready / failure notes into the shared `Agent Session Notes` panel
+- `docs/demo-script.md` includes the Quick/Advanced buffered-scene orchestration linkage for demo narration
 
 Central files:
 
@@ -168,6 +216,9 @@ Central files:
   - top-level workflow overview
   - Mermaid diagrams
   - stronger differentiator framing
+- the current doc policy is:
+  - `README.md` = conceptual product overview
+  - `docs/architecture.md` = route-level and workflow-ownership source of truth
 - `docs/demo-script.md` was updated with:
   - judge-facing talking points
   - agent-harness wording
@@ -240,6 +291,9 @@ Current result:
   - `6310cf5` `Combine workflow profile locks`
   - `0c6dec7` `Deduplicate script pack prompt prep`
   - `7d7d41b` `Share advanced route request helpers`
+  - `f9d68e0` `Refine Advanced stage progress and layout`
+  - `2990350` `Improve Advanced progress and source-text model routing`
+  - `61a44c6` `Refine Advanced progress pacing`
 
 ## Files Most Central To The Current State
 
@@ -319,6 +373,9 @@ Docs:
 - Quick MP4 uses generated visuals and local proof intercuts when available
 - Advanced MP4 is intentionally image + audio only for now
 - Proof links for PDF work best through separate-tab viewing in deployed environments
+- transcript normalization and asset-backed source recovery now use different default Gemini model tiers:
+  - transcript normalization -> `gemini-3.1-flash-lite-preview`
+  - asset-backed recovery -> `gemini-3-flash-preview`
 
 ## Important Guardrails
 
@@ -367,9 +424,9 @@ These are real next-step items, not regressions.
 
 If continuing product work:
 
-1. deploy and rehearse current `main`
-2. fix only concrete demo bugs
-3. stop feature churn
+1. finish demo-script / project-story polish
+2. rehearse the chosen Advanced demo source on the deployed URL
+3. fix only concrete demo bugs
 
 If continuing refactor work on this branch:
 
@@ -397,22 +454,13 @@ If the Codex app updates or runtime state is lost:
 
 ## Short Mission For The Next Session
 
-Continue from a stable base.
+Work from the current stable base.
 
 Most likely next move:
 
-- keep Quick frozen at the current good state
-- update / reread this handoff
-- run a targeted Advanced smoke pass on:
-  - source -> extraction -> render profile -> signal confirm -> script pack -> stream
-  - proof viewer / proof links
-  - scene override
-  - bundle export / Advanced MP4 export
-
-Fallback if demo needs dominate:
-
-- stop refactoring
-- deploy current `main`
-- do a final cloud smoke pass on:
-  - Advanced extraction -> script pack -> stream -> MP4 export
-  - Quick artifact -> reel -> playlist -> MP4
+- keep product behavior frozen unless a concrete demo bug appears
+- reread this handoff
+- finish demo narrative materials
+- run a final cloud rehearsal on:
+  - Advanced extraction -> script pack -> stream -> proof links -> MP4 export
+  - Quick artifact -> reel / playlist -> MP4

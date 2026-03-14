@@ -48,11 +48,12 @@ sequenceDiagram
             API-->>W: source_manifest asset records
         end
         W->>WF: POST /workflow/start
-        W->>API: POST /extract-signal
+        W->>WF: POST /workflow/{id}/extract-signal
+        WF->>API: extract_signal(...)
         API->>LLM: Signal extraction (prompt + uploaded Gemini Files)
         LLM-->>API: content_signal
-        API-->>W: content_signal
-        W->>WF: POST /workflow/{id}/extract-signal
+        API-->>WF: extraction result
+        WF-->>W: workflow + content_signal
         note over WF: "CP1_SIGNAL_READY"
     end
 

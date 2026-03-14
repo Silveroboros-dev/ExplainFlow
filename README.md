@@ -63,82 +63,54 @@ At a high level:
 4. stream scenes with self-checks and retries
 5. keep proof linked to the generated output
 
+These two diagrams are conceptual. For the exact route-level workflow, checkpoint ownership, and request/response path, see [`docs/architecture.md`](./docs/architecture.md).
+
 ### Director Workflow
 
 ```mermaid
 sequenceDiagram
-    participant U as "Director (User)"
-    participant A as "Workflow Chat Agent"
-    participant E as "Signal Extractor"
-    participant P as "Script Planner + QA"
-    participant S as "SSE Scene Engine"
+    participant U as "User"
+    participant ST as "Studio UI"
+    participant C as "AgentCoordinator"
+    participant G as "Gemini Runtime"
 
-    U->>E: Upload PDF, text, or source media
-    Note over E: Extract thesis, claims, beats, and evidence
-    E-->>U: CP1 Signal Ready
+    U->>ST: Provide source material and choose output intent
+    ST->>C: Start or update workflow
+    C->>G: Extract grounded signal
+    G-->>C: content_signal
+    C-->>ST: Signal ready for review
 
-    U->>A: Lock profile and request a storyboard
-    A->>P: Trigger script-pack planning
-    Note over P: Runs salience, forward-pull, QA, repair/replan
-    P-->>U: CP4 Script Locked
+    ST->>C: Lock profile and request script pack
+    C->>G: Plan scenes and run planner QA
+    G-->>C: locked script pack
+    C-->>ST: Script pack ready
 
-    Note over U: User can inspect or redirect the plan here
-
-    U->>S: Generate stream
+    ST->>C: Start generation stream
     loop Per scene
-        S->>S: Generate text, image, audio
-        S->>S: Scene-level QA gate
-        S-->>U: Stream scene + proof badges
+        C->>G: Generate text, image, and audio
+        G-->>C: Scene candidate
+        C->>C: QA / retry if needed
+        C-->>ST: Scene output + proof links
     end
-
-    U->>S: Open proof link
-    S-->>U: Source-backed PDF, crop, or clip proof
+    C-->>ST: Final bundle ready
 ```
 
 ### Data Anatomy
 
 ```mermaid
-flowchart TD
-    subgraph RAW["1. Raw Multimodal Source"]
-        T["Text / Transcript"]
-        V["Video / Audio"]
-        P["PDF / Images"]
-    end
+flowchart LR
+    A["Source Material<br/>text, PDF, image, audio, video"]
+    B["Extracted Signal<br/>thesis, claims, evidence"]
+    C["Locked Script Pack<br/>scene goals, refs, render strategy"]
+    D["Scene Outputs<br/>text, visuals, audio, proof links"]
+    E["Review + Export<br/>scene review, final bundle, MP4"]
 
-    subgraph SIG["2. Extracted Signal"]
-        TH["Thesis + Concepts"]
-        KC["Key Claims"]
-        EV["Evidence Snippets<br/>text recovery / timestamps / visual evidence anchors"]
-    end
-
-    subgraph PLAN["3. Script Pack Blueprint"]
-        SP["Script Pack"]
-        S1["Scene 1: Hook"]
-        S2["Scene 2: Proof"]
-        S3["Scene 3: Takeaway"]
-    end
-
-    subgraph UI["4. Rendered UI"]
-        CARD["Scene Card / Quick Block"]
-        TEXT["Narrative Text + Claim Badges"]
-        VIS["Generated Visual + Source Media"]
-        PROOF["View Source Proof"]
-    end
-
-    T --> TH
-    T --> KC
-    V --> EV
-    P --> EV
-    KC --> SP
-    EV --> SP
-    TH --> SP
-    SP --> S1
-    SP --> S2
-    SP --> S3
-    S2 --> CARD
-    CARD --> TEXT
-    CARD --> VIS
-    CARD --> PROOF
+    A --> B
+    B --> C
+    C --> D
+    D --> E
+    B -.->|"claim refs / evidence refs"| D
+    A -.->|"source proof media"| D
 ```
 
 ## How to Run Locally
@@ -254,7 +226,7 @@ This agent sits inside a larger harness that also performs:
 
 ## Architecture Summary
 
-- **Frontend**: Next.js Studio UI with `AgentActivityPanel` for 100% transparency of agent decisions.
+- **Frontend**: Next.js Studio UI with visible workflow state through the ExplainFlow Assistant and Agent Session Notes.
 - **Backend**: FastAPI with `AgentCoordinator` service layer and SSE streaming.
 - **Orchestration**:
   - **Planner**: Gemini 3.1 Pro for extraction, planning, salience, forward-pull, and planner QA
