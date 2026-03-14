@@ -60,12 +60,24 @@ export default function AdvancedSourcePanel({
   onCollapse,
   formatDuration,
 }: AdvancedSourcePanelProps) {
+  const hasSourceDoc = sourceDoc.trim().length > 0;
+  const assetCount = uploadedSourceAssets.length;
+  const sourceSummary = isExtracting
+    ? "Structured extraction is running on the current source."
+    : hasSourceDoc && assetCount > 0
+      ? `Source text plus ${assetCount} attached asset${assetCount === 1 ? "" : "s"} ready for extraction.`
+      : hasSourceDoc
+        ? "Source text is ready for structured extraction."
+        : assetCount > 0
+          ? `${assetCount} attached asset${assetCount === 1 ? "" : "s"} ready for extraction.`
+          : "Add source text or attach source assets to begin.";
+
   return (
-    <Card className="flex h-full flex-col bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
-      <CardHeader>
+    <Card className="flex h-full flex-col bg-white/95 text-slate-900 backdrop-blur-xl shadow-[0_20px_40px_rgba(15,23,42,0.08)] border-slate-300/70">
+      <CardHeader className="pb-4">
         <CardTitle className="text-slate-900">1. Source Material</CardTitle>
         <CardDescription className="text-slate-600">
-          Start with source text, uploaded source assets, or both. Images and audio can flow into claim-level proof links; PDFs are accepted for extraction and page-linked proof viewing with matched excerpts when available; short videos are supported with transcript-first extraction.
+          Start with source text, uploaded assets, or both. PDFs and media can feed proof links; short videos stay transcript-first.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-1 flex-col overflow-hidden">
@@ -84,7 +96,7 @@ export default function AdvancedSourcePanel({
                 Optional when uploaded assets already contain the source material. For video, paste transcript or captions here if the clip is longer than 2 minutes. Use page-image uploads if you want crop-level proof on slides; PDFs now add page-linked excerpts when local text matching succeeds.
               </p>
             </div>
-            <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="space-y-4 rounded-[22px] border border-slate-200 bg-slate-50/80 p-4">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-2">
                   <div className="flex items-center gap-3">
@@ -188,51 +200,56 @@ export default function AdvancedSourcePanel({
             </div>
           </div>
           <div className="space-y-3 border-t border-slate-200 bg-white pt-3">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Button
-              type="submit"
-              className={primaryActionClassName}
-              disabled={extractDisabled}
-              size="lg"
-            >
-              <span className="flex w-full items-center justify-between gap-4">
-                <span className="space-y-1 text-left">
-                  <span className={primaryActionLabelClassName}>
-                    Primary Action
-                  </span>
-                  <span className="block text-base font-semibold">
-                    {isExtracting
-                      ? "Extracting Signal..."
-                      : isUploadingAssets
-                        ? "Uploading Assets..."
-                        : "Extract Content Signal"}
-                  </span>
-                </span>
-                {(isExtracting || isUploadingAssets) ? (
-                  <Loader2 className="h-5 w-5 animate-spin text-slate-100" />
-                ) : null}
-              </span>
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className={secondaryActionClassName}
-              onClick={onCollapse}
-            >
-              <span className="space-y-1 text-left">
-                <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                  Secondary Action
-                </span>
-                <span className="block text-base font-semibold">Collapse Window</span>
-              </span>
-            </Button>
-            </div>
             {(isExtracting || extractProgress > 0) ? (
               <div className="space-y-2">
                 <Progress value={extractProgress} className="h-2 bg-amber-100 [&>*]:bg-amber-500" />
                 <p className="text-xs text-slate-600">{extractProgressMessage}</p>
               </div>
             ) : null}
+            <div className="rounded-[28px] border border-slate-200 bg-slate-50/85 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_14px_28px_rgba(15,23,42,0.06)]">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="space-y-1 px-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    Ready to extract
+                  </p>
+                  <p className="text-sm text-slate-700">{sourceSummary}</p>
+                </div>
+                <div className="flex flex-col gap-2 lg:min-w-[320px]">
+                  <Button
+                    type="submit"
+                    className={primaryActionClassName}
+                    disabled={extractDisabled}
+                    size="lg"
+                  >
+                    <span className="flex w-full items-center justify-between gap-4">
+                      <span className="space-y-1 text-left">
+                        <span className={primaryActionLabelClassName}>
+                          Content Signal
+                        </span>
+                        <span className="block text-base font-semibold">
+                          {isExtracting
+                            ? "Extracting..."
+                            : isUploadingAssets
+                              ? "Uploading Assets..."
+                              : "Extract now"}
+                        </span>
+                      </span>
+                      {(isExtracting || isUploadingAssets) ? (
+                        <Loader2 className="h-5 w-5 animate-spin text-slate-100" />
+                      ) : null}
+                    </span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className={`${secondaryActionClassName} w-auto self-start rounded-full px-4 py-2.5 text-sm shadow-none lg:self-end`}
+                    onClick={onCollapse}
+                  >
+                    Hide panel
+                  </Button>
+                </div>
+              </div>
+            </div>
             {errorMessage ? <p className="text-red-500 text-sm font-medium">{errorMessage}</p> : null}
           </div>
         </form>

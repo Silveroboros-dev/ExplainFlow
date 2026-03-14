@@ -1192,7 +1192,7 @@ export default function AdvancedStudio() {
         {/* Header Section */}
         <div className="text-center space-y-1.5">
           <h1 className="text-4xl font-extrabold tracking-tight text-slate-100 drop-shadow-[0_2px_16px_rgba(2,6,23,0.75)]">Advanced Studio</h1>
-          <p className="text-lg text-slate-200/95 drop-shadow-[0_1px_8px_rgba(2,6,23,0.6)]">Long-document input and granular render profile control.</p>
+          <p className="text-lg text-slate-200/95 drop-shadow-[0_1px_8px_rgba(2,6,23,0.6)]">Long-document input with deliberate control over output, audience, and taste.</p>
         </div>
 
         <div className="grid items-start gap-5 lg:grid-cols-[0.82fr_1.18fr]">
@@ -1223,11 +1223,11 @@ export default function AdvancedStudio() {
 
           <div className="space-y-6">
         <div className="mx-auto max-w-4xl">
-        <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
+        <Card className="bg-white/95 text-slate-900 backdrop-blur-xl shadow-[0_20px_40px_rgba(15,23,42,0.08)] border-slate-300/70">
           <CardContent className="pt-6">
-            <div className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div className="space-y-4 rounded-[22px] border border-slate-200 bg-slate-50/80 p-4">
               <div className="flex items-center justify-between gap-3 px-1">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Workflow Stages</p>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Workflow Stages</p>
                 <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
                   Active Flow
                 </span>
@@ -1240,7 +1240,7 @@ export default function AdvancedStudio() {
                       type="button"
                       onClick={() => setActivePanel(panel)}
                       style={{ flex: '1 1 0%' }}
-                      className={`w-full rounded-[18px] border px-3 py-2 text-center text-xs font-semibold transition hover:brightness-95 ${stageBadgeClass(panel)}`}
+                      className={`w-full rounded-[18px] border px-3 py-2 text-center text-[11px] font-semibold transition-all duration-200 hover:-translate-y-0.5 ${stageBadgeClass(panel)}`}
                     >
                       {panelLabel[panel]}
                     </button>

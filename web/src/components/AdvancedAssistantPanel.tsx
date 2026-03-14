@@ -78,22 +78,22 @@ export default function AdvancedAssistantPanel({
   onDismissPendingAction,
 }: AdvancedAssistantPanelProps) {
   return (
-    <Card className="bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
+    <Card className="bg-white/95 text-slate-900 backdrop-blur-xl shadow-[0_20px_40px_rgba(15,23,42,0.08)] border-slate-300/70">
       <CardHeader className="pb-3">
         <CardTitle className="text-slate-900">ExplainFlow Assistant</CardTitle>
         <CardDescription className="text-slate-600">
-          Workflow orchestration console. Shows only the latest request/response while detailed logs stay in Agent Session Notes.
+          Latest exchange with the workflow assistant. Detailed execution stays in Agent Session Notes.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+        <div className="rounded-[22px] border border-slate-200 bg-slate-50/80 p-3">
           <div className="mb-2 flex items-center justify-between gap-3 px-1">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Latest Exchange</p>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Latest Exchange</p>
             <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
               Live
             </span>
           </div>
-          <ScrollArea className="h-[180px] rounded-xl border border-slate-200 bg-white p-3 md:h-[210px]">
+          <ScrollArea className="h-[180px] rounded-[18px] border border-slate-200 bg-white p-3 shadow-[0_8px_18px_rgba(15,23,42,0.03)] md:h-[210px]">
             <div className="space-y-3 pr-2">
               {chatMessages.map((message) => {
                 const meta = chatRoleMeta(message.role);
@@ -139,24 +139,34 @@ export default function AdvancedAssistantPanel({
             </div>
           </div>
         ) : null}
-        <form onSubmit={onSubmit} className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+        <form onSubmit={onSubmit} className="space-y-3 rounded-[22px] border border-slate-200 bg-slate-50/80 p-3">
           <Textarea
             value={chatInput}
             onChange={(event) => onChatInputChange(event.target.value)}
             placeholder='Ask naturally, e.g. "What should I do next?" or "Open render profile."'
             className="min-h-[84px] resize-none bg-white text-slate-900 border-slate-300 placeholder:text-slate-500"
           />
-          <Button
-            type="submit"
-            className={primaryActionClassName}
-          >
-            <span className="space-y-1 text-left">
-              <span className={primaryActionLabelClassName}>
-                Assistant Action
-              </span>
-              <span className="block text-base font-semibold">Send Request</span>
-            </span>
-          </Button>
+          <div className="rounded-[24px] border border-slate-200 bg-white/90 p-3 shadow-[0_8px_18px_rgba(15,23,42,0.03)]">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-1 px-1">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                  Assistant request
+                </p>
+                <p className="text-sm text-slate-700">Use the assistant to explain state, move the workflow, or suggest the next action.</p>
+              </div>
+              <Button
+                type="submit"
+                className={`${primaryActionClassName} sm:min-w-[240px]`}
+              >
+                <span className="space-y-1 text-left">
+                  <span className={primaryActionLabelClassName}>
+                    Assistant
+                  </span>
+                  <span className="block text-base font-semibold">Send Request</span>
+                </span>
+              </Button>
+            </div>
+          </div>
         </form>
       </CardContent>
     </Card>

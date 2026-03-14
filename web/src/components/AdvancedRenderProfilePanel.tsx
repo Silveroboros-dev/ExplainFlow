@@ -164,12 +164,14 @@ export default function AdvancedRenderProfilePanel({
   onApply,
   onCollapse,
 }: AdvancedRenderProfilePanelProps) {
+  const profileSummary = `${currentSelectionLabel} · ${audienceLevel} audience · ${tasteBar.replaceAll("_", " ")} taste`;
+
   return (
-    <Card className="flex h-full flex-col bg-white text-slate-900 backdrop-blur-xl shadow-xl border-slate-300/70">
+    <Card className="flex h-full flex-col bg-white/95 text-slate-900 backdrop-blur-xl shadow-[0_20px_40px_rgba(15,23,42,0.08)] border-slate-300/70">
       <CardHeader className="pb-3">
         <CardTitle className="text-slate-900">2. Render Profile</CardTitle>
         <CardDescription className="text-slate-600">
-          Configure output while signal extraction runs in parallel. Questions are split so each choice is deliberate.
+          Set output intent while extraction runs. The profile is split into four deliberate choices.
         </CardDescription>
       </CardHeader>
       <CardContent className="high-contrast-form-labels flex flex-1 flex-col space-y-4 overflow-hidden">
@@ -202,8 +204,8 @@ export default function AdvancedRenderProfilePanel({
               tileHoverClassName={tileHoverClassName}
               onSelect={onVisualModeChange}
             />
-            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Current Selection</p>
+            <div className="rounded-[20px] border border-slate-200 bg-slate-50/80 px-4 py-3">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">Current Selection</p>
               <p className="mt-2 text-sm text-slate-700">{currentSelectionLabel}</p>
             </div>
           </TabsContent>
@@ -263,7 +265,7 @@ export default function AdvancedRenderProfilePanel({
               tileHoverClassName={tileHoverClassName}
               onSelect={onTasteBarChange}
             />
-            <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+            <div className="rounded-[18px] border border-blue-200 bg-blue-50/85 p-3 text-sm text-blue-900">
               Low-key preview is always enabled for speed. You can request a high-fidelity rerun at Final Bundle stage.
             </div>
           </TabsContent>
@@ -314,40 +316,45 @@ export default function AdvancedRenderProfilePanel({
           </Button>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 pt-1 sm:grid-cols-2">
-          <Button
-            type="button"
-            className={primaryActionClassName}
-            onClick={onApply}
-            disabled={isApplyingProfile || applyDisabled}
-          >
-            <span className="flex w-full items-center justify-between gap-4">
-              <span className="space-y-1 text-left">
-                <span className={primaryActionLabelClassName}>
-                  Primary Action
+        <div className="rounded-[28px] border border-slate-200 bg-slate-50/85 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_14px_28px_rgba(15,23,42,0.06)]">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="space-y-1 px-1">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                Ready to lock
+              </p>
+              <p className="text-sm text-slate-700">{profileSummary}</p>
+            </div>
+            <div className="flex flex-col gap-2 lg:min-w-[320px]">
+              <Button
+                type="button"
+                className={primaryActionClassName}
+                onClick={onApply}
+                disabled={isApplyingProfile || applyDisabled}
+              >
+                <span className="flex w-full items-center justify-between gap-4">
+                  <span className="space-y-1 text-left">
+                    <span className={primaryActionLabelClassName}>
+                      Render Profile
+                    </span>
+                    <span className="block text-base font-semibold">
+                      {isApplyingProfile ? "Locking..." : "Apply now"}
+                    </span>
+                  </span>
+                  {isApplyingProfile ? (
+                    <Loader2 className="h-5 w-5 animate-spin text-slate-100" />
+                  ) : null}
                 </span>
-                <span className="block text-base font-semibold">
-                  {isApplyingProfile ? "Locking Profile..." : "Apply Render Profile"}
-                </span>
-              </span>
-              {isApplyingProfile ? (
-                <Loader2 className="h-5 w-5 animate-spin text-slate-100" />
-              ) : null}
-            </span>
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            className={secondaryActionClassName}
-            onClick={onCollapse}
-          >
-            <span className="space-y-1 text-left">
-              <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                Secondary Action
-              </span>
-              <span className="block text-base font-semibold">Collapse Window</span>
-            </span>
-          </Button>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className={`${secondaryActionClassName} w-auto self-start rounded-full px-4 py-2.5 text-sm shadow-none lg:self-end`}
+                onClick={onCollapse}
+              >
+                Hide panel
+              </Button>
+            </div>
+          </div>
         </div>
       </CardContent>
     </Card>

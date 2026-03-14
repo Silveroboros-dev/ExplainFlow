@@ -16,14 +16,6 @@ const displayFont = Space_Grotesk({
   weight: ["500", "700"],
 });
 
-const pipelineStages = [
-  "Source Input",
-  "Signal Extraction",
-  "Scene Planning",
-  "Interleaved Generation",
-  "Final Media Bundle",
-];
-
 type CollageTile = {
   src: string;
   alt: string;
@@ -79,15 +71,6 @@ export default function Home() {
             </div>
           ))}
         </div>
-        <div className="landing-flow-map">
-          <div className="flow-line" />
-          {pipelineStages.map((stage, idx) => (
-            <div key={stage} className={`flow-stage flow-stage-${idx + 1}`}>
-              <span className="flow-dot" />
-              <span className="flow-label">{stage}</span>
-            </div>
-          ))}
-        </div>
         <div className="landing-orb landing-orb-a" />
         <div className="landing-orb landing-orb-b" />
         <div className="landing-orb landing-orb-c" />
@@ -123,19 +106,19 @@ export default function Home() {
           <div className="grid w-full max-w-3xl grid-cols-2 gap-3 pt-2 text-left md:grid-cols-4">
             <div className="rounded-2xl border border-slate-400/30 bg-slate-900/58 px-4 py-3 backdrop-blur-md">
               <p className="text-[11px] uppercase tracking-wide text-slate-300">Output</p>
-              <p className="text-sm font-semibold text-slate-100">Text + Image + Audio</p>
+              <p className="text-sm font-semibold text-slate-100">Grounded scenes, reels, and narrated video</p>
             </div>
             <div className="rounded-2xl border border-slate-400/30 bg-slate-900/58 px-4 py-3 backdrop-blur-md">
-              <p className="text-[11px] uppercase tracking-wide text-slate-300">Latency</p>
-              <p className="text-sm font-semibold text-slate-100">Scene-by-scene stream</p>
+              <p className="text-[11px] uppercase tracking-wide text-slate-300">Inputs</p>
+              <p className="text-sm font-semibold text-slate-100">Prompt, docs, or video</p>
             </div>
             <div className="rounded-2xl border border-slate-400/30 bg-slate-900/58 px-4 py-3 backdrop-blur-md">
               <p className="text-[11px] uppercase tracking-wide text-slate-300">Control</p>
-              <p className="text-sm font-semibold text-slate-100">Audience + Taste Bar</p>
+              <p className="text-sm font-semibold text-slate-100">Audience + production controls</p>
             </div>
             <div className="rounded-2xl border border-slate-400/30 bg-slate-900/58 px-4 py-3 backdrop-blur-md">
-              <p className="text-[11px] uppercase tracking-wide text-slate-300">Flow</p>
-              <p className="text-sm font-semibold text-slate-100">Prompt to media bundle</p>
+              <p className="text-[11px] uppercase tracking-wide text-slate-300">Evidence</p>
+              <p className="text-sm font-semibold text-slate-100">Proof links + source reels</p>
             </div>
           </div>
         </div>
@@ -189,15 +172,15 @@ export default function Home() {
             <div className="flex justify-center">
               <Cpu className="w-6 h-6 text-slate-300" />
             </div>
-            <p className="font-bold text-slate-100">Gemini 3.1 Pro</p>
-            <p className="text-sm text-slate-300">Extraction & logic</p>
+            <p className="font-bold text-slate-100">Gemini Routing</p>
+            <p className="text-sm text-slate-300">Pro + Flash model paths</p>
           </div>
           <div className="space-y-2 rounded-2xl border border-slate-400/25 bg-slate-900/58 p-4 backdrop-blur-md">
             <div className="flex justify-center">
               <Play className="w-6 h-6 text-slate-300" />
             </div>
-            <p className="font-bold text-slate-100">Nano Banana Pro</p>
-            <p className="text-sm text-slate-300">Multimodal streaming</p>
+            <p className="font-bold text-slate-100">Scene Stream</p>
+            <p className="text-sm text-slate-300">Checkpointed generation flow</p>
           </div>
           <div className="space-y-2 rounded-2xl border border-slate-400/25 bg-slate-900/58 p-4 backdrop-blur-md">
             <div className="flex justify-center">
@@ -210,8 +193,8 @@ export default function Home() {
             <div className="flex justify-center">
               <Sparkles className="w-6 h-6 text-slate-300" />
             </div>
-            <p className="font-bold text-slate-100">Infinite Styles</p>
-            <p className="text-sm text-slate-300">Dynamic art direction</p>
+            <p className="font-bold text-slate-100">Proof-Linked Output</p>
+            <p className="text-sm text-slate-300">Source-backed scenes and reels</p>
           </div>
         </div>
       </main>

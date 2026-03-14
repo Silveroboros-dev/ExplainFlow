@@ -14,9 +14,9 @@ import {
 
 export const ADVANCED_API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 export const ADVANCED_WORKFLOW_STORAGE_KEY = "explainflow.advanced.workflow_id";
-export const PRIMARY_ACTION_CARD_CLASS = "group h-auto w-full rounded-[24px] bg-slate-950 px-5 py-4 text-left text-white shadow-[0_18px_36px_rgba(15,23,42,0.18)] transition-transform hover:-translate-y-0.5 hover:bg-slate-900 disabled:opacity-100 disabled:bg-slate-300 disabled:text-slate-500 disabled:hover:translate-y-0";
-export const SECONDARY_ACTION_CARD_CLASS = "h-auto w-full rounded-[24px] border-slate-200 bg-slate-50 px-5 py-4 text-left text-slate-900 shadow-none transition-transform hover:-translate-y-0.5 hover:bg-slate-100 disabled:opacity-100 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:hover:translate-y-0";
-export const PRIMARY_ACTION_LABEL_CLASS = "block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300 transition-colors group-disabled:text-slate-600";
+export const PRIMARY_ACTION_CARD_CLASS = "group h-auto w-full rounded-[22px] bg-[linear-gradient(180deg,#0f172a_0%,#111827_100%)] px-5 py-3.5 text-left text-white shadow-[0_16px_32px_rgba(15,23,42,0.16)] ring-1 ring-slate-900/5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_20px_40px_rgba(15,23,42,0.2)] disabled:opacity-100 disabled:bg-slate-200 disabled:text-slate-500 disabled:shadow-none disabled:ring-0 disabled:hover:translate-y-0";
+export const SECONDARY_ACTION_CARD_CLASS = "h-auto w-full rounded-[22px] border border-slate-200 bg-white px-5 py-3.5 text-left text-slate-900 shadow-[0_8px_18px_rgba(15,23,42,0.04)] transition-all duration-200 hover:-translate-y-0.5 hover:border-slate-300 hover:bg-slate-50 disabled:opacity-100 disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:shadow-none disabled:hover:translate-y-0";
+export const PRIMARY_ACTION_LABEL_CLASS = "block text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 transition-colors group-disabled:text-slate-500";
 
 export type SelectionTile = {
   value: string;
@@ -29,8 +29,8 @@ export type SelectionTile = {
   selectedIconClassName: string;
 };
 
-export const RENDER_PROFILE_TILE_CLASS = "rounded-[24px] border p-4 text-left transition-all duration-200";
-export const RENDER_PROFILE_TILE_HOVER_CLASS = "hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]";
+export const RENDER_PROFILE_TILE_CLASS = "rounded-[22px] border p-3.5 text-left shadow-[0_8px_18px_rgba(15,23,42,0.03)] transition-all duration-200";
+export const RENDER_PROFILE_TILE_HOVER_CLASS = "hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-[0_14px_28px_rgba(15,23,42,0.08)]";
 
 export const ARTIFACT_SELECTION_TILES: SelectionTile[] = [
   {
