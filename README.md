@@ -45,6 +45,59 @@ Most AI generators go directly from source to final output. **ExplainFlow does n
 
 This is optimized for **controllability, recovery, and traceability**, not just blind generation speed.
 
+## System Architecture
+
+```mermaid
+flowchart TD
+    subgraph USER["User"]
+        QUICK["Quick Mode"]
+        ADVANCED["Advanced Studio"]
+    end
+
+    subgraph FRONTEND["Next.js Frontend — Google Cloud Run"]
+        UI["Studio UI\nSource Intake · Render Profile\nScene Review · Proof Viewer · Export"]
+        SSE_CLIENT["SSE Stream Client\nReal-Time Scene Rendering"]
+    end
+
+    subgraph BACKEND["FastAPI Backend — Google Cloud Run"]
+        ROUTES["REST API + SSE Endpoints"]
+        COORD["AgentCoordinator\nCP1 Signal → CP2 Artifacts → CP3 Render\n→ CP4 Script → CP5 Stream → CP6 Bundle"]
+        STORY["GeminiStoryAgent\nExtraction · Planning · Scene Streaming"]
+        CHAT["Workflow Chat Agent\nCheckpoint-Aware Co-Direction"]
+        QA["Planner QA + Scene QA\nSelf-Healing · Auto-Retry"]
+    end
+
+    subgraph GEMINI["Gemini Models — Google GenAI SDK"]
+        PRO["gemini-3.1-pro-preview\nSignal Extraction · Salience\nForward-Pull · Planner QA"]
+        IMG["gemini-3-pro-image-preview\nInterleaved Text + Image\nScene Generation"]
+        FLASH["gemini-3-flash-preview\nQuick Artifact Paths\nTranscript Normalization"]
+    end
+
+    GCS[("Google Cloud Storage\nScene Images · Audio · Video\nSource Assets · Proof Media\nFinal Bundles")]
+
+    QUICK & ADVANCED --> UI
+    UI -->|"REST"| ROUTES
+    ROUTES --> COORD
+    COORD --> STORY
+    COORD --> CHAT
+    STORY --> QA
+    QA -->|"Auto-Retry on QA Fail"| STORY
+    STORY -->|"Google GenAI SDK"| PRO
+    STORY -->|"Google GenAI SDK"| IMG
+    STORY -->|"Google GenAI SDK"| FLASH
+    STORY -->|"Asset Storage"| GCS
+    ROUTES -->|"SSE Event Stream\nscene_start · story_text_delta\ndiagram_ready · audio_ready\nqa_status · source_media_ready"| SSE_CLIENT
+    SSE_CLIENT --> UI
+
+    style USER fill:#f8fafc,stroke:#94a3b8,color:#1e293b
+    style FRONTEND fill:#dbeafe,stroke:#3b82f6,color:#1e293b
+    style BACKEND fill:#fef3c7,stroke:#f59e0b,color:#1e293b
+    style GEMINI fill:#fce7f3,stroke:#ec4899,color:#1e293b
+    style GCS fill:#d1fae5,stroke:#10b981,color:#1e293b
+```
+
+For the exact route-level workflow, checkpoint ownership, and request/response path, see [`docs/architecture.md`](./docs/architecture.md).
+
 ## How ExplainFlow Works
 
 ExplainFlow is designed as a transparent production pipeline rather than a black-box generator.
@@ -56,8 +109,6 @@ At a high level:
 3. plan and lock a script before rendering
 4. stream scenes with self-checks and retries
 5. keep proof linked to the generated output
-
-These two diagrams are conceptual. For the exact route-level workflow, checkpoint ownership, and request/response path, see [`docs/architecture.md`](./docs/architecture.md).
 
 ### Director Workflow
 

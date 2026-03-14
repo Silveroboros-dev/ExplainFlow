@@ -1,11 +1,11 @@
 steps:
   # 1. Build the API image
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'us-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-api:latest', '-f', 'api/Dockerfile', '.']
+    args: ['build', '-t', 'us-central1-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-api:latest', '-f', 'api/Dockerfile', '.']
 
   # 2. Push the API image
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'us-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-api:latest']
+    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-api:latest']
 
   # 3. Deploy API to Cloud Run (Serverless, Fully Managed)
   # This uses the image we just built. It sets the timeout to 300s (critical for multimodal streaming).
@@ -17,7 +17,7 @@ steps:
       - 'deploy'
       - 'explainflow-api'
       - '--image'
-      - 'us-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-api:latest'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-api:latest'
       - '--region'
       - 'us-central1'
       - '--allow-unauthenticated'
@@ -27,6 +27,8 @@ steps:
       - '2Gi'
       - '--cpu'
       - '2'
+      - '--set-env-vars'
+      - 'EXPLAINFLOW_BUCKET=explainflow-assets-$PROJECT_ID'
       - '--set-secrets'
       - 'GEMINI_API_KEY=explainflow-gemini-api-key:latest'
 
@@ -47,11 +49,11 @@ steps:
       - '-c'
       - |
         API_URL=$$(cat /workspace/api_url.txt)
-        docker build -t us-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-web:latest -f web/Dockerfile --build-arg NEXT_PUBLIC_API_URL="$$API_URL" .
+        docker build -t us-central1-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-web:latest -f web/Dockerfile --build-arg NEXT_PUBLIC_API_URL="$$API_URL" .
 
   # 6. Push the Web image
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'us-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-web:latest']
+    args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-web:latest']
 
   # 7. Deploy Web to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -61,7 +63,7 @@ steps:
       - 'deploy'
       - 'explainflow-web'
       - '--image'
-      - 'us-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-web:latest'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-web:latest'
       - '--region'
       - 'us-central1'
       - '--allow-unauthenticated'
@@ -70,5 +72,5 @@ options:
   logging: CLOUD_LOGGING_ONLY
 
 images:
-  - 'us-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-api:latest'
-  - 'us-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-web:latest'
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-api:latest'
+  - 'us-central1-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-web:latest'
