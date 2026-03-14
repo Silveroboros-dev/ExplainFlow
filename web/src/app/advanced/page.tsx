@@ -38,16 +38,7 @@ import {
   RENDER_PROFILE_STEP_LABELS,
   RENDER_PROFILE_TILE_CLASS,
   RENDER_PROFILE_TILE_HOVER_CLASS,
-  SCRIPT_EXPLAINER_TEXT,
-  SCRIPT_JSON_PREVIEW,
-  SCRIPT_TYPEWRITER_DURATION_MS,
   SECONDARY_ACTION_CARD_CLASS,
-  SIGNAL_EXPLAINER_TEXT,
-  SIGNAL_JSON_PREVIEW,
-  SIGNAL_TYPEWRITER_DURATION_MS,
-  STREAM_EXPLAINER_TEXT,
-  STREAM_JSON_PREVIEW,
-  STREAM_TYPEWRITER_DURATION_MS,
   TASTE_BAR_TILES,
   VISUAL_MODE_TILES,
   formatMilliseconds,
@@ -95,18 +86,6 @@ export default function AdvancedStudio() {
   const [error, setError] = useState('');
   const [generationError, setGenerationError] = useState('');
   const [generationStatus, setGenerationStatus] = useState('');
-  const [typedExplainer, setTypedExplainer] = useState('');
-  const [typedPreview, setTypedPreview] = useState('');
-  const [typedScriptExplainer, setTypedScriptExplainer] = useState('');
-  const [typedScriptPreview, setTypedScriptPreview] = useState('');
-  const [typedStreamExplainer, setTypedStreamExplainer] = useState('');
-  const [typedStreamPreview, setTypedStreamPreview] = useState('');
-  const [signalTypewriterArmed, setSignalTypewriterArmed] = useState(false);
-  const [scriptTypewriterArmed, setScriptTypewriterArmed] = useState(false);
-  const [streamTypewriterArmed, setStreamTypewriterArmed] = useState(false);
-  const [signalTypingRunId, setSignalTypingRunId] = useState(0);
-  const [scriptTypingRunId, setScriptTypingRunId] = useState(0);
-  const [streamTypingRunId, setStreamTypingRunId] = useState(0);
   const [scriptPresentationMode, setScriptPresentationMode] = useState<'review' | 'auto'>('auto');
 
   const [isGenerating, setIsGenerating] = useState(false);
@@ -132,52 +111,13 @@ export default function AdvancedStudio() {
   ]);
   const chatScrollAnchorRef = React.useRef<HTMLDivElement | null>(null);
   
-  // Ref for the typewriter effect to track full text without causing infinite re-renders
+  // Buffer full scene text separately so scene cards can animate live text without rerender loops.
   const fullTextBuffer = React.useRef<Record<string, string>>({});
   const sourceAssetsInputRef = React.useRef<HTMLInputElement | null>(null);
   const noteDedupRef = React.useRef<Record<string, number>>({});
   const checkpointNoteStatusRef = React.useRef<Record<string, string> | null>(null);
   const checkpointNoteWorkflowIdRef = React.useRef<string | null>(null);
   const scriptStageNoteRef = React.useRef<string | null>(null);
-
-  const resetSignalPreviewRun = () => {
-    setTypedExplainer('');
-    setTypedPreview('');
-    setSignalTypewriterArmed(false);
-  };
-
-  const startSignalPreviewRun = () => {
-    setTypedExplainer('');
-    setTypedPreview('');
-    setSignalTypewriterArmed(true);
-    setSignalTypingRunId((prev) => prev + 1);
-  };
-
-  const resetScriptPreviewRun = () => {
-    setTypedScriptExplainer('');
-    setTypedScriptPreview('');
-    setScriptTypewriterArmed(false);
-  };
-
-  const startScriptPreviewRun = () => {
-    setTypedScriptExplainer('');
-    setTypedScriptPreview('');
-    setScriptTypewriterArmed(true);
-    setScriptTypingRunId((prev) => prev + 1);
-  };
-
-  const resetStreamPreviewRun = () => {
-    setTypedStreamExplainer('');
-    setTypedStreamPreview('');
-    setStreamTypewriterArmed(false);
-  };
-
-  const startStreamPreviewRun = () => {
-    setTypedStreamExplainer('');
-    setTypedStreamPreview('');
-    setStreamTypewriterArmed(true);
-    setStreamTypingRunId((prev) => prev + 1);
-  };
 
   const pushAgentNote = (type: AgentNoteType, stage: string, message: string) => {
     const dedupeKey = `${type}::${stage}::${message}`;
@@ -235,9 +175,6 @@ export default function AdvancedStudio() {
     setExpectedSceneCount,
     setEvidenceViewer,
     fullTextBufferRef: fullTextBuffer,
-    resetSignalPreviewRun,
-    resetScriptPreviewRun,
-    resetStreamPreviewRun,
     pushAgentNote,
   });
 
@@ -332,7 +269,6 @@ export default function AdvancedStudio() {
     setScenes,
     setScriptPack,
     fullTextBufferRef: fullTextBuffer,
-    startStreamPreviewRun,
     fetchWorkflowSnapshot,
     handleUnknownWorkflowError,
     pushAgentNote,
@@ -405,11 +341,6 @@ export default function AdvancedStudio() {
     setScriptPackStage,
     setScriptPackProgress,
     clearGeneratedOutputs,
-    startSignalPreviewRun,
-    resetSignalPreviewRun,
-    startScriptPreviewRun,
-    resetScriptPreviewRun,
-    resetStreamPreviewRun,
     updateWorkflowSnapshot,
     syncWorkflowUiFromSnapshot,
     recoverWorkflowState,
@@ -644,137 +575,6 @@ export default function AdvancedStudio() {
     };
   }, [isGeneratingScriptPack]);
 
-  React.useEffect(() => {
-    if (signalTypingRunId === 0 || extractedSignal) {
-      return;
-    }
-
-    setTypedExplainer('');
-    setTypedPreview('');
-
-    const targetDurationMs = SIGNAL_TYPEWRITER_DURATION_MS;
-    const tickMs = 60;
-    const totalChars = SIGNAL_EXPLAINER_TEXT.length + SIGNAL_JSON_PREVIEW.length;
-    const totalTicks = Math.max(1, Math.ceil(targetDurationMs / tickMs));
-    const charsPerTick = totalChars / totalTicks;
-    let cursor = 0;
-
-    const intervalId = window.setInterval(() => {
-      cursor = Math.min(totalChars, cursor + charsPerTick);
-      const shownChars = Math.floor(cursor);
-      const explainerChars = Math.min(shownChars, SIGNAL_EXPLAINER_TEXT.length);
-      const previewChars = Math.max(0, shownChars - SIGNAL_EXPLAINER_TEXT.length);
-
-      setTypedExplainer(SIGNAL_EXPLAINER_TEXT.slice(0, explainerChars));
-      setTypedPreview(SIGNAL_JSON_PREVIEW.slice(0, previewChars));
-
-      if (cursor >= totalChars) {
-        window.clearInterval(intervalId);
-      }
-    }, tickMs);
-
-    return () => window.clearInterval(intervalId);
-  }, [signalTypingRunId, extractedSignal]);
-
-  React.useEffect(() => {
-    if (scriptTypingRunId === 0 || scriptPack) {
-      return;
-    }
-
-    setTypedScriptExplainer('');
-    setTypedScriptPreview('');
-
-    const targetDurationMs = SCRIPT_TYPEWRITER_DURATION_MS;
-    const tickMs = 60;
-    const totalChars = SCRIPT_EXPLAINER_TEXT.length + SCRIPT_JSON_PREVIEW.length;
-    const totalTicks = Math.max(1, Math.ceil(targetDurationMs / tickMs));
-    const charsPerTick = totalChars / totalTicks;
-    let cursor = 0;
-
-    const intervalId = window.setInterval(() => {
-      cursor = Math.min(totalChars, cursor + charsPerTick);
-      const shownChars = Math.floor(cursor);
-      const explainerChars = Math.min(shownChars, SCRIPT_EXPLAINER_TEXT.length);
-      const previewChars = Math.max(0, shownChars - SCRIPT_EXPLAINER_TEXT.length);
-      setTypedScriptExplainer(SCRIPT_EXPLAINER_TEXT.slice(0, explainerChars));
-      setTypedScriptPreview(SCRIPT_JSON_PREVIEW.slice(0, previewChars));
-
-      if (cursor >= totalChars) {
-        window.clearInterval(intervalId);
-      }
-    }, tickMs);
-
-    return () => window.clearInterval(intervalId);
-  }, [scriptTypingRunId, scriptPack]);
-
-  React.useEffect(() => {
-    const streamOutputReady = Object.values(scenes).some((scene) => (
-      scene.text.trim().length > 0
-      || Boolean(scene.imageUrl)
-      || Boolean(scene.audioUrl)
-      || (scene.source_media?.length ?? 0) > 0
-      || scene.status === 'ready'
-      || scene.status === 'qa-failed'
-    ));
-    if (streamTypingRunId === 0 || streamOutputReady) {
-      return;
-    }
-
-    setTypedStreamExplainer('');
-    setTypedStreamPreview('');
-
-    const targetDurationMs = STREAM_TYPEWRITER_DURATION_MS;
-    const tickMs = 60;
-    const totalChars = STREAM_EXPLAINER_TEXT.length + STREAM_JSON_PREVIEW.length;
-    const totalTicks = Math.max(1, Math.ceil(targetDurationMs / tickMs));
-    const charsPerTick = totalChars / totalTicks;
-    let cursor = 0;
-
-    const intervalId = window.setInterval(() => {
-      cursor = Math.min(totalChars, cursor + charsPerTick);
-      const shownChars = Math.floor(cursor);
-      const explainerChars = Math.min(shownChars, STREAM_EXPLAINER_TEXT.length);
-      const previewChars = Math.max(0, shownChars - STREAM_EXPLAINER_TEXT.length);
-      setTypedStreamExplainer(STREAM_EXPLAINER_TEXT.slice(0, explainerChars));
-      setTypedStreamPreview(STREAM_JSON_PREVIEW.slice(0, previewChars));
-
-      if (cursor >= totalChars) {
-        window.clearInterval(intervalId);
-      }
-    }, tickMs);
-
-    return () => window.clearInterval(intervalId);
-  }, [streamTypingRunId, scenes]);
-
-  React.useEffect(() => {
-    if (!extractedSignal) return;
-    setTypedExplainer('');
-    setTypedPreview('');
-    setSignalTypewriterArmed(false);
-  }, [extractedSignal]);
-
-  React.useEffect(() => {
-    if (!scriptPack) return;
-    setTypedScriptExplainer('');
-    setTypedScriptPreview('');
-    setScriptTypewriterArmed(false);
-  }, [scriptPack]);
-
-  React.useEffect(() => {
-    const streamOutputReady = Object.values(scenes).some((scene) => (
-      scene.text.trim().length > 0
-      || Boolean(scene.imageUrl)
-      || Boolean(scene.audioUrl)
-      || (scene.source_media?.length ?? 0) > 0
-      || scene.status === 'ready'
-      || scene.status === 'qa-failed'
-    ));
-    if (!streamOutputReady) return;
-    setTypedStreamExplainer('');
-    setTypedStreamPreview('');
-    setStreamTypewriterArmed(false);
-  }, [scenes]);
-
   const openActionDialog = (stage: ActionDialogStage) => {
     setActionDialogStage(stage);
     setShowAmendHelp(false);
@@ -809,7 +609,7 @@ export default function AdvancedStudio() {
         return false;
       }
       setActivePanel(extractedSignal ? 'signal' : 'profile');
-      await runExtraction({ armSignalPreview: Boolean(extractedSignal) });
+      await runExtraction();
       return true;
     }
 
@@ -822,7 +622,6 @@ export default function AdvancedStudio() {
         return false;
       }
       setActivePanel('signal');
-      startSignalPreviewRun();
       await applyProfileToWorkflow();
       return true;
     }
@@ -895,7 +694,6 @@ export default function AdvancedStudio() {
       'Wait for the current scene override to finish before applying the render profile.',
     )) return;
     setActivePanel('signal');
-    startSignalPreviewRun();
     pushAgentNote('info', 'Render Profile', 'Render profile ready. Waiting for lock confirmation.');
     openActionDialog('profile');
   };
@@ -909,7 +707,7 @@ export default function AdvancedStudio() {
     )) return;
     resetBundleImageMode();
     setActivePanel('signal');
-    void runExtraction({ armSignalPreview: true });
+    void runExtraction();
   };
 
   const handleRegenerateScript = () => {
@@ -1216,17 +1014,6 @@ export default function AdvancedStudio() {
     || scene.status === 'ready'
     || scene.status === 'qa-failed'
   ));
-  const showSignalTypingPreview = signalTypewriterArmed
-    && signalStage !== 'error'
-    && !extractedSignal;
-  const scriptPreviewFailed = scriptTypewriterArmed && !isGeneratingScriptPack && !scriptPack && generationError.trim().length > 0;
-  const showScriptTypingPreview = scriptTypewriterArmed
-    && !scriptPreviewFailed
-    && !scriptPack;
-  const streamPreviewFailed = streamTypewriterArmed && !isGenerating && !streamOutputReady && generationError.trim().length > 0;
-  const showStreamTypingPreview = streamTypewriterArmed
-    && !streamPreviewFailed
-    && !streamOutputReady;
   const signalProgressItems = buildAdvancedSignalProgressItems({
     workflowId,
     workflowSnapshot,

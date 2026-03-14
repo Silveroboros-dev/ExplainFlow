@@ -59,7 +59,7 @@ export default function Home() {
   };
 
   return (
-    <div className="relative isolate min-h-screen overflow-x-clip bg-[#05070f] text-slate-100 selection:bg-cyan-300/30">
+    <div className="landing-home-shell relative isolate min-h-screen overflow-x-clip text-slate-100 selection:bg-cyan-300/30">
       <div className="landing-bg landing-bg-home pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden>
         <div className="landing-aurora" />
         <div className="landing-grid" />
@@ -140,7 +140,12 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="mx-auto mb-24 grid max-w-5xl gap-8 md:grid-cols-2">
+        <div className="relative mx-auto mb-24 max-w-5xl">
+          <div
+            className="pointer-events-none absolute inset-x-12 -inset-y-8 rounded-[40px] bg-[radial-gradient(circle_at_center,_rgba(56,189,248,0.12),_transparent_48%),radial-gradient(circle_at_70%_35%,_rgba(99,102,241,0.12),_transparent_42%),linear-gradient(180deg,rgba(15,23,42,0.18),rgba(15,23,42,0.04))] blur-2xl"
+            aria-hidden
+          />
+          <div className="relative grid gap-8 md:grid-cols-2">
           <Link href="/quick" className="group">
             <Card className="h-full border border-slate-300/20 bg-slate-900/65 shadow-[0_24px_60px_rgba(15,23,42,0.28)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1.5 hover:shadow-[0_28px_80px_rgba(6,182,212,0.22)]">
               <CardHeader>
@@ -176,6 +181,7 @@ export default function Home() {
               </CardContent>
             </Card>
           </Link>
+          </div>
         </div>
 
         <div className="mx-auto grid max-w-4xl grid-cols-2 gap-8 border-t border-slate-500/30 pt-16 text-center md:grid-cols-4">

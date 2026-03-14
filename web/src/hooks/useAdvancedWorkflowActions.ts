@@ -77,11 +77,6 @@ type UseAdvancedWorkflowActionsOptions = {
   setScriptPackStage: React.Dispatch<React.SetStateAction<ScriptPackStage>>;
   setScriptPackProgress: React.Dispatch<React.SetStateAction<number>>;
   clearGeneratedOutputs: () => void;
-  startSignalPreviewRun: () => void;
-  resetSignalPreviewRun: () => void;
-  startScriptPreviewRun: () => void;
-  resetScriptPreviewRun: () => void;
-  resetStreamPreviewRun: () => void;
   updateWorkflowSnapshot: (snapshot: unknown) => void;
   syncWorkflowUiFromSnapshot: (snapshot: WorkflowSnapshot) => void;
   recoverWorkflowState: (
@@ -133,11 +128,6 @@ export default function useAdvancedWorkflowActions({
   setScriptPackStage,
   setScriptPackProgress,
   clearGeneratedOutputs,
-  startSignalPreviewRun,
-  resetSignalPreviewRun,
-  startScriptPreviewRun,
-  resetScriptPreviewRun,
-  resetStreamPreviewRun,
   updateWorkflowSnapshot,
   syncWorkflowUiFromSnapshot,
   recoverWorkflowState,
@@ -193,11 +183,10 @@ export default function useAdvancedWorkflowActions({
     };
   };
 
-  const runExtraction = async (options: { armSignalPreview?: boolean } = {}) => {
+  const runExtraction = async () => {
     if (!hasSourceInput) {
       return false;
     }
-    const { armSignalPreview = false } = options;
     const sourceManifest = buildAdvancedSourceManifest(uploadedSourceAssets);
     const canReuseWorkflow = Boolean(
       workflowId
@@ -213,13 +202,6 @@ export default function useAdvancedWorkflowActions({
     setError("");
     setGenerationError("");
     setExtractedSignal(null);
-    if (armSignalPreview) {
-      startSignalPreviewRun();
-    } else {
-      resetSignalPreviewRun();
-    }
-    resetScriptPreviewRun();
-    resetStreamPreviewRun();
     setGenerationStatus("");
     clearGeneratedOutputs();
     let stopSnapshotPolling: (() => void) | null = null;
@@ -421,7 +403,6 @@ export default function useAdvancedWorkflowActions({
         ? "Generating script pack for review."
         : "Generating script pack for immediate streaming.",
     );
-    startScriptPreviewRun();
     setScriptPack(null);
     setExpectedSceneCount(0);
     let stopSnapshotPolling: (() => void) | null = null;

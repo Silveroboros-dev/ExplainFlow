@@ -49,7 +49,6 @@ type UseAdvancedGenerationStreamOptions = {
   setScenes: React.Dispatch<React.SetStateAction<Record<string, SceneViewModel>>>;
   setScriptPack: React.Dispatch<React.SetStateAction<ScriptPackPayload | null>>;
   fullTextBufferRef: React.MutableRefObject<Record<string, string>>;
-  startStreamPreviewRun: () => void;
   fetchWorkflowSnapshot: (workflowIdValue: string) => Promise<WorkflowSnapshot>;
   handleUnknownWorkflowError: (
     error: unknown,
@@ -78,7 +77,6 @@ export default function useAdvancedGenerationStream({
   setScenes,
   setScriptPack,
   fullTextBufferRef,
-  startStreamPreviewRun,
   fetchWorkflowSnapshot,
   handleUnknownWorkflowError,
   pushAgentNote,
@@ -279,7 +277,6 @@ export default function useAdvancedGenerationStream({
     setIsGenerating(true);
     setGenerationError("");
     setGenerationStatus(preparationMessage);
-    startStreamPreviewRun();
     setExpectedSceneCount(deriveSceneCount(scriptPackOverride ?? scriptPack ?? null));
     if (!preserveExistingScenes) {
       setScenes({});

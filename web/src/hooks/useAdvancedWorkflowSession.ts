@@ -56,9 +56,6 @@ type UseAdvancedWorkflowSessionOptions = {
   setExpectedSceneCount: React.Dispatch<React.SetStateAction<number>>;
   setEvidenceViewer: React.Dispatch<React.SetStateAction<EvidenceViewerState | null>>;
   fullTextBufferRef: React.MutableRefObject<Record<string, string>>;
-  resetSignalPreviewRun: () => void;
-  resetScriptPreviewRun: () => void;
-  resetStreamPreviewRun: () => void;
   pushAgentNote: PushAgentNote;
   storageKey?: string;
 };
@@ -88,9 +85,6 @@ export default function useAdvancedWorkflowSession({
   setExpectedSceneCount,
   setEvidenceViewer,
   fullTextBufferRef,
-  resetSignalPreviewRun,
-  resetScriptPreviewRun,
-  resetStreamPreviewRun,
   pushAgentNote,
   storageKey = ADVANCED_WORKFLOW_STORAGE_KEY,
 }: UseAdvancedWorkflowSessionOptions) {
@@ -138,9 +132,6 @@ export default function useAdvancedWorkflowSession({
     setShowAmendHelp(false);
     setActivePanel("source");
     fullTextBufferRef.current = {};
-    resetSignalPreviewRun();
-    resetScriptPreviewRun();
-    resetStreamPreviewRun();
     if (!silent) {
       pushAgentNote("error", noteStage, noteMessage);
     }

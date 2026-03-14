@@ -377,6 +377,31 @@ export default function QuickGenerate() {
     || artifactDraft.blocks.some((block) => !block.image_url?.trim())
   );
 
+  const artifactVisualsRequireReelRefresh = (
+    previousArtifact: QuickArtifact,
+    nextArtifact: QuickArtifact,
+  ) => {
+    if (!previousArtifact.reel?.segments?.length) {
+      return false;
+    }
+
+    const reelImageByBlockId = new Map(
+      previousArtifact.reel.segments.map((segment) => [
+        segment.block_id,
+        segment.fallback_image_url?.trim() || '',
+      ]),
+    );
+
+    return nextArtifact.blocks.some((block) => {
+      const nextImageUrl = block.image_url?.trim() || '';
+      if (!nextImageUrl) {
+        return false;
+      }
+      const reelImageUrl = reelImageByBlockId.get(block.block_id) || '';
+      return reelImageUrl !== nextImageUrl;
+    });
+  };
+
   const invalidateQuickArtifactHydration = () => {
     artifactVisualPassRef.current += 1;
     setIsHydratingArtifactVisuals(false);
@@ -443,11 +468,24 @@ export default function QuickGenerate() {
         reel: currentArtifact.reel ?? hydratedArtifact.reel,
         video: currentArtifact.video ?? hydratedArtifact.video,
       };
+      const shouldRefreshReel = artifactVisualsRequireReelRefresh(currentArtifact, mergedArtifact);
+      if (shouldRefreshReel) {
+        mergedArtifact.video = null;
+      }
       artifactRef.current = mergedArtifact;
       setArtifact(mergedArtifact);
       setGenerationStatus((prev) => (prev === pendingStatus ? completeStatus : prev));
       pushAgentNote("checkpoint", "Visuals", "Quick artifact visuals finished rendering.");
-      if (activeQuickViewRef.current === 'reel') {
+      if (shouldRefreshReel) {
+        void ensureQuickReel(
+          {
+            ...mergedArtifact,
+            reel: null,
+            video: null,
+          },
+          { forceRefresh: true, silent: true },
+        );
+      } else if (activeQuickViewRef.current === 'reel') {
         void ensureQuickReel(mergedArtifact);
       }
       return mergedArtifact;
@@ -465,19 +503,25 @@ export default function QuickGenerate() {
     }
   };
 
-  const ensureQuickReel = async (artifactDraft?: QuickArtifact | null) => {
+  const ensureQuickReel = async (
+    artifactDraft?: QuickArtifact | null,
+    options: { forceRefresh?: boolean; silent?: boolean } = {},
+  ) => {
+    const { forceRefresh = false, silent = false } = options;
     const baseArtifact = artifactDraft ?? artifact;
     if (!baseArtifact) {
       return null;
     }
-    if (baseArtifact.reel) {
+    if (baseArtifact.reel && !forceRefresh) {
       return baseArtifact;
     }
 
     setIsBuildingReel(true);
     setReelError('');
-    setGenerationStatus('Building proof reel...');
-    pushAgentNote("info", "Reel", "Deriving Proof Reel segments from the current Quick artifact.");
+    if (!silent) {
+      setGenerationStatus('Building proof reel...');
+      pushAgentNote("info", "Reel", "Deriving Proof Reel segments from the current Quick artifact.");
+    }
 
     try {
       const response = await fetch(`${API_BASE}/api/generate-quick-reel`, {
@@ -496,14 +540,18 @@ export default function QuickGenerate() {
 
       const nextArtifact = data.artifact as QuickArtifact;
       setArtifact(nextArtifact);
-      setGenerationStatus('Proof reel ready.');
-      pushAgentNote("checkpoint", "Reel", "Proof Reel ready. Each Quick block now maps to an ordered segment.");
+      if (!silent) {
+        setGenerationStatus('Proof reel ready.');
+        pushAgentNote("checkpoint", "Reel", "Proof Reel ready. Each Quick block now maps to an ordered segment.");
+      }
       return nextArtifact;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Proof reel generation failed.';
       setReelError(message);
-      setGenerationStatus('');
-      pushAgentNote("error", "Reel", message);
+      if (!silent) {
+        setGenerationStatus('');
+        pushAgentNote("error", "Reel", message);
+      }
       return null;
     } finally {
       setIsBuildingReel(false);

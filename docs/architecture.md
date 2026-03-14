@@ -539,37 +539,79 @@ For image/PDF proof regions, the backend can emit a cropped proof asset instead 
 ### Frontend
 
 - `web/src/app/advanced/page.tsx`
-  Advanced Studio workflow UI, SSE client, planner QA notes, and proof viewer dialog.
+  Advanced Studio composition root that wires the staged workflow, assistant surface, scene review, and export UI.
+- `web/src/hooks/useAdvancedWorkflowActions.ts`
+  Workflow mutations for extraction, profile locking, script-pack generation, and stage recovery.
+- `web/src/hooks/useAdvancedGenerationStream.ts`
+  Advanced SSE stream orchestration, scene updates, QA events, and final-bundle state.
+- `web/src/hooks/useAdvancedWorkflowSession.ts`
+  Workflow snapshot recovery, checkpoint hydration, and persisted session reload.
+- `web/src/components/AdvancedSourcePanel.tsx`
+  Source ingestion, uploaded-asset controls, and extraction CTA/footer layout.
+- `web/src/components/AdvancedRenderProfilePanel.tsx`
+  Artifact, audience, style, and constraints controls for render-profile locking.
+- `web/src/components/AdvancedContentSignalPanel.tsx`
+  Signal review and confirmation surface with progress summaries.
+- `web/src/components/AdvancedScriptPackPanel.tsx`
+  Planner QA summary, script-pack review, and script-stage progress panel.
+- `web/src/components/AdvancedGenerationStreamPanel.tsx`
+  Stream launch, live scene progress, and generation-stage reporting.
 - `web/src/components/SceneCard.tsx`
   Per-scene card with claim badges, regeneration controls, and source-proof entry points.
 - `web/src/components/FinalBundle.tsx`
-  Final bundle review and zip export.
+  Final bundle review, Advanced MP4 export, and upscale controls.
+- `web/src/app/quick/page.tsx`
+  Quick workflow composition root for artifact, reel, playlist, and MP4 delivery.
+- `web/src/components/QuickSourceForm.tsx`
+  Quick source/topic intake, transcript expectations, and local-video warnings.
+- `web/src/components/QuickReelView.tsx`
+  Proof Reel review and segment playback controls.
 
 ### Backend
 
 - `api/app/routes/generate_stream.py`
-  Extraction, advanced script-pack generation, advanced streaming, and scene regeneration routes.
+  Direct generation routes for legacy SSE, Quick artifact/reel/video flows, Quick source indexing, and non-workflow Advanced entry points.
 - `api/app/routes/workflow.py`
-  Checkpointed workflow orchestration routes and workflow agent chat.
+  Checkpointed workflow orchestration routes, workflow-backed stream launch, scene regeneration, and workflow agent chat.
 - `api/app/routes/assets.py`
-  Source-asset upload, final-bundle export, and high-fidelity image upscaling endpoints.
+  Source-asset upload, final-bundle export/video/download, quick-video download, and high-fidelity image upscaling endpoints.
 - `api/app/routes/sessions.py`
   Final bundle retrieval by `run_id`.
 
 ### Services
 
 - `api/app/services/gemini_story_agent.py`
-  Signal extraction, Gemini Files upload for multimodal extraction, artifact-aware planning, planner QA, scene generation, and SSE emission.
+  Top-level orchestration shell for extraction, planning, advanced streaming, Quick entrypoints, and regeneration paths.
 - `api/app/services/agent_coordinator.py`
   Workflow state machine, checkpoint invalidation rules, and request reconstruction.
+- `api/app/services/story_agent_source_media.py`
+  Source-media resolution, proof-link enrichment, and scene/source evidence attachment.
+- `api/app/services/story_agent_planner.py`
+  Planner QA evaluation, deterministic repair, and constrained replan helpers.
+- `api/app/services/story_agent_scene_generation.py`
+  Scene prompt assembly, continuity hints, and proof-grounded scene-generation helpers.
+- `api/app/services/story_agent_quick_workflows.py`
+  Quick artifact, reel, MP4, and override orchestration.
+- `api/app/services/story_agent_extraction_runtime.py`
+  Extraction runtime helpers for normalized text recovery and multimodal recovery paths.
+- `api/app/services/story_agent_advanced_stream.py`
+  Advanced buffered scene preparation, continuity memory, and scene coordination helpers.
+- `api/app/services/story_agent_advanced_qa.py`
+  Advanced buffered-scene QA / retry loop.
+- `api/app/services/story_agent_advanced_first_scene.py`
+  Advanced first-scene live retry/QA wrapper.
 - `api/app/services/interleaved_parser.py`
   Scene QA and incremental text parsing.
 - `api/app/services/image_pipeline.py`
   Asset saving, thumbnail composition, proof-region cropping, and upscale helpers.
+- `api/app/services/video_pipeline.py`
+  Quick and Advanced MP4 composition from already generated assets.
 - `api/app/services/final_bundle_export.py`
   Zip assembly for final bundle export.
 - `api/app/services/source_ingest.py`
   Local source-asset ingest and manifest construction for uploaded image/audio/PDF files.
+- `api/app/services/workflow_chat_agent.py`
+  Checkpoint-aware chat agent for workflow explanation, safe action dispatch, and recovery guidance.
 
 ### Schemas
 
@@ -580,31 +622,57 @@ For image/PDF proof regions, the backend can emit a cropped proof asset instead 
 
 ## API Surface
 
-### Core Generation
+### Direct / Legacy Generation
 
-- `POST /extract-signal`
-- `GET /generate-stream`
-- `POST /generate-stream-advanced`
-- `POST /generate-script-pack-advanced`
-- `POST /regenerate-scene`
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `POST` | `/extract-signal` | Direct signal extraction without workflow checkpoints. |
+| `GET` | `/generate-stream` | Legacy Quick SSE route kept for compatibility. |
+| `POST` | `/generate-stream-advanced` | Direct Advanced stream entrypoint without workflow checkpoint state. |
+| `POST` | `/generate-script-pack-advanced` | Direct Advanced script-pack generation without workflow checkpoint state. |
+| `POST` | `/regenerate-scene` | Legacy standalone scene regeneration route. |
+
+### Quick
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `POST` | `/quick-source-index/start` | Start transcript/source indexing for Quick source-backed runs. |
+| `GET` | `/quick-source-index/{job_id}` | Poll Quick source-index job status. |
+| `POST` | `/generate-quick-artifact` | Generate Quick artifact. |
+| `POST` | `/hydrate-quick-artifact-visuals` | Fill hero and block visuals for an existing Quick artifact. |
+| `POST` | `/generate-quick-reel` | Derive Proof Reel from Quick artifact blocks. |
+| `POST` | `/generate-quick-video` | Render Quick MP4 from Proof Reel / artifact state. |
+| `POST` | `/regenerate-quick-block` | Regenerate one Quick block in place. |
+| `POST` | `/regenerate-quick-artifact` | Regenerate a wider Quick artifact slice or whole artifact. |
 
 ### Workflow
 
-- `POST /workflow/start`
-- `POST /workflow/{workflow_id}/extract-signal`
-- `GET /workflow/{workflow_id}`
-- `POST /workflow/{workflow_id}/lock-artifacts`
-- `POST /workflow/{workflow_id}/lock-render`
-- `POST /workflow/{workflow_id}/generate-script-pack`
-- `POST /workflow/{workflow_id}/generate-stream`
-- `POST /workflow/agent/chat`
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `POST` | `/workflow/start` | Create workflow state and initial checkpoint envelope. |
+| `POST` | `/workflow/{workflow_id}/extract-signal` | Run signal extraction into workflow state and mark `CP1`. |
+| `GET` | `/workflow/{workflow_id}` | Retrieve workflow snapshot and checkpoint state. |
+| `GET` | `/workflow/{workflow_id}/content-signal` | Retrieve the locked/extracted content signal. |
+| `GET` | `/workflow/{workflow_id}/script-pack` | Retrieve the locked script pack. |
+| `POST` | `/workflow/{workflow_id}/lock-artifacts` | Lock artifact scope into workflow state. |
+| `POST` | `/workflow/{workflow_id}/lock-render` | Lock render profile into workflow state. |
+| `POST` | `/workflow/{workflow_id}/apply-profile` | Lock artifacts and render profile together in one request. |
+| `POST` | `/workflow/{workflow_id}/generate-script-pack` | Build script pack from locked workflow state and mark `CP4`. |
+| `POST` | `/workflow/{workflow_id}/generate-stream` | Build Advanced stream request from locked workflow state and emit SSE events. |
+| `POST` | `/workflow/{workflow_id}/regenerate-scene` | Regenerate one Advanced scene using locked workflow context. |
+| `POST` | `/workflow/agent/chat` | Chat with the workflow-aware assistant agent. |
 
-### Bundle / Assets
+### Assets / Export
 
-- `POST /source-assets/upload`
-- `GET /final-bundle/{run_id}`
-- `POST /final-bundle/export`
-- `POST /final-bundle/upscale`
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `POST` | `/source-assets/upload` | Upload source files and build `source_manifest` asset entries. |
+| `GET` | `/final-bundle/{run_id}` | Retrieve final-bundle status by run ID. |
+| `POST` | `/final-bundle/export` | Export current scenes as a ZIP bundle. |
+| `POST` | `/final-bundle/video` | Render Advanced MP4 from current final-bundle scenes. |
+| `GET` | `/final-bundle/video/download` | Attachment-style download for rendered Advanced MP4. |
+| `GET` | `/quick-video/download` | Attachment-style download for rendered Quick MP4. |
+| `POST` | `/final-bundle/upscale` | Upscale existing final-bundle scene images without regeneration. |
 
 ## Frontend Rendering Model
 

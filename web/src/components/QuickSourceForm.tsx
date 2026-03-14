@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { AlertTriangle, Clapperboard, Loader2, Mic, PlayCircle, Square, Upload } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, Clapperboard, Loader2, Mic, PlayCircle, Square, Upload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,8 +10,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   QUICK_AUDIENCE_TILES,
-  QUICK_PRIMARY_ACTION_CARD_CLASS,
-  QUICK_PRIMARY_ACTION_LABEL_CLASS,
   QUICK_TONE_PRESETS,
   QUICK_VISUAL_TILES,
   type UploadedQuickSourceAsset,
@@ -81,6 +79,20 @@ export default function QuickSourceForm({
   onRemoveYoutubeSource,
   onRemoveUploadedVideoAsset,
 }: QuickSourceFormProps) {
+  const hasSourceContext = Boolean(
+    sourceVideoUrl.trim()
+    || sourceTranscript.trim()
+    || uploadedVideoAsset
+    || youtubeSourceAsset,
+  );
+  const [isSourceSectionExpanded, setIsSourceSectionExpanded] = React.useState(hasSourceContext);
+
+  React.useEffect(() => {
+    if (hasSourceContext) {
+      setIsSourceSectionExpanded(true);
+    }
+  }, [hasSourceContext]);
+
   const showUploadedVideoWithoutTranscriptWarning = Boolean(
     uploadedVideoAsset
     && !sourceTranscript.trim(),
@@ -133,19 +145,31 @@ export default function QuickSourceForm({
             ) : null}
           </div>
 
-          <div className="space-y-4 md:col-span-2 rounded-[28px] border border-slate-200 bg-slate-50/90 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
+          <div className="space-y-4 md:col-span-2 rounded-[28px] border border-slate-200 bg-slate-50/90 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
             <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="flex items-start gap-3">
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-start gap-3 text-left"
+                onClick={() => setIsSourceSectionExpanded((prev) => !prev)}
+              >
                 <span className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-slate-700 shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
                   <Clapperboard className="h-5 w-5" />
                 </span>
-                <div className="space-y-1">
-                  <Label className="text-sm font-semibold text-slate-900">Source Video or YouTube URL (Optional)</Label>
+                <div className="min-w-0 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-sm font-semibold text-slate-900">Source Video or YouTube URL (Optional)</Label>
+                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      {hasSourceContext ? "Source attached" : "Prompt-only works"}
+                    </span>
+                  </div>
                   <p className="max-w-2xl text-sm leading-6 text-slate-600">
-                    Quick can index an uploaded clip or a YouTube URL, use transcript/captions as the truth layer, and reuse clip-backed proof inside the HTML artifact.
+                    Add a clip only when you want transcript-backed proof or source reels. Quick still runs well from the prompt alone.
                   </p>
                 </div>
-              </div>
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-500 shadow-[0_8px_20px_rgba(15,23,42,0.06)]">
+                  {isSourceSectionExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </span>
+              </button>
               <input
                 ref={sourceFileInputRef}
                 type="file"
@@ -169,6 +193,7 @@ export default function QuickSourceForm({
               </Button>
             </div>
 
+            {isSourceSectionExpanded ? (
             <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
               <div className="space-y-2">
                 <Label htmlFor="sourceVideoUrl">YouTube URL</Label>
@@ -300,6 +325,11 @@ export default function QuickSourceForm({
                 )}
               </div>
             </div>
+            ) : (
+              <div className="rounded-[20px] border border-dashed border-slate-200 bg-white/85 px-4 py-3 text-sm text-slate-600">
+                Add source only when you want proof-backed clips, transcript grounding, or source reels. Otherwise Quick will generate directly from the prompt.
+              </div>
+            )}
           </div>
 
           <div className="space-y-3 md:col-span-2">
@@ -313,17 +343,17 @@ export default function QuickSourceForm({
                     key={tile.value}
                     type="button"
                     onClick={() => onAudienceChange(tile.value)}
-                    className={`rounded-[24px] border p-4 text-left transition-all duration-200 ${
+                    className={`rounded-[24px] border p-3.5 text-left transition-all duration-200 ${
                       tile.baseClassName
                     } ${isSelected ? tile.selectedClassName : 'hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]'}`}
                   >
-                    <div className="mb-4 flex items-center gap-3">
+                    <div className="mb-3 flex items-center gap-3">
                       <span
-                        className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
+                        className={`inline-flex h-10 w-10 items-center justify-center rounded-2xl ${
                           isSelected ? tile.selectedIconClassName : tile.iconClassName
                         }`}
                       >
-                        <Icon className="h-5 w-5" />
+                        <Icon className="h-4.5 w-4.5" />
                       </span>
                       <div>
                         <p className="font-semibold">{tile.title}</p>
@@ -368,13 +398,13 @@ export default function QuickSourceForm({
                       tile.baseClassName
                     } ${isSelected ? tile.selectedClassName : 'hover:-translate-y-0.5 hover:shadow-[0_12px_24px_rgba(15,23,42,0.08)]'}`}
                   >
-                    <div className="mb-4 flex items-center gap-3">
+                    <div className="mb-3 flex items-center gap-3">
                       <span
-                        className={`inline-flex h-11 w-11 items-center justify-center rounded-2xl ${
+                        className={`inline-flex h-10 w-10 items-center justify-center rounded-2xl ${
                           isSelected ? tile.selectedIconClassName : tile.iconClassName
                         }`}
                       >
-                        <Icon className="h-5 w-5" />
+                        <Icon className="h-4.5 w-4.5" />
                       </span>
                       <div>
                         <p className="font-semibold">{tile.title}</p>
@@ -420,27 +450,42 @@ export default function QuickSourceForm({
             </div>
           </div>
 
-          <div className="md:col-span-2 pt-4">
-            <Button
-              type="submit"
-              className={QUICK_PRIMARY_ACTION_CARD_CLASS}
-              disabled={isGenerating || isUploadingSource}
-              size="lg"
-            >
-              <span className="flex w-full items-center justify-between gap-4">
-                <span className="space-y-1 text-left">
-                  <span className={QUICK_PRIMARY_ACTION_LABEL_CLASS}>
-                    Primary Action
+          <div className="md:col-span-2 pt-2">
+            <div className="rounded-[28px] border border-slate-200 bg-slate-50/85 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_14px_28px_rgba(15,23,42,0.06)]">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="space-y-1 px-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                    Ready to generate
+                  </p>
+                  <p className="text-sm text-slate-700">
+                    {audience === "Other" && customAudience.trim()
+                      ? `Custom audience • ${visualMode} mode`
+                      : `${audience} audience • ${visualMode} mode`}
+                    {tone.trim() ? ` • ${tone.trim()} tone` : ""}
+                  </p>
+                </div>
+                <Button
+                  type="submit"
+                  className="h-auto min-w-[280px] rounded-[22px] bg-slate-950 px-5 py-4 text-left text-white shadow-[0_18px_36px_rgba(15,23,42,0.18)] transition-transform hover:-translate-y-0.5 hover:bg-slate-900 disabled:opacity-100 disabled:bg-slate-300 disabled:text-slate-500 disabled:hover:translate-y-0 lg:ml-auto"
+                  disabled={isGenerating || isUploadingSource}
+                  size="lg"
+                >
+                  <span className="flex w-full items-center justify-between gap-4">
+                    <span className="space-y-1 text-left">
+                      <span className="block text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300 group-disabled:text-slate-600">
+                        Quick Artifact
+                      </span>
+                      <span className="block text-base font-semibold">
+                        {isGenerating ? "Generating..." : "Generate now"}
+                      </span>
+                    </span>
+                    {isGenerating ? (
+                      <Loader2 className="h-5 w-5 animate-spin text-slate-100" />
+                    ) : null}
                   </span>
-                  <span className="block text-base font-semibold">
-                    {isGenerating ? "Generating Quick Artifact..." : "Generate Quick Artifact"}
-                  </span>
-                </span>
-                {isGenerating ? (
-                  <Loader2 className="h-5 w-5 animate-spin text-slate-100" />
-                ) : null}
-              </span>
-            </Button>
+                </Button>
+              </div>
+            </div>
           </div>
 
           {(generationStatus || generationError || isGenerating) ? (

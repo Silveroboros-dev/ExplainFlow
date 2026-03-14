@@ -110,6 +110,11 @@
 }
 
 @layer components {
+  .landing-home-shell {
+    background:
+      radial-gradient(120% 90% at 50% 0%, rgba(18, 44, 78, 0.92) 0%, rgba(10, 18, 34, 0.94) 42%, rgba(7, 11, 21, 0.98) 78%, #05070f 100%);
+  }
+
   .high-contrast-form-labels label {
     color: rgb(2 6 23) !important;
     font-weight: 700;
@@ -123,6 +128,12 @@
     --landing-amber: rgba(249, 115, 22, 0.24);
   }
 
+  .landing-bg-home {
+    --landing-cyan: rgba(34, 211, 238, 0.56);
+    --landing-indigo: rgba(99, 102, 241, 0.48);
+    --landing-amber: rgba(249, 115, 22, 0.18);
+  }
+
   .landing-aurora {
     position: absolute;
     inset: -18%;
@@ -132,6 +143,11 @@
       radial-gradient(45% 45% at 52% 90%, var(--landing-amber), transparent 75%);
     filter: blur(34px) saturate(125%);
     animation: landingAuroraDrift 20s ease-in-out infinite alternate;
+  }
+
+  .landing-bg-home .landing-aurora {
+    filter: blur(28px) saturate(130%);
+    opacity: 0.9;
   }
 
   .landing-grid {
@@ -147,12 +163,20 @@
     animation: landingGridDrift 20s linear infinite;
   }
 
+  .landing-bg-home .landing-grid {
+    opacity: 0.24;
+  }
+
   .landing-noise {
     position: absolute;
     inset: 0;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140' viewBox='0 0 140 140'%3E%3Cg fill='%23dbeafe' fill-opacity='0.08'%3E%3Ccircle cx='8' cy='8' r='1'/%3E%3Ccircle cx='58' cy='22' r='1'/%3E%3Ccircle cx='122' cy='48' r='1'/%3E%3Ccircle cx='33' cy='93' r='1'/%3E%3Ccircle cx='95' cy='128' r='1'/%3E%3C/g%3E%3C/svg%3E");
     opacity: 0.15;
     mix-blend-mode: screen;
+  }
+
+  .landing-bg-home .landing-noise {
+    opacity: 0.1;
   }
 
   .landing-collage {
@@ -162,11 +186,19 @@
     opacity: 0.56;
   }
 
+  .landing-bg-home .landing-collage {
+    opacity: 0.48;
+  }
+
   .landing-collage::after {
     content: "";
     position: absolute;
     inset: 0;
     background: radial-gradient(68% 56% at 50% 44%, rgba(5, 7, 15, 0) 0%, rgba(5, 7, 15, 0.38) 70%, rgba(5, 7, 15, 0.6) 100%);
+  }
+
+  .landing-bg-home .landing-collage::after {
+    background: radial-gradient(72% 58% at 50% 42%, rgba(8, 12, 24, 0.02) 0%, rgba(8, 12, 24, 0.24) 66%, rgba(8, 12, 24, 0.44) 100%);
   }
 
   .collage-tile {
