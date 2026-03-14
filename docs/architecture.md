@@ -1,23 +1,15 @@
 # ExplainFlow Architecture
 
-`README.md` is the overview. This document is the detailed engineering view: the staged workflow, core contracts, reasoning layers, and runtime surfaces that make ExplainFlow work.
+`README.md` is the product overview. This document is the engineering reference: staged workflow, checkpoint contracts, model routing, agent coordination, and runtime surfaces.
 
-ExplainFlow is a workflow-driven artifact generation system. It turns a locked source signal into a script pack, streams scene generation with QA gates, and now supports a first multimodal traceability slice for audio timestamps and image/PDF proof regions.
+ExplainFlow is an agent-coordinated production studio. It extracts a grounded signal from source material, locks a script pack before generation, streams interleaved multimodal scenes with QA gates, and keeps proof linked to every claim in the output.
 
-The system is intentionally not a generic notebook. Its core differentiators are:
+The system exposes two product surfaces:
 
-- checkpointed director workflow
-- artifact-aware planning
-- claim-grounded traceability
-- scene-level repair and regeneration
-- proof-linked source media in the Advanced Studio
+- **Advanced Studio** — staged workflow with checkpoint control, planner review, proof-linked scene generation, and selective scene regeneration
+- **Quick** — single-pass artifact generation with derived Proof Reel and MP4 export
 
-ExplainFlow currently exposes two product surfaces:
-
-- **Advanced Studio**
-  - staged workflow, planner review, proof-linked scene generation
-- **Quick**
-  - lightweight artifact generation with derived Proof Reel and MP4 views
+For the full data lifecycle (source → signal → script pack → scenes → proof → export), see [`data-pipeline.md`](./data-pipeline.md).
 
 ## System Architecture
 
@@ -37,30 +29,37 @@ flowchart TD
         ROUTES["REST API + SSE Endpoints"]
         COORD["AgentCoordinator\nCP1 Signal → CP2 Artifacts → CP3 Render\n→ CP4 Script → CP5 Stream → CP6 Bundle"]
         STORY["GeminiStoryAgent\nExtraction · Planning · Scene Streaming"]
-        CHAT["Workflow Chat Agent\nCheckpoint-Aware Co-Direction"]
+        CHAT["WorkflowChatAgent\nCheckpoint-Aware Co-Direction"]
         QA["Planner QA + Scene QA\nSelf-Healing · Auto-Retry"]
     end
 
     subgraph GEMINI["Gemini Models — Google GenAI SDK"]
-        PRO["gemini-3.1-pro-preview\nSignal Extraction · Salience\nForward-Pull · Planner QA"]
-        IMG["gemini-3-pro-image-preview\nInterleaved Text + Image\nScene Generation"]
-        FLASH["gemini-3-flash-preview\nQuick Artifact Paths\nTranscript Normalization"]
+        PRO["gemini-3.1-pro-preview\nSignal Extraction (structural + creative)\nScript Pack Planning · Constrained Replans\nWorkflow Chat"]
+        LITE["gemini-3.1-flash-lite-preview\nTranscript Normalization\nPlanner Precompute (salience, forward-pull)\nQuick Artifact Generation"]
+        IMG["gemini-3-pro-image-preview\nInterleaved Text + Image\nScene Generation · Scene Regen\nQuick Image Generation"]
+        FLASH["gemini-3-flash-preview\nAsset-Backed Source Recovery"]
     end
 
-    GCS[("Google Cloud Storage\nScene Images · Audio · Video\nSource Assets · Proof Media\nFinal Bundles")]
+    GCS[("Google Cloud Storage\nSource Assets · Scene Media\nProof Media · Final Outputs")]
+    LOCAL[("Local Static Assets\nAudio · Video · Bundles")]
 
     QUICK & ADVANCED --> UI
     UI -->|"REST"| ROUTES
     ROUTES --> COORD
+    ROUTES --> CHAT
+    CHAT --> COORD
+    CHAT --> STORY
     COORD --> STORY
-    COORD --> CHAT
     STORY --> QA
     QA -->|"Auto-Retry on QA Fail"| STORY
-    STORY -->|"Google GenAI SDK"| PRO
-    STORY -->|"Google GenAI SDK"| IMG
-    STORY -->|"Google GenAI SDK"| FLASH
-    STORY -->|"Asset Storage"| GCS
-    ROUTES -->|"SSE Event Stream\nscene_start · story_text_delta\ndiagram_ready · audio_ready\nqa_status · source_media_ready"| SSE_CLIENT
+    STORY --> PRO
+    STORY --> LITE
+    STORY --> IMG
+    STORY --> FLASH
+    CHAT -->|"GenAI SDK"| PRO
+    STORY -->|"Images + Source"| GCS
+    STORY -->|"Audio + Video"| LOCAL
+    ROUTES -->|"SSE Stream"| SSE_CLIENT
     SSE_CLIENT --> UI
 
     style USER fill:#f8fafc,stroke:#94a3b8,color:#1e293b
@@ -68,6 +67,7 @@ flowchart TD
     style BACKEND fill:#fef3c7,stroke:#f59e0b,color:#1e293b
     style GEMINI fill:#fce7f3,stroke:#ec4899,color:#1e293b
     style GCS fill:#d1fae5,stroke:#10b981,color:#1e293b
+    style LOCAL fill:#e2e8f0,stroke:#64748b,color:#1e293b
 ```
 
 ## Reading Guide
@@ -436,38 +436,28 @@ The derived layers currently behave like this:
 
 Quick intentionally avoids the full checkpointed workflow unless a future product version justifies that extra complexity.
 
-## Workflow Chat Agent: Co-Director, Not Sidebar Chat
+## Workflow Chat Agent
 
-ExplainFlow includes a workflow chat agent because the staged system is powerful but easy to misuse without state awareness.
+ExplainFlow's staged workflow has six checkpoints, multiple locking stages, and conditional gates. The chat agent exists so users never have to track that state themselves.
 
-The chat agent has two jobs:
+It does two things:
 
-1. explain the process
-- what stage the workflow is in
-- what each checkpoint means
-- why the user is blocked or what is ready next
+**Explains the workflow in context.**
+It knows which checkpoint the workflow is at, what each stage means, and what is ready or blocked. Ask "What should I do next?" and it reads the checkpoint state and gives you the specific next action — not a generic tooltip.
 
-2. take safe state-aware actions
-- start extraction
-- confirm or lock the right stage
-- generate a script pack
-- launch stream generation
-- recover the user to the correct checkpoint after interruption
+**Proposes safe, state-aware actions.**
+It can propose extraction, profile lock, script-pack generation, or stream launch, and stage those actions behind explicit confirmation. If prerequisites are missing, it tells you exactly which checkpoints are blocked and why.
 
-This matters because a linear pipeline would force the user to remember hidden state.
-The workflow agent makes that state legible and actionable.
-
-Architecturally, this means the agent is not a toy conversational layer bolted on top of generation.
-It is a checkpoint-aware controller with tool access, constrained actions, and workflow context.
-
-That is also why ExplainFlow can answer questions like:
+This means questions like:
 
 - "What is the difference between signal and script pack?"
 - "What should I do next?"
 - "Why do I need to confirm signal?"
 - "Can I continue from here without regenerating everything?"
 
-without collapsing the workflow back into a one-shot black box.
+get answered from live workflow state, not from a static help page.
+
+Architecturally, the chat agent is a checkpoint-aware workflow agent backed by Gemini 3.1 Pro. It receives the full checkpoint state, chooses from a constrained action set, and returns structured responses with UI directives — which panel to open, which action to surface, whether confirmation is needed. It is wired directly to the AgentCoordinator and GeminiStoryAgent, not layered on top of them.
 
 ## Scene Generation and QA
 
