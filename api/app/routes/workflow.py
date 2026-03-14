@@ -4,6 +4,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
+from app.config import limiter
+
 from app.routes.advanced_route_helpers import run_workflow_script_pack
 from app.schemas.requests import (
     SignalExtractionRequest,
@@ -31,7 +33,8 @@ def _handle_error(exc: Exception, status_code: int = 409) -> HTTPException:
 
 
 @router.post("/workflow/start")
-async def workflow_start(payload: WorkflowStartRequest):
+@limiter.limit("10/minute")
+async def workflow_start(request: Request, payload: WorkflowStartRequest):
     snapshot = await coordinator.start_workflow(
         payload.source_text,
         payload.source_manifest.model_dump() if payload.source_manifest is not None else None,
@@ -46,7 +49,8 @@ async def workflow_start(payload: WorkflowStartRequest):
 
 
 @router.post("/workflow/{workflow_id}/extract-signal")
-async def workflow_extract_signal(workflow_id: str, payload: WorkflowStartRequest):
+@limiter.limit("5/minute")
+async def workflow_extract_signal(request: Request, workflow_id: str, payload: WorkflowStartRequest):
     try:
         extraction_result = await agent.extract_signal(
             SignalExtractionRequest(
@@ -162,7 +166,8 @@ async def workflow_apply_profile(workflow_id: str, payload: WorkflowProfileApply
 
 
 @router.post("/workflow/{workflow_id}/generate-script-pack")
-async def workflow_generate_script_pack(workflow_id: str):
+@limiter.limit("5/minute")
+async def workflow_generate_script_pack(request: Request, workflow_id: str):
     try:
         script_request = await coordinator.build_script_pack_request(workflow_id)
         return await run_workflow_script_pack(
@@ -176,6 +181,7 @@ async def workflow_generate_script_pack(workflow_id: str):
 
 
 @router.post("/workflow/{workflow_id}/generate-stream")
+@limiter.limit("5/minute")
 async def workflow_generate_stream(workflow_id: str, request: Request):
     try:
         body = await request.json()
@@ -245,6 +251,7 @@ async def workflow_generate_stream(workflow_id: str, request: Request):
 
 
 @router.post("/workflow/{workflow_id}/regenerate-scene")
+@limiter.limit("5/minute")
 async def workflow_regenerate_scene(
     workflow_id: str,
     payload: WorkflowSceneRegenerateRequest,
@@ -266,7 +273,8 @@ async def workflow_regenerate_scene(
 
 
 @router.post("/workflow/agent/chat")
-async def workflow_agent_chat(payload: WorkflowAgentChatRequest):
+@limiter.limit("10/minute")
+async def workflow_agent_chat(request: Request, payload: WorkflowAgentChatRequest):
     try:
         response = await chat_agent.handle_chat_turn(payload)
         return response.model_dump()

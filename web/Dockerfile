@@ -2,9 +2,11 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Add build-time environment variable
+# Add build-time environment variables
 ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_RATE_LIMIT_BYPASS_KEY
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_RATE_LIMIT_BYPASS_KEY=$NEXT_PUBLIC_RATE_LIMIT_BYPASS_KEY
 
 COPY web/package*.json ./
 RUN npm install

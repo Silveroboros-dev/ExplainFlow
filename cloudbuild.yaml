@@ -30,9 +30,9 @@ steps:
       - '--set-env-vars'
       - 'EXPLAINFLOW_BUCKET=explainflow-assets-$PROJECT_ID'
       - '--set-secrets'
-      - 'GEMINI_API_KEY=explainflow-gemini-api-key:latest'
+      - 'GEMINI_API_KEY=explainflow-gemini-api-key:latest,RATE_LIMIT_BYPASS_KEY=explainflow-rate-limit-bypass-key:latest'
 
-  # 4. Fetch the deployed API URL to pass to the Web build
+  # 4. Fetch the deployed API URL and bypass key for the Web build
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'bash'
     args:
@@ -41,15 +41,18 @@ steps:
         API_URL=$(gcloud run services describe explainflow-api --region us-central1 --format 'value(status.url)')
         echo "Found API_URL: $$API_URL"
         echo "$$API_URL" > /workspace/api_url.txt
+        BYPASS_KEY=$(gcloud secrets versions access latest --secret=explainflow-rate-limit-bypass-key 2>/dev/null || echo "")
+        echo "$$BYPASS_KEY" > /workspace/bypass_key.txt
 
-  # 5. Build the Web image, dynamically injecting the API URL
+  # 5. Build the Web image, dynamically injecting the API URL and bypass key
   - name: 'gcr.io/cloud-builders/docker'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
         API_URL=$$(cat /workspace/api_url.txt)
-        docker build -t us-central1-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-web:latest -f web/Dockerfile --build-arg NEXT_PUBLIC_API_URL="$$API_URL" .
+        BYPASS_KEY=$$(cat /workspace/bypass_key.txt)
+        docker build -t us-central1-docker.pkg.dev/$PROJECT_ID/explainflow-repo/explainflow-web:latest -f web/Dockerfile --build-arg NEXT_PUBLIC_API_URL="$$API_URL" --build-arg NEXT_PUBLIC_RATE_LIMIT_BYPASS_KEY="$$BYPASS_KEY" .
 
   # 6. Push the Web image
   - name: 'gcr.io/cloud-builders/docker'

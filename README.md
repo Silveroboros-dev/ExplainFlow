@@ -282,8 +282,13 @@ For detailed sequence diagrams and workflow rationale, see:
 
 ---
 
-## Remaining TODO
+## Testing
 
-- [ ] **Credit Protection**: Gated access PIN for public demos.
+ExplainFlow is deployed and available for testing:
+
+- **Studio**: https://explainflow-web-nxgdm2zy3a-uc.a.run.app
+- **API**: https://explainflow-api-nxgdm2zy3a-uc.a.run.app
+
+No login or credentials required. Both Quick and Advanced Studio workflows are fully functional.
 
 Built for the **Gemini Live Agent Challenge**.

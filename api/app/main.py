@@ -3,12 +3,17 @@ load_dotenv()
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from app.config import limiter
 from app.routes import assets, generate_stream, sessions, workflow
 
 from fastapi.staticfiles import StaticFiles
 import os
 
 app = FastAPI(title="ExplainFlow API")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Ensure static directory exists
 os.makedirs("app/static/assets", exist_ok=True)

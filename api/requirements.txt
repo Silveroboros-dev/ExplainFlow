@@ -10,3 +10,4 @@ gTTS
 pypdf
 python-multipart
 moviepy
+slowapi

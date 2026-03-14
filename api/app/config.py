@@ -39,3 +39,27 @@ BUCKET_NAME = os.getenv("EXPLAINFLOW_BUCKET")
 def get_gemini_client() -> genai.Client:
     api_key = os.getenv("GEMINI_API_KEY")
     return genai.Client(api_key=api_key)
+
+
+# ---------------------------------------------------------------------------
+# Rate limiter (shared across route modules)
+# ---------------------------------------------------------------------------
+from uuid import uuid4
+from fastapi import Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+
+def _rate_limit_key(request: Request) -> str:
+    """Per-IP rate limiting with bypass header support.
+
+    Set RATE_LIMIT_BYPASS_KEY env var and send X-RateLimit-Bypass header
+    to skip rate limiting (e.g. during demos).
+    """
+    bypass = os.getenv("RATE_LIMIT_BYPASS_KEY", "")
+    if bypass and request.headers.get("X-RateLimit-Bypass") == bypass:
+        return f"exempt-{uuid4().hex}"
+    return get_remote_address(request)
+
+
+limiter = Limiter(key_func=_rate_limit_key)

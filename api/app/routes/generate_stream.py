@@ -5,6 +5,8 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
+from app.config import limiter
+
 from app.routes.advanced_route_helpers import (
     advanced_stream_request_from_body,
     service_response,
@@ -80,13 +82,15 @@ async def _run_quick_source_index_job(job_id: str, payload: QuickSourceIndexRequ
 
 
 @router.post("/extract-signal")
-async def extract_signal(payload: SignalExtractionRequest):
+@limiter.limit("5/minute")
+async def extract_signal(request: Request, payload: SignalExtractionRequest):
     result = await agent.extract_signal(payload)
     return service_response(result, error_fallback=500)
 
 
 @router.post("/quick-source-index/start")
-async def quick_source_index_start(payload: QuickSourceIndexRequest):
+@limiter.limit("5/minute")
+async def quick_source_index_start(request: Request, payload: QuickSourceIndexRequest):
     if not payload.source_text.strip() and not payload.normalized_source_text.strip() and payload.source_manifest is None:
         raise HTTPException(status_code=400, detail="Provide transcript text or upload at least one source asset before indexing.")
 
@@ -153,6 +157,7 @@ async def generate_stream_legacy_quick(
 
 
 @router.post("/generate-stream-advanced")
+@limiter.limit("5/minute")
 async def generate_stream_advanced(request: Request):
     body = await request.json()
     if not isinstance(body, dict):
@@ -169,6 +174,7 @@ async def generate_stream_advanced(request: Request):
 
 
 @router.post("/generate-script-pack-advanced")
+@limiter.limit("5/minute")
 async def generate_script_pack_advanced(request: Request):
     body = await request.json()
     if not isinstance(body, dict):
@@ -180,42 +186,49 @@ async def generate_script_pack_advanced(request: Request):
 
 
 @router.post("/generate-quick-artifact")
-async def generate_quick_artifact(payload: QuickArtifactRequest, request: Request):
+@limiter.limit("5/minute")
+async def generate_quick_artifact(request: Request, payload: QuickArtifactRequest):
     result = await agent.generate_quick_artifact(payload, request=request)
     return service_response(result, error_fallback=500)
 
 
 @router.post("/hydrate-quick-artifact-visuals")
-async def hydrate_quick_artifact_visuals(payload: QuickArtifactVisualsRequest, request: Request):
+@limiter.limit("5/minute")
+async def hydrate_quick_artifact_visuals(request: Request, payload: QuickArtifactVisualsRequest):
     result = await agent.hydrate_quick_artifact_visuals(payload, request=request)
     return service_response(result, error_fallback=500)
 
 
 @router.post("/generate-quick-reel")
-async def generate_quick_reel(payload: QuickReelRequest):
+@limiter.limit("5/minute")
+async def generate_quick_reel(request: Request, payload: QuickReelRequest):
     result = await agent.generate_quick_reel(payload)
     return service_response(result, error_fallback=500)
 
 
 @router.post("/generate-quick-video")
-async def generate_quick_video(payload: QuickVideoRequest, request: Request):
+@limiter.limit("5/minute")
+async def generate_quick_video(request: Request, payload: QuickVideoRequest):
     result = await agent.generate_quick_video(payload, request=request)
     return service_response(result, error_fallback=500)
 
 
 @router.post("/regenerate-quick-block")
-async def regenerate_quick_block(payload: QuickBlockOverrideRequest, request: Request):
+@limiter.limit("5/minute")
+async def regenerate_quick_block(request: Request, payload: QuickBlockOverrideRequest):
     result = await agent.regenerate_quick_block(payload, request=request)
     return service_response(result, error_fallback=500)
 
 
 @router.post("/regenerate-quick-artifact")
-async def regenerate_quick_artifact(payload: QuickArtifactOverrideRequest, request: Request):
+@limiter.limit("5/minute")
+async def regenerate_quick_artifact(request: Request, payload: QuickArtifactOverrideRequest):
     result = await agent.regenerate_quick_artifact(payload, request=request)
     return service_response(result, error_fallback=500)
 
 
 @router.post("/regenerate-scene")
-async def regenerate_scene(payload: RegenerateSceneRequest, request: Request):
+@limiter.limit("5/minute")
+async def regenerate_scene(request: Request, payload: RegenerateSceneRequest):
     result = await agent.regenerate_scene(payload, request)
     return service_response(result, error_fallback=500)

@@ -30,6 +30,14 @@ import { Toaster, toast } from "sonner";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
+const apiHeaders = (extra?: Record<string, string>): Record<string, string> => {
+  const key = process.env.NEXT_PUBLIC_RATE_LIMIT_BYPASS_KEY;
+  return {
+    ...(key ? { "X-RateLimit-Bypass": key } : {}),
+    ...extra,
+  };
+};
+
 type BrowserSpeechResult = {
   transcript: string;
 };
@@ -437,7 +445,7 @@ export default function QuickGenerate() {
     try {
       const response = await fetch(`${API_BASE}/api/hydrate-quick-artifact-visuals`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           topic,
           audience: audience === 'Other' ? customAudience : audience,
@@ -526,7 +534,7 @@ export default function QuickGenerate() {
     try {
       const response = await fetch(`${API_BASE}/api/generate-quick-reel`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           artifact: baseArtifact,
           content_signal: indexedSignal ?? {},
@@ -748,7 +756,7 @@ export default function QuickGenerate() {
         pushAgentNote("info", "Source", indexingCopy?.startNote ?? 'Source indexing started.');
         const startIndexResponse = await fetch(`${API_BASE}/api/quick-source-index/start`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: apiHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({
             source_text: sourceTranscript,
             source_manifest: sourceManifest,
@@ -775,7 +783,7 @@ export default function QuickGenerate() {
 
       const response = await fetch(`${API_BASE}/api/generate-quick-artifact`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           topic,
           audience: audience === 'Other' ? customAudience : audience,
@@ -827,7 +835,7 @@ export default function QuickGenerate() {
     try {
       const response = await fetch(`${API_BASE}/api/regenerate-quick-block`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           topic,
           audience: audience === 'Other' ? customAudience : audience,
@@ -911,7 +919,7 @@ export default function QuickGenerate() {
     try {
       const response = await fetch(`${API_BASE}/api/regenerate-quick-artifact`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           topic,
           audience: audience === 'Other' ? customAudience : audience,
@@ -1177,7 +1185,7 @@ export default function QuickGenerate() {
     try {
       const response = await fetch(`${API_BASE}/api/generate-quick-video`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: apiHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           artifact: reelArtifact,
           content_signal: indexedSignal ?? {},

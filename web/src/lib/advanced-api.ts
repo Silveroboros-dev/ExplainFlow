@@ -112,8 +112,17 @@ export type AdvancedWorkflowSceneRegenerateResponse = {
   message?: string;
 };
 
+const bypassHeaders = (): Record<string, string> => {
+  const key = process.env.NEXT_PUBLIC_RATE_LIMIT_BYPASS_KEY;
+  return key ? { "X-RateLimit-Bypass": key } : {};
+};
+
 const requestJson = async <T>(url: string, init?: RequestInit): Promise<JsonApiResult<T>> => {
-  const response = await fetch(url, init);
+  const merged = {
+    ...init,
+    headers: { ...bypassHeaders(), ...init?.headers },
+  };
+  const response = await fetch(url, merged);
   const data = await response.json().catch(() => ({} as T));
   return {
     ok: response.ok,
@@ -269,7 +278,7 @@ export const openAdvancedWorkflowStream = async (
 ): Promise<Response> => (
   fetch(`${apiBase}/api/workflow/${workflowId}/generate-stream`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { ...bypassHeaders(), "Content-Type": "application/json" },
     body: JSON.stringify({
       script_pack: scriptPack ?? undefined,
     }),
