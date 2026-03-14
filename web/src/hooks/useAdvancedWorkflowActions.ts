@@ -149,6 +149,50 @@ export default function useAdvancedWorkflowActions({
 }: UseAdvancedWorkflowActionsOptions) {
   const buildRenderProfilePayload = () => buildAdvancedRenderProfilePayload(renderProfileInput);
 
+  const startWorkflowSnapshotPolling = (
+    workflowIdValue: string,
+    shouldStop: (snapshot: WorkflowSnapshot) => boolean,
+    noteStage: "Signal" | "Script Pack",
+  ): (() => void) => {
+    let stopped = false;
+    let timeoutId: number | null = null;
+
+    const poll = async () => {
+      if (stopped) return;
+      try {
+        const snapshot = await fetchWorkflowSnapshot(workflowIdValue);
+        if (shouldStop(snapshot)) {
+          stopped = true;
+          return;
+        }
+      } catch (error) {
+        if (handleUnknownWorkflowError(error, { noteStage })) {
+          stopped = true;
+          return;
+        }
+        console.warn(`${noteStage} snapshot polling error:`, error);
+      }
+      if (!stopped && typeof window !== "undefined") {
+        timeoutId = window.setTimeout(() => {
+          void poll();
+        }, 4000);
+      }
+    };
+
+    if (typeof window !== "undefined") {
+      timeoutId = window.setTimeout(() => {
+        void poll();
+      }, 4000);
+    }
+
+    return () => {
+      stopped = true;
+      if (timeoutId !== null && typeof window !== "undefined") {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  };
+
   const runExtraction = async (options: { armSignalPreview?: boolean } = {}) => {
     if (!hasSourceInput) {
       return false;
@@ -178,6 +222,7 @@ export default function useAdvancedWorkflowActions({
     resetStreamPreviewRun();
     setGenerationStatus("");
     clearGeneratedOutputs();
+    let stopSnapshotPolling: (() => void) | null = null;
 
     try {
       if (!activeWorkflowId) {
@@ -201,6 +246,17 @@ export default function useAdvancedWorkflowActions({
         } else {
           setWorkflowSnapshot(null);
         }
+      }
+
+      if (activeWorkflowId) {
+        stopSnapshotPolling = startWorkflowSnapshotPolling(
+          activeWorkflowId,
+          (snapshot) => {
+            const status = snapshot.checkpoint_state?.CP1_SIGNAL_READY;
+            return status === "passed" || status === "failed";
+          },
+          "Signal",
+        );
       }
 
       const extractResult = await extractAdvancedWorkflowSignal(apiBase, activeWorkflowId, {
@@ -244,6 +300,7 @@ export default function useAdvancedWorkflowActions({
       setExtractProgress(0);
       return false;
     } finally {
+      stopSnapshotPolling?.();
       setIsExtracting(false);
     }
   };
@@ -367,8 +424,17 @@ export default function useAdvancedWorkflowActions({
     startScriptPreviewRun();
     setScriptPack(null);
     setExpectedSceneCount(0);
+    let stopSnapshotPolling: (() => void) | null = null;
 
     try {
+      stopSnapshotPolling = startWorkflowSnapshotPolling(
+        workflowId,
+        (snapshot) => {
+          const status = snapshot.checkpoint_state?.CP4_SCRIPT_LOCKED;
+          return status === "passed" || status === "failed";
+        },
+        "Script Pack",
+      );
       const scriptPackResult = await generateAdvancedWorkflowScriptPack(apiBase, workflowId);
       const data = scriptPackResult.data;
       if (data?.workflow) {
@@ -437,6 +503,7 @@ export default function useAdvancedWorkflowActions({
       pushAgentNote("error", "Script Pack", "Unable to generate script pack.");
       setGenerationStatus("");
     } finally {
+      stopSnapshotPolling?.();
       setIsGeneratingScriptPack(false);
     }
   };

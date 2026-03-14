@@ -718,8 +718,7 @@ export const buildAdvancedSignalProgressItems = ({
   const checkpointStatus = workflowSnapshot?.checkpoint_state?.CP1_SIGNAL_READY;
   const signalReady = hasSignal || checkpointStatus === "passed" || workflowSnapshot?.has_signal === true;
   const failed = signalStage === "error" || checkpointStatus === "failed";
-  const validationStarted = signalStage === "structuring" || extractProgress >= 45 || signalReady;
-  const confirmationStarted = signalStage === "structuring" || extractProgress >= 80 || signalReady;
+  const validationStarted = signalStage === "structuring" || extractProgress >= 58 || signalReady;
 
   return [
     {
@@ -741,20 +740,12 @@ export const buildAdvancedSignalProgressItems = ({
           : "Waiting for source text or uploaded assets.",
     },
     {
-      id: "validate",
-      label: "Schema validation",
+      id: "validate_confirm",
+      label: "Validation + confirmation prep",
       status: signalReady ? "done" : failed ? "error" : validationStarted ? "active" : "pending",
       detail: signalReady
-        ? "Signal is valid and ready for the next stage."
-        : "Verifies the signal before render-profile locking.",
-    },
-    {
-      id: "confirm",
-      label: "Signal ready for confirmation",
-      status: signalReady ? "done" : failed ? "error" : confirmationStarted ? "active" : "pending",
-      detail: signalReady
-        ? "Proceed to Content Signal and confirm it."
-        : "Preparing the validated signal for confirmation.",
+        ? "Signal is ready for review and confirmation."
+        : "Validates the signal and prepares it for confirmation.",
     },
   ];
 };
@@ -763,11 +754,13 @@ export const buildAdvancedScriptProgressItems = ({
   workflowSnapshot,
   isGeneratingScriptPack,
   scriptPackStage,
+  scriptPackProgress,
   scriptPack,
 }: {
   workflowSnapshot: WorkflowSnapshot | null;
   isGeneratingScriptPack: boolean;
   scriptPackStage: "idle" | "outlining" | "structuring" | "validating" | "ready" | "error";
+  scriptPackProgress: number;
   scriptPack: ScriptPackPayload | null;
 }): StageProgressItem[] => {
   const checkpoints = workflowSnapshot?.checkpoint_state ?? {};
@@ -776,7 +769,7 @@ export const buildAdvancedScriptProgressItems = ({
   const plannerSummary = workflowSnapshot?.planner_qa_summary?.summary;
   const plannerDraftComplete = locked || scriptPackStage === "validating" || scriptPackStage === "ready";
   const plannerQaStarted = plannerSummary || scriptPackStage === "validating" || scriptPackStage === "ready";
-  const lockStarted = locked || plannerQaStarted;
+  const lockStarted = locked || (scriptPackStage === "validating" && scriptPackProgress >= 92);
 
   return [
     {
@@ -836,10 +829,12 @@ export const buildAdvancedStreamProgressItems = ({
   generationError: string;
 }): StageProgressItem[] => {
   const checkpoints = workflowSnapshot?.checkpoint_state ?? {};
+  const streamComplete = checkpoints.CP5_STREAM_COMPLETE === "passed" || checkpoints.CP6_BUNDLE_FINALIZED === "passed";
   const bundleReady = checkpoints.CP6_BUNDLE_FINALIZED === "passed";
   const streamReady = workflowSnapshot?.ready_for_stream || checkpoints.CP5_STREAM_COMPLETE === "passed" || bundleReady;
   const failed = Boolean(generationError) || checkpoints.CP5_STREAM_COMPLETE === "failed" || checkpoints.CP6_BUNDLE_FINALIZED === "failed";
   const hasQaActivity = Object.values(scenes).some((scene) => Boolean(scene.qa_status) || (scene.auto_retry_count ?? 0) > 0);
+  const renderDone = totalSceneCount > 0 && completedSceneCount >= totalSceneCount;
 
   return [
     {
@@ -859,19 +854,31 @@ export const buildAdvancedStreamProgressItems = ({
     {
       id: "render",
       label: "Live scene rendering",
-      status: failed ? "error" : totalSceneCount > 0 && completedSceneCount >= totalSceneCount && totalSceneCount > 0 ? "done" : isGenerating ? "active" : "pending",
+      status: failed ? "error" : renderDone ? "done" : isGenerating ? "active" : "pending",
       detail: totalSceneCount > 0
         ? `${completedSceneCount}/${totalSceneCount} scenes completed.`
         : "Narration, visuals, proof links, and audio stream in scene by scene.",
     },
     {
-      id: "qa_bundle",
-      label: "QA and final bundle",
-      status: bundleReady ? "done" : failed ? "error" : (isGenerating || hasQaActivity) ? "active" : "pending",
-      detail: bundleReady
-        ? "Bundle finalized with traceability attached."
+      id: "qa",
+      label: "QA and retries",
+      status: failed ? "error" : streamComplete ? "done" : (isGenerating && (hasQaActivity || completedSceneCount > 0)) ? "active" : "pending",
+      detail: streamComplete
+        ? "Per-scene QA completed for the current run."
         : hasQaActivity
           ? "Per-scene QA is evaluating outputs and requesting retries when needed."
+          : completedSceneCount > 0
+            ? "QA begins as scenes complete."
+            : "QA starts once scene outputs begin landing.",
+    },
+    {
+      id: "bundle",
+      label: "Final bundle",
+      status: bundleReady ? "done" : failed ? "error" : renderDone ? "active" : "pending",
+      detail: bundleReady
+        ? "Bundle finalized with traceability attached."
+        : renderDone
+          ? "Assembling the final bundle from the completed scene outputs."
           : "Final bundle is assembled after scene outputs stabilize.",
     },
   ];

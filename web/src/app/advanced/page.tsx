@@ -1239,6 +1239,7 @@ export default function AdvancedStudio() {
     workflowSnapshot,
     isGeneratingScriptPack,
     scriptPackStage,
+    scriptPackProgress,
     scriptPack,
   });
   const streamProgressItems = buildAdvancedStreamProgressItems({
