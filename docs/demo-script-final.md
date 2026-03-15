@@ -17,39 +17,38 @@
 
 ### Tabs Pre-Opened (in order)
 1. ExplainFlow landing page (Cloud Run URL, not localhost)
-2. Quick page — ideally with a pre-generated artifact ready to show
-3. Advanced Studio — fresh session
-4. Cloud Run console showing `explainflow-api` service
-5. Architecture diagram (open `docs/architecture.md` Mermaid or a rendered PNG)
+2. Advanced Studio — fresh session
+3. Cloud Run console showing `explainflow-api` service
+4. Architecture diagram (open `docs/architecture.md` Mermaid or a rendered PNG)
+5. Quick page — ideally with a pre-generated artifact ready to show
 
 ### Pre-Warm
-- Run one full Quick generation before recording so you know the timing
 - Run one full Advanced extraction + script pack + at least 2 scenes before recording
+- Run one full Quick generation before recording so you know the timing
 - Have a stable source document ready to paste (see Recommended Input below)
 - Test that proof links open correctly from the deployed URL
 
 ### Audio
 - Use an external mic or record voiceover separately
-- Speak at ~140 words per minute (natural, unhurried)
+- Speak at ~130 words per minute (natural, unhurried)
 - Each section below includes exact word counts to stay on pace
 
 ---
 
 ## Recommended Source Input
 
-**Topic:** "The Mechanics of SpaceX Starship Orbital Launch"
+**Source:** Benoit Mandelbrot, "How Long Is the Coast of Britain? Statistical Self-Similarity and Fractional Dimension"
 
-**Why this topic:**
-- Technically rich (claims, evidence, causal chains)
-- Visually interesting (Gemini generates strong aerospace imagery)
-- Familiar enough that judges immediately understand the content
-- Has natural narrative structure (stages, risks, payoffs)
+**Why this source:**
+- Visually stunning (fractals, coastlines, self-similarity — Gemini generates strong mathematical imagery)
+- Intellectually rich (claims, evidence, recursive logic)
+- Matches the landing page art (Mandelbrot set) — instant visual continuity
+- Familiar enough that judges recognize the concept without needing domain expertise
 
-**Alternative:** "How CRISPR Gene Editing Works" or "The Race to Commercial Fusion Energy"
-
-**Persona:** Aerospace Investor (or Venture Capitalist)
-**Taste Bar:** Very High
-**Art Direction:** Hybrid
+**Artifact Type:** Storyboard Grid
+**Visual Mode:** Hybrid
+**Audience Level:** Intermediate
+**Audience Persona:** Curious Systems Thinker
 
 ---
 
@@ -61,44 +60,15 @@
 
 **Screen:** ExplainFlow landing page. Mandelbrot/Vitruvian art visible. Let the page breathe for 2 seconds before speaking.
 
-**Voiceover** (~55 words, 25 seconds):
+**Voiceover** (~52 words, 25 seconds):
 
-> Every AI content tool today works the same way. You paste something in, you get something out, and you have no idea where the claims came from, no way to fix one part without redoing everything, and no proof that the output is grounded in reality.
->
-> We built ExplainFlow to change that. It is a production studio, not a black box.
+> Current AI video tools are black boxes — you can't control the narrative or verify the facts. ExplainFlow is a Director's Console that exposes the middle. You approve the facts and lock the outline first. And when the visual story is done, every single claim remains fully traceable back to your original source.
 
 **Judge criteria hit:** Clear problem definition (Demo 30%). Sets up "grounding" narrative (Technical 30%).
 
 ---
 
-### BEAT 2 — Quick Path: Prove Speed (0:25 – 1:00)
-
-**Screen:** Click into Quick. Paste a topic, click generate, then **CUT** — skip the ~60s generation wait entirely. Resume recording when the artifact is ready. Show the four-block artifact with claim references visible. Switch to Proof Reel tab. Flash the MP4 export button.
-
-**Voiceover** (~75 words, 35 seconds):
-
-> Let me show you the fast path first. I give ExplainFlow a topic, pick my audience, and it generates a grounded explainer artifact. Each block carries claim references back to the source material.
->
-> From there, I can derive a Proof Reel — each segment links generated visuals to cited source evidence — and export the whole thing as a narrated MP4.
->
-> That is Quick mode: one input to a complete, proof-aware media package. But the real depth is in the Advanced Studio.
-
-**Screen actions (timed):**
-- 0:25 — click Quick
-- 0:28 — show source input / topic, click generate
-- **CUT** — stop recording, wait for generation (~60s), resume when artifact appears
-- 0:33 — show generated artifact blocks (scroll slowly)
-- 0:42 — point at claim ref badges on blocks
-- 0:45 — switch to Proof Reel tab
-- 0:50 — briefly show a reel segment playing
-- 0:55 — flash MP4 export button
-- 0:58 — pause, then navigate to Advanced
-
-**Judge criteria hit:** Multimodal output breadth — text, image, audio, video export (UX 40%). Shows "rich, mixed-media responses" per Creative Storyteller rubric.
-
----
-
-### BEAT 3 — Advanced Studio: Source + Director Console Live (1:00 – 1:50)
+### BEAT 2 — Advanced Studio: Source + Director Console Live (0:25 – 1:25)
 
 **This beat runs LIVE over the director console. Do NOT cut the wait time — it IS the demo.**
 
@@ -106,39 +76,39 @@ The Advanced Studio has a two-column layout that is the visual proof of the agen
 - **Left column (sticky):** ExplainFlow Assistant (chat) + Agent Session Notes (timestamped checkpoint/QA/trace timeline)
 - **Right column:** Workflow Stages bar (5 color-coded badges + progress bar) + active panel with StageProgressList ("Under the Hood" items transitioning pending→active→done)
 
-**Screen:** Paste the Starship document. Set persona and taste bar. Click Extract Content Signal. Stay on screen and narrate over the director console as it works. The progress UI, stage transitions, and Agent Session Notes streaming in ARE the content.
+**Screen:** Click into Advanced Studio. Paste the Mandelbrot paper. Click Extract Content Signal. While extraction runs, lock the render profile (output goal, visual mode, audience, persona, density, taste). Stay on screen and narrate over the director console as it works. The progress UI, stage transitions, and Agent Session Notes streaming in ARE the content.
 
-**Voiceover** (~105 words, 50 seconds):
+**Voiceover** (~125 words, 60 seconds):
 
-> In the Advanced Studio, I paste a technical brief and define my audience and quality bar. Watch what happens when I start extraction.
+> This is the Advanced Studio. I paste Mandelbrot's classic paper on fractal coastlines and start extraction. On the left, Agent Session Notes stream in real time. On the right, extraction stages transition live — this is not a spinner, this is a director console.
 >
-> On the left, the Agent Session Notes are filling with timestamped decisions. On the right, the progress list shows each extraction stage transitioning from pending to active to done — source validation, schema check, structuring thesis and claims.
+> While it runs, I lock the render profile in parallel — output goal, visual mode, audience persona, information density, and taste. These parameters give the story its ears, and locking them triggers a second Gemini pass that generates narrative beats and visual candidates on top of the structural truth.
 >
-> This is not a spinner. This is a live director console showing the agent harness at work. Every checkpoint is logged. Every stage is traceable.
->
-> And now the signal arrives — a structured thesis, key claims with evidence chains, and narrative beats. This gets locked as a checkpoint before any generation happens.
+> And now the signal arrives — thesis, claims, evidence chains, narrative beats. Notice this is pure content — no fonts, no visual direction. That separation is an engineering decision: when an LLM extracts facts and picks styles at the same time, it hallucinates. Extract truth first, lock it, then spend the generation budget.
 
 **Screen actions (LIVE, no cuts):**
-- 1:00 — paste document into source panel
-- 1:03 — set persona to "Aerospace Investor", taste to "Very High"
-- 1:08 — click Extract Content Signal
-- 1:10 — point at Agent Session Notes (left column) as first notes appear
-- 1:15 — point at StageProgressList items transitioning (right column)
-- 1:18 — point at progress bar advancing
-- 1:22 — point at phase text: "Structuring thesis, claims, concepts, and narrative beats..."
-- 1:25 — point at Workflow Stages bar — badges changing color
-- 1:30 — checkpoint toast appears — briefly acknowledge it
-- **~1:38** — signal result appears (extraction takes ~50s total from click)
-- 1:38–1:45 — scroll through extracted signal: thesis, claims, evidence
-- 1:48 — briefly point at evidence snippets
+- 0:25 — click Advanced from landing page
+- 0:28 — paste document into source panel
+- 0:32 — click Extract Content Signal
+- 0:35 — while extraction runs, set render profile: Storyboard Grid, Hybrid, Intermediate, Curious Systems Thinker
+- 0:40 — lock render profile
+- 0:42 — point at Agent Session Notes (left column) as notes stream in
+- 0:46 — point at StageProgressList items transitioning (right column)
+- 0:50 — point at progress bar advancing
+- 0:50 — point at phase text: "Structuring thesis, claims, concepts, and narrative beats..."
+- 0:54 — point at Workflow Stages bar — badges changing color
+- 1:00 — checkpoint toast appears — briefly acknowledge it
+- **~1:15** — signal result appears (extraction takes ~50s total from click)
+- 1:15–1:22 — scroll through extracted signal: thesis, claims, evidence
+- 1:23 — briefly point at evidence snippets
 
 **If extraction finishes early:** Fill with narration about the checkpoint architecture. If it runs long, let the last few seconds of extraction overlap with the start of your next voiceover.
 
-**Judge criteria hit:** This beat is the primary proof of agent architecture (Technical 30%). Checkpoint logging, stage traceability, and self-awareness are all visible in real-time. Also hits grounding (Technical 30%) when the signal arrives.
+**Judge criteria hit:** This beat is the primary proof of agent architecture (Technical 30%). Checkpoint logging, stage traceability, and self-awareness are all visible in real-time. The "why checkpoint" explanation directly addresses grounding (Technical 30%).
 
 ---
 
-### BEAT 4 — Script Pack: Plan + Planner QA Live (1:50 – 2:15)
+### BEAT 3 — Script Pack: Plan + Planner QA Live (1:25 – 1:50)
 
 **This beat also runs LIVE over the director console. Show the planning pipeline working.**
 
@@ -146,28 +116,26 @@ The Advanced Studio has a two-column layout that is the visual proof of the agen
 
 **Voiceover** (~55 words, 25 seconds):
 
-> Before spending any generation budget, ExplainFlow compiles a Script Pack. Watch the stages — outlining, structuring, then validating. That validation step is Planner QA: the system self-checks the plan and repairs weak coverage before generation begins.
->
-> The Agent Session Notes on the left are logging every decision. This is not a loading screen — it is an audit trail.
+> Now watch ExplainFlow do something most AI systems never do — criticize its own plan before spending a cent on generation. The Script Pack locks every scene's goal and claim coverage, then Planner QA tears it apart, repairs weak spots, and locks acceptance checks that every generated scene must pass.
 
 **Screen actions (LIVE, no cuts):**
-- 1:50 — click Generate Script Pack
-- 1:52 — point at Script Pack progress items transitioning
-- 1:55 — point at phase text: "Mapping scene roles, claim coverage, and artifact structure..."
-- 1:58 — phase changes to "Drafting narration focus, visual directives, and continuity..."
-- 2:00 — phase changes to "Running planner QA, repairs, and script-pack locking..."
-- 2:02 — point at Agent Session Notes: "Planner QA and deterministic repair checks are running"
-- **~2:08** — script pack result appears
-- 2:08–2:12 — scroll through script pack: scene goals, acceptance checks, claim_refs
-- 2:13 — point at planner QA summary if visible
+- 1:25 — click Generate Script Pack
+- 1:27 — point at Script Pack progress items transitioning
+- 1:30 — point at phase text: "Mapping scene roles, claim coverage, and artifact structure..."
+- 1:33 — phase changes to "Drafting narration focus, visual directives, and continuity..."
+- 1:36 — phase changes to "Running planner QA, repairs, and script-pack locking..."
+- 1:38 — point at Agent Session Notes: "Planner QA and deterministic repair checks are running"
+- **~1:43** — script pack result appears
+- 1:43–1:47 — scroll through script pack: scene goals, acceptance checks, claim_refs
+- 1:48 — point at planner QA summary if visible
 
-**If script pack finishes early:** Jump straight to showing the result. If it runs long, start your Beat 5 voiceover transition while it finishes.
+**If script pack finishes early:** Jump straight to showing the result. If it runs long, start your Beat 4 voiceover transition while it finishes.
 
 **Judge criteria hit:** Agent architecture (Technical 30%). Self-healing / error handling (Technical 30%). "Context-aware" planning (UX 40%). Planner QA is the most direct answer to "does it handle errors gracefully?"
 
 ---
 
-### BEAT 5 — Live Multimodal Streaming + Auto QA (2:15 – 3:00)
+### BEAT 4 — Live Multimodal Streaming + Auto QA (1:50 – 2:35)
 
 **This is the centerpiece. Give it the most screen time. Runs LIVE and UNCUT.**
 
@@ -175,21 +143,21 @@ The Advanced Studio has a two-column layout that is the visual proof of the agen
 
 **Voiceover** (~90 words, 45 seconds):
 
-> Now watch the stream. Narration text arrives scene by scene, immediately followed by a generated visual — this is Gemini's native interleaved multimodal output, text and image woven together in one stream.
+> Watch this. Text narration types out, then an image lands — generated together in one Gemini call, not stitched after the fact. Scene by scene, the stream builds a complete visual story.
 >
-> Look at the badges. Every scene passes through an Auto QA Gate — scored against the acceptance checks from the Script Pack. If it detects drift or missing claims, it triggers a Correction Retry in real-time.
+> See those badges? Each scene is scored by an Auto QA Gate. Every scene you see already passed. The ones that didn't — you'll never see them.
 >
-> And the claim badges on each scene card are live proof links back to the original source evidence.
+> And every claim badge you see is a live link back to the original source evidence.
 
 **Screen actions:**
-- 2:15 — click Generate Stream
-- 2:20 — Scene 1 text starts streaming via typewriter (let it flow)
-- 2:27 — Scene 1 image appears (pause narration briefly to let it land)
-- 2:32 — QA badge appears — point at it
-- 2:35 — Scene 2 starts
-- 2:42 — Scene 2 image arrives
-- 2:45 — If QA retry happens on any scene, highlight it: "There — the system caught a problem and is retrying"
-- 2:55 — Scene 3 visible, claim badges visible
+- 1:50 — click Generate Stream
+- 1:55 — Scene 1 text starts streaming via typewriter (let it flow)
+- 2:02 — Scene 1 image appears (pause narration briefly to let it land)
+- 2:07 — QA badge appears — point at it
+- 2:10 — Scene 2 starts
+- 2:17 — Scene 2 image arrives
+- 2:20 — If QA retry happens on any scene, highlight it: "There — the system caught a problem and is retrying"
+- 2:30 — Scene 3 visible, claim badges visible
 
 **DO NOT CUT THIS BEAT.** The streaming is the visual payoff — text appearing character by character, images landing, QA badges popping in, Agent Session Notes updating on the left. If there are brief pauses between scenes, keep narrating over them. This is where judges see "media seamlessly woven into cohesive narrative."
 
@@ -197,66 +165,77 @@ The Advanced Studio has a two-column layout that is the visual proof of the agen
 
 ---
 
-### BEAT 6 — Proof-Linked Review (3:00 – 3:15)
+### BEAT 5 — Proof + Regeneration (2:35 – 2:52)
 
-**Screen:** Click "View Source Proof" on a scene card claim badge. Show the proof dialog opening: evidence metadata, source quote, and backing asset.
+**Screen:** Click a claim badge to open the proof dialog. Show evidence. Close dialog. Then click Regenerate on one scene, type a short instruction, **CUT** through the wait, show the new scene while others stay locked.
 
-**Voiceover** (~40 words, 15 seconds):
+**Voiceover** (~35 words, 17 seconds):
 
-> Here is what makes ExplainFlow fundamentally different. I click any claim badge and the exact backing evidence opens. This is not retroactive citation. The proof was carried from extraction through planning into the final scene. Every claim is traceable.
-
-**Screen actions:**
-- 3:00 — click a claim badge on a scene card
-- 3:03 — proof dialog opens, show evidence text and source reference
-- 3:08 — scroll through evidence metadata
-- 3:12 — close dialog
-
-**Judge criteria hit:** Grounding (Technical 30% — "evidence of grounding to avoid hallucinations"). This is the differentiator most competitors will not have.
-
----
-
-### BEAT 7 — Directed Scene Regeneration (3:15 – 3:27)
-
-**Screen:** Click Regenerate on one scene. Type a short instruction. **CUT** through the regeneration wait. Show the new scene while other scenes remain locked.
-
-**Voiceover** (~30 words, 12 seconds):
-
-> Because the workflow is checkpointed, I can regenerate any single scene with a custom direction while every other scene stays stable. I am directing, not restarting.
+> Click any claim badge — the original source evidence opens. The proof survived the entire pipeline. And if I don't like a scene, I regenerate just that one — every other scene stays locked. Every image can be upscaled to print resolution, and the entire production exports as a single ZIP — script, images, and audio. Directing, not restarting.
 
 **Screen actions:**
-- 3:15 — click Regenerate on Scene 2
-- 3:18 — type instruction, click confirm
+- 2:35 — click a claim badge on a scene card
+- 2:37 — proof dialog opens, show evidence text and source reference
+- 2:40 — close dialog
+- 2:42 — click Regenerate on a scene, type instruction, click confirm
 - **CUT** — stop recording, wait for regeneration, resume when new scene appears
-- 3:22 — new scene appears, other scenes unchanged
+- 2:48 — new scene appears, other scenes unchanged
 
-**Judge criteria hit:** User control beyond text box (UX 40%). Checkpoint recovery (Technical 30%).
+**Judge criteria hit:** Grounding (Technical 30% — "evidence of grounding to avoid hallucinations"). User control beyond text box (UX 40%). Checkpoint recovery (Technical 30%).
 
 ---
 
-### BEAT 8 — Architecture + Cloud Proof (3:27 – 3:42)
+### BEAT 6 — Architecture + Cloud Proof (2:52 – 3:07)
 
 **Screen:** Flash the architecture diagram (Mermaid render or PNG). Switch to Cloud Run console tab showing active service. Optionally show Terraform file for bonus points.
 
 **Voiceover** (~35 words, 15 seconds):
 
-> The system runs on FastAPI and Google Cloud Run with 300-second streaming timeouts. Gemini 3.1 Pro handles extraction and planning, Gemini 3 Pro Image handles interleaved generation, and infrastructure is managed with Terraform.
+> Four Gemini models, each assigned to a different stage of the pipeline. Not one general-purpose call — four specialized ones. FastAPI backend, deployed on Cloud Run, managed with Terraform.
 
 **Screen actions:**
-- 3:27 — show architecture diagram (2 seconds)
-- 3:31 — switch to Cloud Run console, show active service and URL
-- 3:36 — briefly flash `terraform/main.tf` or `cloudbuild.yaml` in the repo (for IaC bonus)
-- 3:40 — transition back to landing page
+- 2:52 — show architecture diagram (2 seconds)
+- 2:56 — switch to Cloud Run console, show active service and URL
+- 3:01 — briefly flash `terraform/main.tf` or `cloudbuild.yaml` in the repo (for IaC bonus)
+- 3:05 — transition to Quick
 
 **Judge criteria hit:** "Legible architecture diagram" + "Visual proof of Cloud deployment" (Demo 30%). Terraform mention earns +0.2 IaC bonus.
 
 ---
 
-### BEAT 9 — Close (3:42 – 3:50)
+### BEAT 7 — Quick Mic Drop (3:07 – 3:42)
+
+**Screen:** Click into Quick. Paste the YouTube URL for "Living Human Brain Cells Play DOOM" and paste the transcript. Set prompt: "Explain the video to non-technical students in a playful tone." Click Generate, then **CUT** — skip the generation wait. Resume when the artifact is ready. Show the four-block artifact with claim references. Switch to Proof Reel tab — show a segment with generated images alongside source footage. Flash MP4 export.
+
+**Voiceover** (~55 words, 25 seconds):
+
+> Everything I just showed you — Quick does it in one shot. I paste a YouTube video about brain cells playing DOOM, and out comes a grounded artifact with claim refs on every block.
+>
+> ExplainFlow reads the transcript and saves relevant timecodes. In the Proof Reel, I choose: original YouTube footage, generated images, or both. Imagine a three-hour Karpathy podcast condensed to a five-minute visual summary with key moments pulled from source. Export to MP4. Done.
+
+**Screen actions (timed):**
+- 3:07 — click Quick
+- 3:09 — paste YouTube URL, paste transcript, set prompt and audience
+- **CUT** — stop recording, wait for generation (~60s), resume when artifact appears
+- 3:12 — show generated artifact blocks (scroll slowly)
+- 3:17 — point at claim ref badges on blocks
+- 3:20 — switch to Proof Reel tab
+- 3:23 — show a reel segment playing (generated image + source footage visible)
+- 3:28 — flash MP4 export button
+- 3:30 — pause
+
+**Judge criteria hit:** Multimodal output breadth — text, image, audio, video export (UX 40%). YouTube video as source input demonstrates multimodal ingestion (Technical 30%). Mic-drop ending (Demo 30%).
+
+---
+
+### BEAT 8 — Close (3:42 – 3:50)
 
 **Screen:** Landing page. Let the Mandelbrot/Vitruvian art sit for a moment.
 
 **Voiceover** (~20 words, 8 seconds):
 
+> We skipped the Assistant chat for time, but it is checkpoint-aware — users can ask questions or recover the workflow through natural language at any stage.
+>
 > ExplainFlow is not a generator. It is a director. Extract, plan, self-check, stream, prove, and repair. Thank you.
 
 **Hard stop at 3:50.** Ten-second buffer before the 4:00 cap.
@@ -267,20 +246,19 @@ The Advanced Studio has a two-column layout that is the visual proof of the agen
 
 | Beat | Words | Seconds | Pace (wpm) | Live? |
 |------|-------|---------|-------------|-------|
-| 1. Cold Open | 55 | 25 | 132 | — |
-| 2. Quick | 75 | 35 | 129 | CUT |
-| 3. Signal + Director Console | 105 | 50 | 126 | **LIVE** |
-| 4. Script Pack + Planner QA | 55 | 25 | 132 | **LIVE** |
-| 5. Streaming | 90 | 45 | 120 | **LIVE** |
-| 6. Proof | 40 | 15 | 160 | — |
-| 7. Regen | 30 | 12 | 150 | CUT |
-| 8. Architecture | 35 | 15 | 140 | — |
-| 9. Close | 20 | 8 | 150 | — |
-| **Total** | **505** | **230s (3:50)** | **132 avg** |
+| 1. Cold Open | 52 | 25 | 125 | — |
+| 2. Signal + Director Console | 120 | 60 | 120 | **LIVE** |
+| 3. Script Pack + Planner QA | 47 | 25 | 113 | **LIVE** |
+| 4. Streaming + Auto QA | 75 | 45 | 100 | **LIVE** |
+| 5. Proof + Regen | 55 | 22 | 150 | CUT |
+| 6. Architecture | 30 | 15 | 120 | — |
+| 7. Quick Mic Drop | 80 | 35 | 137 | CUT |
+| 8. Close | 45 | 8 | 150 | — |
+| **Total** | **504** | **235s (3:55)** | **129 avg** |
 
-132 wpm average is comfortable narration pace. Not rushed, not slow.
+131 wpm average is comfortable narration pace. Not rushed, not slow.
 
-**Key change from earlier drafts:** Beats 3, 4, and 5 all run LIVE over the director console. The only CUT points are in Beat 2 (Quick, no progress UI) and Beat 7 (scene regeneration). The live director console — progress lists, Agent Session Notes, phase text, checkpoint toasts — is the primary visual proof of the agentic architecture, which is 30% of the judging weight.
+**Key structural decision:** Advanced runs first (Beats 2-5) to establish the checkpoint architecture and explain *why* each stage exists. Quick closes as the mic drop (Beat 7) — proving the same grounded pipeline also delivers in seconds. The only CUT point is Beat 5 (proof + regen) and Beat 7 (Quick generation). Beats 2, 3, and 4 all run LIVE and UNCUT over the director console.
 
 ---
 
@@ -297,14 +275,14 @@ The Advanced Studio has a two-column layout that is the visual proof of the agen
 ### Music
 - Optional. If used, keep it very low — atmospheric ambient only. Judges need to hear your voice clearly.
 
-### Editing Strategy: Live Director Console, Minimal Cuts
-- **Only 2 cut points** in this version (Beat 2 Quick and Beat 7 Regen)
-- **Beats 3, 4, and 5 all run LIVE and UNCUT** — this is the core differentiator
+### Editing Strategy: Advanced First, Quick Mic Drop
+- **Only 2 cut points** in this version (Beat 6 Regen and Beat 8 Quick)
+- **Beats 2, 3, and 4 all run LIVE and UNCUT** — this is the core differentiator
 - The director console (Agent Session Notes, StageProgressList, progress bars, phase text, checkpoint toasts) is the visual proof of the agentic architecture. Cutting away from it would remove the most architecturally impressive content.
 - At each CUT: stop recording, wait for generation to finish, resume from the same screen
 - In editing, join the clips — the result looks like instant generation
 - Rules require "actual software in action," not a single unedited take — clean cuts are fine
-- **Timing risk:** Beats 3 and 4 depend on real extraction/planning time (~50s and ~30s). If either runs significantly longer than expected, overlap voiceover from the next beat. If shorter, fill with brief additional narration about checkpoint architecture.
+- **Timing risk:** Beats 2 and 3 depend on real extraction/planning time (~50s and ~30s). If either runs significantly longer than expected, overlap voiceover from the next beat. If shorter, fill with brief additional narration about checkpoint architecture.
 
 ### Thumbnail
 - Use a frame from the landing page with the Mandelbrot/Vitruvian art.

@@ -104,3 +104,21 @@ git cherry-pick <commit-sha>
 git push origin HEAD:main
 ```
 
+## 9. Deployment State & Guardrails (Standardized us-central1)
+
+**GCP Project:** `explainflow`
+
+### Standardized Configuration
+- **Canonical Location:** `us-central1` (Registry and Deployment).
+- **Artifact Registry Host:** `us-central1-docker.pkg.dev`
+- **Image URLs:**
+  - `us-central1-docker.pkg.dev/explainflow/explainflow-repo/explainflow-api:latest`
+  - `us-central1-docker.pkg.dev/explainflow/explainflow-repo/explainflow-web:latest`
+- **Aligned Files:** Both `cloudbuild.yaml` and `terraform/main.tf` are standardized on these URLs.
+
+### Operational Guardrails
+- **Registry Hygiene:** Do not reintroduce `us-docker.pkg.dev` references. The old `us` repository has been deleted; only `us-central1` is canonical.
+- **Infrastructure Constraints:** Cloud Run timeouts must remain at **300s** (mandated for multimodal streaming).
+- **Secrets:** Use Secret Manager (`explainflow-gemini-api-key`) for runtime keys; do not commit secrets to code or `.env` files in production.
+- **Verification:** Always verify that image URLs in `cloudbuild.yaml` and `terraform/main.tf` match before any deployment automation.
+

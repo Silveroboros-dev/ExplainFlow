@@ -284,11 +284,30 @@ For detailed sequence diagrams and workflow rationale, see:
 
 ## Testing
 
-ExplainFlow is deployed and available for testing:
+ExplainFlow is deployed and available for testing. No login or credentials required.
 
 - **Studio**: https://explainflow-web-nxgdm2zy3a-uc.a.run.app
 - **API**: https://explainflow-api-nxgdm2zy3a-uc.a.run.app
 
-No login or credentials required. Both Quick and Advanced Studio workflows are fully functional.
+### Quick Mode
+
+1. Open the Studio link above and select **Quick**.
+2. Paste source text or upload a document (PDF, image, audio, or video).
+3. Set a topic and audience, then click **Generate**.
+4. The artifact appears in seconds — four grounded blocks with claim refs and evidence.
+5. Click **Proof Reel** to see a deterministic walkthrough of the artifact with source-backed evidence.
+6. Click **Export MP4** to render a video from the artifact.
+
+### Advanced Studio
+
+1. Select **Advanced** from the landing page.
+2. Paste source text or upload source assets, then click **Extract Signal**.
+3. Review the extracted signal (thesis, claims, evidence, narrative beats) in the Content Signal panel.
+4. Choose an audience persona, visual mode, and density, then lock the render profile.
+5. Click **Generate Script Pack** — the planner builds a scene-by-scene production manifest with QA checks.
+6. Click **Start Generation** — scenes stream in real time with text, images, and audio. The Agent Session Notes panel shows checkpoint progress and QA status as they happen.
+7. After generation, click any claim badge on a scene card to open the **Proof Viewer** and inspect the backing evidence.
+8. Optionally regenerate any individual scene with a custom instruction.
+9. Click **Export** for a ZIP bundle (script + images + audio) or **Export MP4** for a rendered video.
 
 Built for the **Gemini Live Agent Challenge**.
