@@ -33,7 +33,7 @@ ExplainFlow is deployed and available for testing. No login or credentials requi
 ### Quick Mode
 
 1. Open the Studio link above and select **Quick**.
-2. Upload a video or paste source text.
+2. Paste a YouTube URL (try https://www.youtube.com/watch?v=yRV8fSw6HaE) or copy-paste a transcript or any source text.
 3. Set the topic to: **Explain this video to non-technical students in a playful tone.**
 4. Click **Generate**.
 5. The artifact appears in seconds — four grounded blocks with claim refs and evidence.
