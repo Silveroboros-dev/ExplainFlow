@@ -1254,7 +1254,7 @@ export default function AdvancedStudio() {
         </Card>
         </div>
 
-        <div className="relative min-h-[420px] lg:h-[calc(100vh-21rem)]">
+        <div className="relative min-h-[420px] lg:h-[calc(100vh-26rem)]">
           <div className="mx-auto h-full max-w-4xl">
             <div key={activePanel} className="h-full animate-in fade-in-0 zoom-in-95 duration-300 [&>*]:h-full">
               {activePanel === 'source' && (

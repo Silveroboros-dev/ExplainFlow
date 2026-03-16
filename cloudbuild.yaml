@@ -27,6 +27,8 @@ steps:
       - '2Gi'
       - '--cpu'
       - '2'
+      - '--min-instances'
+      - '1'
       - '--set-env-vars'
       - 'EXPLAINFLOW_BUCKET=explainflow-assets-$PROJECT_ID'
       - '--set-secrets'

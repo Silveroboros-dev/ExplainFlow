@@ -185,50 +185,35 @@ The Advanced Studio has a two-column layout that is the visual proof of the agen
 
 ---
 
-### BEAT 6 — Architecture + Cloud Proof (2:52 – 3:07)
+### BEAT 6 — Quick Mic Drop (2:52 – 3:42)
 
-**Screen:** Flash the architecture diagram (Mermaid render or PNG). Switch to Cloud Run console tab showing active service. Optionally show Terraform file for bonus points.
+**Screen:** Click into Quick. While it loads, deliver the architecture line as a transition. Paste the YouTube URL for "Living Human Brain Cells Play DOOM" and paste the transcript. Set prompt: "Explain the video to non-technical students in a playful tone." Click Generate, then **CUT** — skip the generation wait. Resume when the artifact is ready. Show the artifact with claim references. Switch to Proof Reel tab — toggle a segment between source footage, generated image, and hybrid. Open the playlist player and let it play for a few seconds. Flash MP4 export.
 
-**Voiceover** (~35 words, 15 seconds):
+**Voiceover** (~75 words, 50 seconds):
 
-> Four Gemini models, each assigned to a different stage of the pipeline. Not one general-purpose call — four specialized ones. FastAPI backend, deployed on Cloud Run, managed with Terraform.
-
-**Screen actions:**
-- 2:52 — show architecture diagram (2 seconds)
-- 2:56 — switch to Cloud Run console, show active service and URL
-- 3:01 — briefly flash `terraform/main.tf` or `cloudbuild.yaml` in the repo (for IaC bonus)
-- 3:05 — transition to Quick
-
-**Judge criteria hit:** "Legible architecture diagram" + "Visual proof of Cloud deployment" (Demo 30%). Terraform mention earns +0.2 IaC bonus.
-
----
-
-### BEAT 7 — Quick Mic Drop (3:07 – 3:42)
-
-**Screen:** Click into Quick. Paste the YouTube URL for "Living Human Brain Cells Play DOOM" and paste the transcript. Set prompt: "Explain the video to non-technical students in a playful tone." Click Generate, then **CUT** — skip the generation wait. Resume when the artifact is ready. Show the four-block artifact with claim references. Switch to Proof Reel tab — show a segment with generated images alongside source footage. Flash MP4 export.
-
-**Voiceover** (~55 words, 25 seconds):
-
-> Everything I just showed you — Quick does it in one shot. I paste a YouTube video about brain cells playing DOOM, and out comes a grounded artifact with claim refs on every block.
+> That was the full Advanced pipeline — four Gemini models, each assigned to a different stage. FastAPI on Cloud Run, managed with Terraform. Now watch Quick do all of it in one shot.
 >
-> ExplainFlow reads the transcript and saves relevant timecodes. In the Proof Reel, I choose: original YouTube footage, generated images, or both. Imagine a three-hour Karpathy podcast condensed to a five-minute visual summary with key moments pulled from source. Export to MP4. Done.
+> I paste a YouTube video about brain cells playing DOOM, and out comes a grounded artifact with claim refs on every block. Blocks can be regenerated individually here too.
+>
+> In the Proof Reel, I choose per segment: original YouTube footage, generated images, or both. Watch — the playlist plays source clips interleaved with generated visuals. Imagine a three-hour Karpathy lecture condensed to five minutes with every key moment pulled from source. Export to MP4 — generated visuals, voiceover, and cinematic transitions bundled into one video. Done.
 
 **Screen actions (timed):**
-- 3:07 — click Quick
-- 3:09 — paste YouTube URL, paste transcript, set prompt and audience
+- 2:52 — click Quick (deliver architecture line while page loads)
+- 2:58 — paste YouTube URL, paste transcript, set prompt and audience
 - **CUT** — stop recording, wait for generation (~60s), resume when artifact appears
-- 3:12 — show generated artifact blocks (scroll slowly)
-- 3:17 — point at claim ref badges on blocks
-- 3:20 — switch to Proof Reel tab
-- 3:23 — show a reel segment playing (generated image + source footage visible)
-- 3:28 — flash MP4 export button
-- 3:30 — pause
+- 3:04 — show generated artifact blocks (scroll slowly)
+- 3:10 — point at claim ref badges on blocks
+- 3:14 — switch to Proof Reel tab
+- 3:18 — toggle a segment's presentation mode: source → image → hybrid (let the toggle be visible)
+- 3:22 — click Play Playlist — let the player run for 4-5 seconds (source clip plays, then a generated slide appears)
+- 3:30 — close player, flash MP4 export button
+- 3:35 — pause
 
-**Judge criteria hit:** Multimodal output breadth — text, image, audio, video export (UX 40%). YouTube video as source input demonstrates multimodal ingestion (Technical 30%). Mic-drop ending (Demo 30%).
+**Judge criteria hit:** Architecture mention (Technical 30%). Multimodal output breadth — text, image, audio, video export (UX 40%). YouTube video as source input demonstrates multimodal ingestion (Technical 30%). Playlist interleaving source and generated media is the visual proof of grounding (Technical 30%). Mic-drop ending (Demo 30%).
 
 ---
 
-### BEAT 8 — Close (3:42 – 3:50)
+### BEAT 7 — Close (3:42 – 3:50)
 
 **Screen:** Landing page. Let the Mandelbrot/Vitruvian art sit for a moment.
 
@@ -251,14 +236,13 @@ The Advanced Studio has a two-column layout that is the visual proof of the agen
 | 3. Script Pack + Planner QA | 47 | 25 | 113 | **LIVE** |
 | 4. Streaming + Auto QA | 75 | 45 | 100 | **LIVE** |
 | 5. Proof + Regen | 55 | 22 | 150 | CUT |
-| 6. Architecture | 30 | 15 | 120 | — |
-| 7. Quick Mic Drop | 80 | 35 | 137 | CUT |
-| 8. Close | 45 | 8 | 150 | — |
-| **Total** | **504** | **235s (3:55)** | **129 avg** |
+| 6. Quick Mic Drop | 75 | 50 | 90 | CUT |
+| 7. Close | 45 | 8 | 150 | — |
+| **Total** | **479** | **230s (3:50)** | **125 avg** |
 
-131 wpm average is comfortable narration pace. Not rushed, not slow.
+125 wpm average is comfortable narration pace. Not rushed, not slow.
 
-**Key structural decision:** Advanced runs first (Beats 2-5) to establish the checkpoint architecture and explain *why* each stage exists. Quick closes as the mic drop (Beat 7) — proving the same grounded pipeline also delivers in seconds. The only CUT point is Beat 5 (proof + regen) and Beat 7 (Quick generation). Beats 2, 3, and 4 all run LIVE and UNCUT over the director console.
+**Key structural decision:** Advanced runs first (Beats 2-5) to establish the checkpoint architecture and explain *why* each stage exists. Quick closes as the mic drop (Beat 6) — proving the same grounded pipeline also delivers in seconds. Architecture is mentioned as a transition line into Quick, not a separate beat. The only CUT points are Beat 5 (proof + regen) and Beat 6 (Quick generation). Beats 2, 3, and 4 all run LIVE and UNCUT over the director console.
 
 ---
 
@@ -276,7 +260,7 @@ The Advanced Studio has a two-column layout that is the visual proof of the agen
 - Optional. If used, keep it very low — atmospheric ambient only. Judges need to hear your voice clearly.
 
 ### Editing Strategy: Advanced First, Quick Mic Drop
-- **Only 2 cut points** in this version (Beat 6 Regen and Beat 8 Quick)
+- **Only 2 cut points** in this version (Beat 5 Regen and Beat 6 Quick)
 - **Beats 2, 3, and 4 all run LIVE and UNCUT** — this is the core differentiator
 - The director console (Agent Session Notes, StageProgressList, progress bars, phase text, checkpoint toasts) is the visual proof of the agentic architecture. Cutting away from it would remove the most architecturally impressive content.
 - At each CUT: stop recording, wait for generation to finish, resume from the same screen

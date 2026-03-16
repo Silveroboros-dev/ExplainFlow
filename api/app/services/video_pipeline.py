@@ -19,7 +19,7 @@ from app.schemas.requests import (
     SourceManifestSchema,
 )
 from app.services.audio_pipeline import generate_audio_and_get_url
-from app.services.image_pipeline import asset_path_from_reference, base_url, public_asset_url, save_image_and_get_url
+from app.services.image_pipeline import asset_path_from_reference, base_url, public_asset_url, save_image_and_get_url, upload_local_file_to_gcs
 
 
 VIDEO_SIZE = (1280, 720)
@@ -759,7 +759,8 @@ def render_quick_video_mp4(
             logger=None,
         )
         duration_ms = int(round(float(getattr(final_clip, "duration", 0.0) or 0.0) * 1000))
-        return f"{base_url(request)}/static/assets/{output_name}", duration_ms
+        video_url = upload_local_file_to_gcs(request, output_path, content_type="video/mp4")
+        return video_url, duration_ms
     finally:
         for clip in reversed(created_clips):
             try:
@@ -910,7 +911,8 @@ def render_advanced_video_mp4(
             logger=None,
         )
         duration_ms = int(round(float(getattr(final_clip, "duration", 0.0) or 0.0) * 1000))
-        return f"{base_url(request)}/static/assets/{output_name}", duration_ms
+        video_url = upload_local_file_to_gcs(request, output_path, content_type="video/mp4")
+        return video_url, duration_ms
     finally:
         for clip in reversed(created_clips):
             try:

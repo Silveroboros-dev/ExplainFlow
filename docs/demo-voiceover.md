@@ -1,6 +1,6 @@
 # ExplainFlow Demo — Voiceover Script
 
-**Total: ~502 words | 3:50 | 131 wpm avg**
+**Total: ~484 words | 3:53 | 124 wpm avg**
 
 ---
 
@@ -10,7 +10,7 @@ Current AI video tools are black boxes — you can't control the narrative or ve
 
 ---
 
-## BEAT 2 — Advanced Studio: Extraction (0:25 – 1:25) **LIVE**
+## BEAT 2 — Advanced Studio: Extraction (0:25 – 1:20) **LIVE**
 
 This is the Advanced Studio. I paste Mandelbrot's classic paper on fractal coastlines and start extraction. On the left, Agent Session Notes stream in real time. On the right, extraction stages transition live — this is not a spinner, this is a director console.
 
@@ -20,43 +20,35 @@ And now the signal arrives — thesis, claims, evidence chains, narrative beats.
 
 ---
 
-## BEAT 3 — Script Pack + Planner QA (1:25 – 1:50) **LIVE**
+## BEAT 3 — Script Pack + Planner QA (1:20 – 1:45) **LIVE**
 
-Now watch ExplainFlow do something most AI systems never do — criticize its own plan before spending a cent on generation. The Script Pack locks every scene's goal and claim coverage, then Planner QA tears it apart, repairs weak spots, and locks acceptance checks that every generated scene must pass.
+Now watch ExplainFlow do something most AI systems never do — criticize its own plan before spending a cent on generation. The Script Pack locks every scene's goal and claim coverage, then Planner QA tears it apart, repairs weak spots, and locks acceptance checks that every generated scene must pass. If the plan fails, it replans automatically.
 
 ---
 
-## BEAT 4 — Live Streaming + Auto QA (1:50 – 2:35) **LIVE**
+## BEAT 4 — Streaming, Proof + Regeneration (1:45 – 2:55) **LIVE**
 
-Watch this. Text narration types out, then an image lands — generated together in one Gemini call, not stitched after the fact. Scene by scene, the stream builds a complete visual story.
+Watch this. Text narration types out, then an image lands — generated together in one Gemini call, not stitched after the fact. Scene by scene, the stream builds a complete visual story. Notice the visual continuity — anchor terms carry forward between scenes to prevent narrative drift.
 
-See those badges? Each scene is scored by an Auto QA Gate. Every scene you see already passed. The ones that didn't — you'll never see them.
+See those badges? Each scene is scored by an Auto QA Gate. Every scene you see already passed. The ones that didn't were retried automatically — you'll never see them.
 
 And every claim badge you see is a live link back to the original source evidence.
 
----
-
-## BEAT 5 — Proof + Regeneration (2:35 – 2:52) **CUT**
-
-Click any claim badge — the original source evidence opens. The proof survived the entire pipeline. And if I don't like a scene, I regenerate just that one — every other scene stays locked. Every image can be upscaled to print resolution, and the entire production exports as a single ZIP — script, images, and audio. Directing, not restarting.
+Click any claim badge — the original source evidence opens. The proof survived the entire pipeline. And if I don't like a scene, I regenerate just that one with a custom instruction — every other scene stays locked. Every image can be upscaled to print resolution, and the entire production exports as a single ZIP — script, images, and audio. Directing, not restarting.
 
 ---
 
-## BEAT 6 — Architecture + Cloud Proof (2:52 – 3:07)
+## BEAT 5 — Quick Mic Drop (2:55 – 3:45) **CUT**
 
-Four Gemini models, each assigned to a different stage of the pipeline. Not one general-purpose call — four specialized ones. FastAPI backend, deployed on Cloud Run, managed with Terraform.
+That was the full Advanced pipeline — four Gemini models, each assigned to a different stage. FastAPI on Cloud Run, managed with Terraform. Now watch Quick do all of it in one shot.
 
----
+I paste a YouTube video about brain cells playing DOOM, and out comes a grounded artifact with claim refs on every block. Blocks can be regenerated individually here too.
 
-## BEAT 7 — Quick Mic Drop (3:07 – 3:42) **CUT**
-
-Everything I just showed you — Quick does it in one shot. I paste a YouTube video about brain cells playing DOOM, and out comes a grounded artifact with claim refs on every block.
-
-ExplainFlow reads the transcript and saves relevant timecodes. In the Proof Reel, I choose: original YouTube footage, generated images, or both. Imagine a three-hour Karpathy podcast condensed to a five-minute visual summary with key moments pulled from source. Export to MP4. Done.
+In the Proof Reel, I choose per segment: original YouTube footage, generated images, or both. Watch — the playlist plays source clips interleaved with generated visuals. Imagine a three-hour Karpathy lecture condensed to five minutes with every key moment pulled from source. Export to MP4 — generated visuals, voiceover, and cinematic transitions bundled into one video. Done.
 
 ---
 
-## BEAT 8 — Close (3:42 – 3:50)
+## BEAT 6 — Close (3:45 – 3:53)
 
 We skipped the Assistant chat for time, but it is checkpoint-aware — users can ask questions or recover the workflow through natural language at any stage.
 

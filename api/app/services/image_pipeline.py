@@ -126,6 +126,30 @@ def save_image_and_get_url(request: Request, scene_id: str, image_bytes: bytes, 
     return f"{base_url(request)}/static/assets/{img_filename}"
 
 
+def upload_local_file_to_gcs(
+    request: Request,
+    local_path: Path,
+    content_type: str = "application/octet-stream",
+) -> str:
+    """Upload a local file to GCS and return the public URL.
+
+    Falls back to a local static URL if GCS is unavailable.
+    """
+    filename = local_path.name
+    if BUCKET_NAME:
+        try:
+            bucket = _get_storage_bucket()
+            if bucket is None:
+                raise RuntimeError("Storage bucket is unavailable.")
+            blob = bucket.blob(filename)
+            blob.upload_from_filename(str(local_path), content_type=content_type)
+            return f"https://storage.googleapis.com/{BUCKET_NAME}/{filename}"
+        except Exception as exc:
+            print(f"GCS upload failed for {filename}: {exc}")
+
+    return f"{base_url(request)}/static/assets/{filename}"
+
+
 def crop_source_region_and_get_url(
     request: Request,
     *,

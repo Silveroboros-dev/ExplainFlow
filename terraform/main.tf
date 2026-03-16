@@ -74,10 +74,11 @@ resource "google_cloud_run_v2_service" "api" {
 
   template {
     scaling {
+      min_instance_count = 1
       max_instance_count = 10
     }
     containers {
-      image = "us-docker.pkg.dev/${var.project_id}/explainflow-repo/explainflow-api:latest"
+      image = "us-central1-docker.pkg.dev/${var.project_id}/explainflow-repo/explainflow-api:latest"
       
       resources {
         limits = {
@@ -122,7 +123,7 @@ resource "google_cloud_run_v2_service" "web" {
       max_instance_count = 10
     }
     containers {
-      image = "us-docker.pkg.dev/${var.project_id}/explainflow-repo/explainflow-web:latest"
+      image = "us-central1-docker.pkg.dev/${var.project_id}/explainflow-repo/explainflow-web:latest"
       
       env {
         name  = "NEXT_PUBLIC_API_URL"

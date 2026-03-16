@@ -661,6 +661,7 @@ export default function QuickGenerate() {
 
       const response = await fetch(`${API_BASE}/api/source-assets/upload`, {
         method: 'POST',
+        headers: apiHeaders(),
         body: formData,
       });
       const data = await response.json();
@@ -691,6 +692,7 @@ export default function QuickGenerate() {
     const startedAt = Date.now();
     while (Date.now() - startedAt < 180000) {
       const response = await fetch(`${API_BASE}/api/quick-source-index/${jobId}`, {
+        headers: apiHeaders(),
         cache: 'no-store',
       });
       const data = await response.json();
@@ -1382,12 +1384,7 @@ export default function QuickGenerate() {
                 <QuickArtifactView
                   artifact={artifact}
                   activeSourceAsset={activeSourceAsset}
-                  heroSourceMediaUrl={heroSourceMediaUrl}
                   resolveSourceMediaUrl={resolveSourceMediaUrl}
-                  onOpenGlobalOverride={() => {
-                    setIsGlobalOverrideOpen(true);
-                    setGlobalOverrideInstruction('');
-                  }}
                   onOpenBlockOverride={(blockId) => {
                     setActiveOverrideBlockId(blockId);
                     setOverrideInstruction('');
